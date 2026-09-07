@@ -49,4 +49,5 @@ VALENCE_CONFIG_VERSION="cfg-conformance" \
 VALENCE_HOUSEHOLD="household-conformance" \
 VALENCE_MANDATE="mandate-conformance" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
+VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun test absence floor silence
