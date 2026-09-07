@@ -155,6 +155,10 @@ A candidate MAY be marked `is_exploration` when either holds:
 - `predicted_conversion` is at or below the deployment's exploration threshold, or
 - the product is unknown to this household: absent from its purchase history and from its lineage.
 
+A candidate that satisfies neither **MUST NOT** be counted toward the floor, and `POST /offers` **MUST** reject an offer that marks one.
+
+Without this the floor is satisfiable by relabelling. A presenter marks the items it most expects to be kept, the count is met, and clause 30 becomes a formality while every reading of §5 still passes. The permission above is on the presenter and cannot be checked from outside; this obligation is on the implementation and can be.
+
 ### 5.2 Why
 
 An engine that maximises the kept ratio stops exploring, removes the household's freedom to decline, and destroys the only output that cannot be obtained elsewhere: which declines predict the market. Selling out is therefore not an achievable state in a conforming implementation (clause 30).
