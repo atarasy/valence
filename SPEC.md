@@ -205,6 +205,8 @@ Valence assumes an authorising ledger with a reserve-and-commit primitive. The m
 
 The estimate at reserve MUST be an upper bound of the eventual settlement. A settlement above the reserve MUST fail rather than silently exceed the household's authorisation.
 
+This is a requirement on the implementation, not on the ledger it uses. A reserve-and-commit primitive does not supply it: the ledgers this maps onto typically treat a commit above the hold as an adjustment and refuse it only when the account cannot cover the difference, which means a funded household is the case that passes. An implementation MUST check the ceiling itself before it delegates.
+
 ----
 
 ## 7. Lineage

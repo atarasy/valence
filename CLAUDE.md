@@ -48,7 +48,9 @@ This specification is where several constitutional clauses become structural. We
 
 **Letting the two bindings diverge.** §2.2 is the *only* place `physical` and `digital` differ in the state machine, and the divergence is one table. A second divergence is a design smell — check whether it belongs in fulfilment instead.
 
-**Treating the estimate as advisory.** §6.4: the reserve must be an upper bound, and a settlement above it must fail rather than silently exceed the household's authorisation. This mirrors Meter's variable-output pricing, where an estimate below the actual is rejected at commit and the hold released.
+**Treating the estimate as advisory.** §6.4: the reserve must be an upper bound, and a settlement above it must fail rather than silently exceed the household's authorisation.
+
+An earlier version of this file said the requirement mirrors Meter, "where an estimate below the actual is rejected at commit and the hold released". That is wrong and was corrected on 2026-09-08 after reading the code. Meter's `commitReservedUsage` charges the difference as a `usage_hold_adjustment` and succeeds; it fails only when the account cannot cover that difference, and a post-paid account is allowed to go negative. Meter's own architecture note describes the underfunded path and reads as though it were the rule. **A funded household is exactly the case where the authorisation is exceeded quietly.** The ceiling is the implementation's obligation and no ledger underneath supplies it.
 
 **Adding a sponsored-placement field to the feed.** §8 has no room for one, deliberately (clause 14).
 
