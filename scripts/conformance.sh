@@ -48,19 +48,7 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-curl -fsS -X POST "$BASE/_presenter/configs" \
-  -H 'content-type: application/json' \
-  -d '{
-        "version": "cfg-conformance",
-        "presenter": "reference-merchant",
-        "products": {
-          "tea-a":    {"price": 1200, "cost": 400},
-          "tea-b":    {"price":  900, "cost": 300},
-          "coffee-a": {"price": 1500, "cost": 600},
-          "miso-a":   {"price":  700, "cost": 250},
-          "nori-a":   {"price": 1100, "cost": 380}
-        }
-      }' > /dev/null
+EDGE="$(BASE="$BASE" bun scripts/seed.ts)"
 
 cd "$TESTS"
 VALENCE_BASE_URL="$BASE" \
@@ -69,4 +57,5 @@ VALENCE_HOUSEHOLD="household-conformance" \
 VALENCE_MANDATE="mandate-conformance" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
-  bun test absence floor silence
+VALENCE_LINEAGE_EDGE="$EDGE" \
+  bun test ${SUITES:-absence floor silence lineage}

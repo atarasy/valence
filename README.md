@@ -62,9 +62,11 @@ mutation is not a probe, and this is how that is found out rather than assumed.
 reserved amount fails rather than quietly exceeding what the household
 authorised. A reserve-and-commit ledger does not give you this. Measured
 against Meter on 2026-09-08: a commit above the hold is charged as a
-`usage_hold_adjustment` and succeeds, and it fails only when the account cannot
+`usage_hold_adjustment` and succeeds, and it fails only when the balance cannot
 cover the difference. **A funded household is exactly the case that slips
-through.** The ceiling is enforced in `src/ledger.ts` before anything is
+through.** The claim covers funded accounts and no others; an earlier draft
+extended it to post-paid accounts inside their credit limit, which the code
+does not do. The ceiling is enforced in `src/ledger.ts` before anything is
 delegated, and the specification now says so.
 
 **A green suite can miss the mutation it exists for.** The first version of the

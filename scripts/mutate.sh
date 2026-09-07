@@ -5,6 +5,19 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
+# Restoring with `git checkout -- src` discards whatever is in the working
+# tree, mutation or not. On 2026-09-08 that silently reverted a correction to
+# ledger.ts that had been written minutes earlier and not yet committed, and
+# nothing said so: the suite went green against the older text. Refuse to run
+# unless src is clean, so the only thing a restore can throw away is the
+# mutation this script applied.
+if ! git diff --quiet -- src || ! git diff --cached --quiet -- src; then
+  echo "src has uncommitted changes; commit or stash them first." >&2
+  echo "This script restores with 'git checkout -- src' and would discard them." >&2
+  git status --short -- src >&2
+  exit 1
+fi
+
 NAME="$1"; shift
 echo "=== mutation: $NAME"
 "$@"

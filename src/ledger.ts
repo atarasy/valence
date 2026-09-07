@@ -13,12 +13,19 @@ import { conflict, unprocessable } from "./errors.js";
  * underneath. Measured against Meter on 2026-09-08, whose
  * `commitReservedUsage` is the primitive this maps onto: a commit above the
  * held amount is not refused. It charges the difference as a
- * `usage_hold_adjustment` and succeeds, and it fails only when the account
- * cannot cover that difference. A funded account, and any post-paid account
- * inside its credit limit, is exactly the case where the household's
- * authorisation is exceeded quietly. Meter's own architecture note reads "an
- * estimate below the actual is rejected at commit", which describes the
- * underfunded path only.
+ * `usage_hold_adjustment` and succeeds, and it fails only when the balance
+ * cannot cover that difference. **A funded account is exactly the case where
+ * the household's authorisation is exceeded quietly.** Meter's own
+ * architecture note reads "an estimate below the actual is rejected at
+ * commit", which describes the underfunded path only.
+ *
+ * An earlier version of this comment extended the claim to post-paid accounts
+ * inside their credit limit. That was wrong and was corrected the same day
+ * after a second reading: the commit path compares the raw balance and never
+ * calls `authorizeSpend`, which is the only function that knows about credit
+ * limits, so a post-paid account carrying a negative balance is refused
+ * rather than waved through. The finding is about funded accounts and only
+ * those.
  *
  * So every adapter enforces the ceiling before it delegates. A conformance
  * test for §6.4 that funds the household is the one that catches an adapter
