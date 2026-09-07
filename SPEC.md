@@ -1,0 +1,363 @@
+# Valence Protocol
+
+**Version**: draft, 2026-09-08
+**Status**: no production implementation. Expect breaking changes.
+**Constitution**: [Ataraxia](https://github.com/atarasy/ataraxia). Clause numbers below refer to it.
+
+----
+
+## 1. Scope
+
+Valence describes the interval between a merchant placing candidates in front of a household and the household deciding which to keep. It sits above ACP and UCP: discovery, checkout and order management belong to those specifications, and Valence hands off to them once a candidate is kept.
+
+It does not define payment, fulfilment, tax, returns handling, or identity. It assumes AP2 for authorisation and a public-key identity whose root is out of scope.
+
+### 1.1 Terms
+
+**MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2119.
+
+**Household** — the recipient of an offer. One key, one ledger. May be a person or a family sharing a mandate.
+
+**Presenter** — the party placing the offer. A merchant, or a representative acting for one.
+
+**Offer** — a set of candidates, placed with one household, with an expiry.
+
+**Candidate** — one item within an offer.
+
+**Valence** — the outcome of a candidate.
+
+**Binding** — `physical` or `digital`. Determines fulfilment and the expiry default.
+
+----
+
+## 2. The offer
+
+An offer is the atom of this specification. It is not an order and it creates no debt.
+
+```
+offer
+  id                     string, unique
+  binding                physical | digital
+  household              key identifier of the recipient
+  presenter              identifier of the merchant or representative
+  purpose                gift | replenish | trial | ceremonial | assortment
+  config_version         version of the presenter's pricing and rules, frozen at creation
+  presented_at           timestamp, null until presented
+  expires_at             timestamp
+  state                  drafted | presented | decided | expired | withdrawn | settled
+  exploration_floor_met  boolean, validated at creation (§5)
+  mandate                reference to the AP2 intent mandate governing this offer
+  candidates             array, 1..n
+```
+
+### 2.1 State
+
+```
+drafted ──present──▶ presented ──decide───▶ decided ──settle─────────▶ settled
+                         │                                              ▲
+                         ├──expire────────▶ expired ──settle_default────┘
+                         └──withdraw──────▶ withdrawn
+```
+
+| transition | effect |
+|---|---|
+| `present` | physical: shipped. digital: rendered in the approval surface. Sets `presented_at`. |
+| `decide` | one or more candidates receive a valence. An offer MAY be decided partially and decided again before expiry. |
+| `expire` | `expires_at` passed. See §2.2. |
+| `withdraw` | the presenter revokes. Any undecided candidate becomes `returned`. No charge. |
+| `settle` | the offer is priced and closed. See §6. |
+| `settle_default` | expiry path for offers that carry a default (§2.2). |
+
+An offer MUST NOT move from `settled` to any other state. Corrections are new offers.
+
+### 2.2 Expiry defaults
+
+This is the only place the two bindings diverge in the machine, and the divergence is deliberate.
+
+| binding | purpose | undecided candidates at expiry become | rationale |
+|---|---|---|---|
+| `physical` | any | `returned` | The goods are already there. Debt does not arise until use. |
+| `digital` | any except `ceremonial` | `returned` | **Silence is not consent.** An order is a debt (clause 36). |
+| either | `ceremonial` | exactly one becomes `defaulted`; the rest `returned` | The giver has already paid a price band. Nothing may be earned from a recipient who does not choose (clause 28). |
+
+An implementation MUST NOT provide a configuration that makes an undecided digital candidate `kept`.
+
+----
+
+## 3. The candidate
+
+```
+candidate
+  id                     string, unique within the offer
+  product                reference into the presenter's catalogue
+  quantity               integer
+  unit_price             the merchant's own price. Immutable within the offer.
+  predicted_conversion   0..1, or null. The presenter's own model output.
+  is_exploration         boolean. Counts toward the floor (§5).
+  valence                offered | kept | returned | consumed | defaulted | lost
+  decided_at             timestamp, null while offered
+  kept_as                self | gift | order. Present only when kept.
+  lineage                reference to a lineage edge. Present only when kept_as = gift.
+```
+
+### 3.1 Price
+
+`unit_price` is the price the merchant charges anyone. An implementation MUST NOT provide a field, a parameter or a configuration by which a presenter, a curator, or the platform raises the price a household pays above the merchant's own price (clause 10). A household never pays more through an offer than it would buying direct.
+
+### 3.2 Valence
+
+| valence | when | settlement |
+|---|---|---|
+| `kept` | taken up | charged at `unit_price` |
+| `returned` | declined, or undecided at expiry | not charged |
+| `consumed` | physical only. Used while trying. | charged at cost, not price (§6.2) |
+| `defaulted` | ceremonial only. Shipped because nothing was chosen. | charged at `unit_price` |
+| `lost` | physical only. Not recovered by the recovery deadline. | not charged to the household |
+
+`lost` is a loss to whoever holds stock risk. It MUST NOT be charged to the household. An implementation that bills a household for unreturned goods is not conformant; the trust model is the point, and loss rates are an operating metric, not a receivable.
+
+### 3.3 What a candidate does not carry
+
+There is no field for a discount, a countdown, a stock-scarcity indicator, a star rating, or a per-person tracking identifier. These are absent, not disabled (clauses 31, 32, 33, 34). An implementation that adds them is not conformant.
+
+----
+
+## 4. Notes
+
+A household MAY attach one line of prose to a candidate.
+
+```
+note
+  candidate    reference
+  author       the household
+  text         string
+  visibility   self | self_and_recipient
+```
+
+There is no rating, no score, and no aggregation across households. A note written before giving becomes the message that accompanies the gift, which is the only reason the field exists.
+
+----
+
+## 5. The exploration floor
+
+**`POST /offers` MUST reject an offer whose candidates include fewer than `floor(n)` marked `is_exploration`, where n is the candidate count.** The rejection is `422`.
+
+```
+floor(n) = max(1, ceil(n * rate))
+```
+
+`rate` is a deployment parameter. It MUST be greater than zero. A conforming implementation MUST NOT expose a configuration that sets it to zero or that bypasses the check.
+
+### 5.1 What counts
+
+A candidate MAY be marked `is_exploration` when either holds:
+
+- `predicted_conversion` is at or below the deployment's exploration threshold, or
+- the product is unknown to this household: absent from its purchase history and from its lineage.
+
+### 5.2 Why
+
+An engine that maximises the kept ratio stops exploring, removes the household's freedom to decline, and destroys the only output that cannot be obtained elsewhere: which declines predict the market. Selling out is therefore not an achievable state in a conforming implementation (clause 30).
+
+### 5.3 Disclosure
+
+Exploration candidates MUST NOT be concealed. The presentation surface SHOULD indicate that a candidate is one the model does not expect to be kept. A household MAY reduce `rate` for its own offers. It MUST NOT be able to reach zero.
+
+----
+
+## 6. Settlement
+
+```
+settlement
+  offer            reference
+  settled_at       timestamp
+  kept_amount      sum of unit_price * quantity over kept and defaulted
+  consumed_amount  sum of cost over consumed
+  lost_amount      sum over lost, informational, not billed to the household
+  receipt          signed by the presenter, delivered to the household
+```
+
+### 6.1 Deduction, not credit
+
+Where a trial precedes a purchase — a household tries several things and gives one — the trial is **deducted from the eventual charge**, not credited to a balance.
+
+An implementation MUST NOT hold a household balance redeemable against future goods. Such a balance is a prepaid payment instrument in several jurisdictions and is out of reach for most implementers. Settle by deduction, or charge cost for what was consumed and nothing else.
+
+### 6.2 Consumed is charged at cost
+
+`consumed` exists so that trying is not free and not full price. It is charged at cost, and the cost basis is the presenter's, recorded at `config_version`.
+
+### 6.3 Terms are frozen at presentation
+
+A settlement MUST use the `config_version` stamped on the offer at creation. A presenter who changes prices or rules mid-flight does not change what an outstanding offer costs.
+
+### 6.4 Ledger mapping
+
+Valence assumes an authorising ledger with a reserve-and-commit primitive. The mapping:
+
+| Valence | ledger |
+|---|---|
+| `present` | reserve, held at the upper bound of the offer |
+| `settle` | commit the actual; the difference is released |
+| `expire` or `withdraw` with nothing kept | release; no charge |
+| `offer.id` | idempotency key |
+| `expires_at` | hold expiry |
+
+The estimate at reserve MUST be an upper bound of the eventual settlement. A settlement above the reserve MUST fail rather than silently exceed the household's authorisation.
+
+----
+
+## 7. Lineage
+
+A lineage edge records that one household gave a specific product to another. It is created when a candidate is `kept` with `kept_as = gift`.
+
+```
+edge
+  id
+  from        key identifier of the giver
+  to          key identifier of the recipient
+  product     reference
+  merchant    reference
+  kind        gift | return | regift | thanks
+  occasion    string
+  receipt     reference to the merchant's signed transaction receipt
+  signature   by the giver's key
+  created_at
+```
+
+### 7.1 Recognition
+
+An edge is recognised when the giver's key is attested by the identity root and `receipt` carries the merchant's signature. **It is not discriminated by which client software produced it** (clause 25). A conforming endpoint MUST accept a well-formed, correctly signed edge regardless of its origin.
+
+### 7.2 What the giver may see
+
+The giver's response surface MAY show acts of the recipient: a `regift`, a `return`, a `thanks`. It **MUST NOT** show, or allow to be inferred, that a recipient did not reorder, did not open, or did not respond (clause 19).
+
+This is a constraint on the schema, not on the interface. A conforming API has no field whose absence or value discloses recipient inaction. Implementers should test for inference, not only for presence.
+
+### 7.3 Reciprocation
+
+An implementation MAY make reciprocation easy. It MUST NOT notify, remind, or impose a deadline on it (clause 21).
+
+### 7.4 The recipient's record
+
+A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 22). No preference, no profile, no score is derived from having received.
+
+### 7.5 Display
+
+Lineage is displayed as density within the viewer's own circle. Totals, network size and popularity rankings MUST NOT be displayed (clause 24). The merchant is never hidden.
+
+----
+
+## 8. Feed extension
+
+A Valence-conformant merchant extends its ACP product feed:
+
+| field | meaning |
+|---|---|
+| `valence.sample_unit` | the unit and quantity in which this product can be offered for trial |
+| `valence.trial_eligible` | whether it may appear as a trial candidate |
+| `valence.gift_meta` | wrapping options, ceremonial eligibility, price band |
+| `valence.lineage_hook` | endpoint accepting lineage edges |
+| `valence.reciprocity` | whether purchase history is returned to the household in standard form |
+
+`valence.reciprocity` is the field a household's agent reads when deciding routing preference (clause 46). A merchant that does not return history is not excluded from anything; it is not preferred.
+
+There is no sponsored-placement field, and a conforming feed schema has no room to add one (clause 14).
+
+----
+
+## 9. Endpoints
+
+```
+POST   /offers                      create. Validates the exploration floor. Reserves.
+POST   /offers/{id}/present         ship or render
+POST   /offers/{id}/decisions       assign valences to candidates
+POST   /offers/{id}/settle          price, commit, return a signed receipt
+POST   /offers/{id}/withdraw        revoke, release
+GET    /offers?household={id}       the presenter's vertical view
+POST   /candidates/{id}/note        one line
+POST   /lineage                     accept an edge
+```
+
+The same operations SHOULD be exposed as MCP tools, so that a merchant's agent and a household's agent call the same surface.
+
+### 9.1 Endpoints that must not exist
+
+`/segments`, `/broadcast`, `/discounts`, `/ratings`, `/events/track`.
+
+A conforming implementation does not have these routes. Their absence is checkable, and it is checked.
+
+----
+
+## 10. Digital binding: drafting
+
+1. **Input.** History from the presenter's vertical ledger, season, prior valences, the exploration floor.
+2. **Generate.** Either the merchant's agent or the household's agent composes candidates. Both enter through `POST /offers`. The specification does not care which, and the endpoint MUST NOT behave differently.
+3. **Present.** Rendered in the household's approval surface with alternatives, and with the reason any candidate was excluded — including detection of auto-renewal, obstructed cancellation or manufactured scarcity (clause 52).
+4. **Decide.** Per candidate. One tap to confirm. At most one reminder (clause 37).
+5. **Sign.** The decided set is signed as an AP2 mandate.
+6. **Order.** Kept candidates proceed to an ACP checkout session.
+
+Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
+
+----
+
+## 11. Physical binding: recovery
+
+| stage | rule |
+|---|---|
+| recovery | the presenter collects unopened candidates and records `returned` |
+| redistribution | permitted only for unopened, ambient goods within the freshness window, with a temperature record where the category requires it. Local food-safety practice governs. |
+| loss | after the recovery deadline plus a grace period, `lost`. Borne by the stock holder, never billed to the household. |
+| cadence | monthly settlement |
+
+### 11.1 Eligibility
+
+A product is eligible for the physical binding when it is ambient, keeps for at least three times the offer period, is small enough that ten fit in one container, and carries enough margin to absorb recovery and redistribution. Chilled and bulky goods are out of scope for this binding. Regulated categories, including alcohol and medicines, are out of scope entirely.
+
+The digital binding has no eligibility restriction.
+
+----
+
+## 12. Ceremonial offers
+
+The purpose `ceremonial` covers the return gift: the offer sent to many recipients after a wedding, a birth, or a funeral, where the giver has chosen a price band and each recipient chooses one item.
+
+| requirement | clause |
+|---|---|
+| The recipient chooses; the giver does not see the candidates | 27 |
+| Price bands are preserved and legible | 26 |
+| If nothing is chosen before expiry, one candidate is `defaulted` and shipped | 28 |
+| Nothing is earned from an unredeemed offer | 28 |
+| Cards, wrapping and denominational wording match local convention exactly | 29 |
+
+The last is not decoration. An implementation that gets the wording of a funeral return wrong has failed regardless of the rest.
+
+Candidates for a ceremonial offer are composed from convention — what is customary for the occasion and the recipient's rough demographic — not from a model of the recipient, who by definition has no record.
+
+----
+
+## 13. Conformance
+
+An implementation is Valence-conformant when it:
+
+1. implements the state machine in §2.1 with the expiry defaults in §2.2
+2. rejects offers below the exploration floor with `422` and exposes no bypass
+3. has no route from §9.1 and no field from §3.3
+4. discloses no recipient inaction on the giver's surface (§7.2)
+5. holds no household balance (§6.1)
+6. freezes terms at `config_version` (§6.3)
+7. accepts well-formed lineage edges regardless of client (§7.1)
+8. bills no household for `lost` (§3.2)
+
+Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Passing them is what entitles an implementation to the mark.
+
+----
+
+## 14. Open
+
+- Binding an AP2 mandate to direct-debit rails. The specification is written for card authorisation; no equivalent exists for account transfer, and one is needed.
+- Multi-hop lineage attribution, where a product passes through several households before a purchase. The settlement side is out of scope here.
+- Whether the feed extension should be proposed to the ACP community or remain a private extension.
+- Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure.
