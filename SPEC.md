@@ -254,7 +254,13 @@ edge
 
 ### 7.1 Recognition
 
-An edge is recognised when the giver's key is attested by the identity root and `receipt` carries the merchant's signature. **It is not discriminated by which client software produced it** (clause 22). A conforming endpoint MUST accept a well-formed, correctly signed edge regardless of its origin.
+An edge is accepted when it is well formed and its signature verifies against the giver's registered key, and **it is not discriminated by which client software produced it** (clause 22). A conforming endpoint MUST accept such an edge regardless of its origin.
+
+An accepted edge carries `attested`: whether an identity root endorsed the giver's key (clause 2), or the key is merely registered. Both are recorded and both are shown, with `attested` on the edge and on every row of the circle, because a viewer is entitled to know which of their edges rest on a root and which are somebody's word.
+
+**An unattested edge makes nothing known.** It does not make a product known to the household it names, so it never removes that product from what is novel to them (§5.1). Anyone can register a key, so an unattested edge that counted toward what a household has been given would let a stranger empty that household's exploration floor by writing edges at it. Where a jurisdiction has no root a person can use (`02` §3.2 of the concept documents), every edge is unattested, and what is lost is the density of lineage rather than the ability to give.
+
+Who endorses a key is clause 2's root and not this specification's business. The reference engine takes it as a flag on the fixture route that registers a key; a conforming host reads it from the root.
 
 ### 7.2 What the giver may see
 

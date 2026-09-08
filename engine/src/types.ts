@@ -208,5 +208,13 @@ export type LineageEdge = {
   occasion: string;
   receipt: string;
   signature: string;
+  /**
+   * §7.1, clause 2. Whether the giver's key is endorsed by an identity root,
+   * or merely registered here. An unattested edge is recorded and shown as
+   * such, and it does not make a product known to the household it names:
+   * anyone can register a key, so an unattested edge that counted would let
+   * a stranger empty somebody's exploration floor.
+   */
+  attested: boolean;
   created_at: number;
 };

@@ -55,6 +55,8 @@ export class ValenceEngine {
   private readonly configs = new Map<string, PresenterConfig>();
   private readonly edges = new Map<string, LineageEdge>();
   private readonly identities = new Map<string, string>();
+  /** §7.1. Keys an identity root endorsed, as against keys merely registered here. */
+  private readonly rootEndorsed = new Set<string>();
   /**
    * §7.5 and clause 19. The value stored beside the time is an opaque token,
    * not the edge's identifier.
@@ -109,7 +111,7 @@ export class ValenceEngine {
     return config;
   }
 
-  registerIdentity(key: string, publicKeyPem: string): void {
+  registerIdentity(key: string, publicKeyPem: string, attested = false): void {
     // A key, once attested, is not replaced by a later caller: whoever could
     // overwrite it could sign as the person (clauses 22, 35).
     const existing = this.identities.get(key);
@@ -117,6 +119,12 @@ export class ValenceEngine {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
     }
     this.identities.set(key, publicKeyPem);
+    if (attested) this.rootEndorsed.add(key);
+  }
+
+  /** §7.1. Whether an identity root endorsed this key (clause 2, `02` §3.2). */
+  isRootEndorsed(key: string): boolean {
+    return this.rootEndorsed.has(key);
   }
 
   // ---- offers --------------------------------------------------------------
@@ -641,6 +649,7 @@ export class ValenceEngine {
       occasion: input.occasion,
       receipt: input.receipt,
       signature: input.signature,
+      attested: this.rootEndorsed.has(input.from),
       created_at: input.now ?? Date.now(),
     };
     this.edges.set(edge.id, edge);
@@ -677,7 +686,8 @@ export class ValenceEngine {
    */
   hasBeenGiven(household: string, product: string): boolean {
     for (const edge of this.edges.values()) {
-      if (edge.to === household && edge.product === product) return true;
+      // §7.1. Only an attested edge makes a product known to a household.
+      if (edge.attested && edge.to === household && edge.product === product) return true;
     }
     return false;
   }
@@ -702,6 +712,7 @@ export class ValenceEngine {
     kind: LineageKind;
     at: number | null;
     product: string | null;
+    attested: boolean;
   }[] {
     const rows = [];
     for (const edge of this.edges.values()) {
@@ -714,6 +725,9 @@ export class ValenceEngine {
         kind: edge.kind,
         at: mine ? null : edge.created_at,
         product: mine ? null : edge.product,
+        // §7.1, clause 2. Shown rather than filtered: a viewer sees which of
+        // their edges rest on a root and which are somebody's word.
+        attested: edge.attested,
       });
     }
     return rows;
@@ -852,7 +866,10 @@ export class ValenceEngine {
       }
     }
     for (const edge of this.edges.values()) {
-      if (edge.to === household && edge.product === product) return true;
+      // §7.1, clause 2. Only an attested edge makes a product known here.
+      // An unattested edge is anybody's claim, and counting it would let a
+      // stranger empty this household's exploration floor by writing edges.
+      if (edge.attested && edge.to === household && edge.product === product) return true;
     }
     return false;
   }

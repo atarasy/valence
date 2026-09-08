@@ -69,6 +69,7 @@ SEED_OUT="$(BASE="$BASE" bun scripts/seed.ts)"
 EDGE="$(printf '%s\n' "$SEED_OUT" | sed -n 1p)"
 MANDATE_KEY="$(printf '%s\n' "$SEED_OUT" | sed -n 2p)"
 SEED_KEYS="$(printf '%s\n' "$SEED_OUT" | sed -n 3p)"
+UNATTESTED_EDGE="$(printf '%s\n' "$SEED_OUT" | sed -n 4p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
@@ -83,6 +84,7 @@ VALENCE_MANDATE_KEY="$MANDATE_KEY" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
 VALENCE_LINEAGE_EDGE="$EDGE" \
+VALENCE_UNATTESTED_EDGE="$UNATTESTED_EDGE" \
 VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
 VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \

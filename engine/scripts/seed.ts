@@ -128,6 +128,17 @@ const giver = "key-giver-conformance";
 await post("/_presenter/identities", {
   key: giver,
   public_key: publicKey.export({ type: "spki", format: "pem" }).toString(),
+  attested: true,
+});
+
+// §7.1. A key nobody's identity root endorsed. An edge signed with it is
+// recorded and shown as unattested, and it makes nothing known to the
+// household it names: anyone can register a key, so an unattested edge that
+// counted would let a stranger empty somebody's exploration floor.
+const stranger = pairFor("stranger");
+await post("/_presenter/identities", {
+  key: "key-stranger-conformance",
+  public_key: stranger.publicKey.export({ type: "spki", format: "pem" }).toString(),
 });
 
 const edge = {
@@ -150,6 +161,7 @@ const onward = pairFor("onward");
 await post("/_presenter/identities", {
   key: "key-recipient-conformance",
   public_key: onward.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  attested: true,
 });
 const secondHop = {
   from: "key-recipient-conformance",
@@ -212,6 +224,7 @@ const mandatePair = pairFor("mandate");
 await post("/_presenter/identities", {
   key: "mandate-conformance",
   public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  attested: true,
 });
 
 console.log(
@@ -224,3 +237,20 @@ console.log(
   Buffer.from(mandatePair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), "utf8").toString("base64")
 );
 console.log(Buffer.from(JSON.stringify(seedKeys), "utf8").toString("base64"));
+
+// §7.1. A well-formed edge from the unattested key, for the probes.
+const strangerEdge = {
+  from: "key-stranger-conformance",
+  to: "household-conformance",
+  product: "nori-a",
+  merchant: "maker-a",
+  kind: "gift" as const,
+  occasion: "no occasion",
+  receipt: "receipt-stranger",
+};
+console.log(
+  JSON.stringify({
+    ...strangerEdge,
+    signature: sign(null, canonical(strangerEdge), stranger.privateKey).toString("base64"),
+  })
+);
