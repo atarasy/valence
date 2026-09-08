@@ -188,9 +188,16 @@ export class ValenceEngine {
     });
 
     // §5. The floor is checked before anything is written.
-    const required = explorationFloor(
-      candidates.length,
-      this.config.explorationRate
+    // §5. The floor asks for as many never-offered candidates as the rate
+    // says, and no more than the presenter still has: a presenter that has
+    // offered this household everything in its catalogue has no exploration
+    // left to carry, and the floor cannot ask for what does not exist.
+    const novelLeft = Object.keys(config.products).filter(
+      (ref) => !this.householdHasSeen(input.household, config.presenter, ref)
+    ).length;
+    const required = Math.min(
+      explorationFloor(candidates.length, this.config.explorationRate),
+      novelLeft
     );
     const marked = candidates.filter((c) => c.is_exploration).length;
     if (marked < required) {

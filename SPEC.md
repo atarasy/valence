@@ -146,8 +146,10 @@ note
 **`POST /offers` MUST reject an offer whose candidates include fewer than `floor(n)` marked `is_exploration`, where n is the candidate count.** The rejection is `422`.
 
 ```
-floor(n) = max(1, ceil(n * rate))
+floor(n) = min(max(1, ceil(n * rate)), novel)
 ```
+
+where `novel` is the number of products in the presenter's catalogue that this household has never been offered by this presenter (§5.1). A presenter that has offered a household everything it has carries no exploration to that household until its catalogue grows; the floor asks for what exists and no more. Added 2026-09-09, when the conformance suite found that under §5.1 a five-product catalogue could make a second offer to the same household impossible.
 
 `rate` is a deployment parameter. It MUST be greater than zero. A conforming implementation MUST NOT expose a configuration that sets it to zero or that bypasses the check.
 
