@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ValenceEngine, explorationFloor } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { ValenceError } from "../src/common/errors.js";
-import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned, signConfig } from "./helpers.js";
 
 const baseOffer = (candidates: {
   product: string;
@@ -145,11 +145,12 @@ describe("price", () => {
       ])
     );
     await engine.present(offer.id);
-    engine.registerConfig({
+    const later = {
       version: "cfg-2",
       presenter: "merchant-1",
       products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
-    });
+    };
+    engine.registerConfig(later, signConfig(later));
     decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },

@@ -1,4 +1,4 @@
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHash, createPublicKey, verify } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
@@ -51,6 +51,21 @@ export type EngineConfig = {
    */
   isInNetwork?: (merchant: string) => boolean;
 };
+
+/**
+ * §5.4. What a presenter signs when it publishes a catalogue: the version,
+ * the presenter's name, and each product with its merchant, carrier and
+ * price, in key order.
+ */
+export function canonicalConfig(config: PresenterConfig): Buffer {
+  const products = Object.keys(config.products)
+    .sort()
+    .map((ref) => {
+      const e = config.products[ref]!;
+      return [ref, e.merchant, e.ships, String(e.price)].join(":");
+    });
+  return Buffer.from([config.version, config.presenter, ...products].join("\n"), "utf8");
+}
 
 export function explorationFloor(candidateCount: number, rate: number): number {
   return Math.max(1, Math.ceil(candidateCount * rate));
@@ -112,9 +127,36 @@ export class ValenceEngine {
 
   // ---- presenter catalogue -------------------------------------------------
 
-  registerConfig(config: PresenterConfig): PresenterConfig {
+  /**
+   * §5.4. A catalogue is published by the presenter it names, or not at all.
+   * The presenter's key signs a canonical form of the version, its name and
+   * its products, so nobody else registers catalogues under a presenter's
+   * name and a presenter cannot disown one it registered.
+   */
+  registerConfig(config: PresenterConfig, signature?: string): PresenterConfig {
     if (this.configs.has(config.version)) {
       throw conflict("config_exists", `config ${config.version} already exists`);
+    }
+    const pem = this.identities.get(config.presenter);
+    if (!pem) {
+      throw unprocessable(
+        "unknown_presenter",
+        `no key is registered for presenter ${config.presenter}`
+      );
+    }
+    let ok = false;
+    try {
+      ok =
+        signature !== undefined &&
+        verify(null, canonicalConfig(config), createPublicKey(pem), Buffer.from(signature, "base64"));
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      throw unprocessable(
+        "bad_signature",
+        `this catalogue is not signed by ${config.presenter}`
+      );
     }
     this.configs.set(config.version, config);
     return config;
@@ -288,6 +330,10 @@ export class ValenceEngine {
       household: input.household,
       presenter: config.presenter,
       purpose: input.purpose,
+      // §5.4. Whether an identity root endorsed this presenter's key, or the
+      // key is merely registered here. A rename is a second identity, and a
+      // household is entitled to see which kind it is dealing with.
+      presenter_attested: this.rootEndorsed.has(config.presenter),
       price_band: input.price_band,
       giver: input.giver,
       config_version: config.version,

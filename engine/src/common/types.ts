@@ -126,6 +126,8 @@ export type Offer = {
   binding: Binding;
   household: string;
   presenter: string;
+  /** §5.4. Whether an identity root endorsed the presenter's key. */
+  presenter_attested: boolean;
   purpose: Purpose;
   /** Clause 23. Present on a ceremonial offer, null otherwise. Shown to the recipient. */
   price_band: PriceBand | null;

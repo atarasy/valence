@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { MeterLedger } from "../src/engine/meter-ledger.js";
 import { ValenceEngine } from "../src/engine/offers.js";
-import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR, signConfig, PRESENTER_PAIR } from "./helpers.js";
 
 /**
  * The adapter is tested against a stand-in that reproduces the behaviour
@@ -82,11 +82,18 @@ const makeEngine = (ledger: MeterLedger) => {
     recoveryGraceDays: 3,
   });
   engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
-  engine.registerConfig({
+  // §5.4. A catalogue is signed by the presenter it names.
+  engine.registerIdentity(
+    "merchant-1",
+    PRESENTER_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    true
+  );
+  const later = {
     version: CONFIG_VERSION,
     presenter: "merchant-1",
     products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
-  });
+  };
+  engine.registerConfig(later, signConfig(later));
   return engine;
 };
 

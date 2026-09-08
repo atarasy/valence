@@ -22,7 +22,7 @@ export type ApprovalCandidate = {
   product: string;
   quantity: number;
   unit_price: number;
-  /** §5.3. Not concealed: a household cannot decline what it cannot see is a guess. */
+  /** §5.4. Not concealed: a household cannot decline what it cannot see is a guess. */
   is_exploration: boolean;
   /** Clause 59. What else the agent considered. */
   alternatives: string[];

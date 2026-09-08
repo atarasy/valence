@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from "node:crypto";
-import { ValenceEngine } from "../src/engine/offers.js";
+import { ValenceEngine, canonicalConfig } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
@@ -16,6 +16,13 @@ export const CONFIG_VERSION = "cfg-1";
 
 export const PHYSICAL = { ambient: true, keeps_for_days: 365, fits_ten_per_container: true, regulated: false };
 
+/** §5.4. The presenter key the unit tests publish catalogues with. */
+export const PRESENTER_PAIR = generateKeyPairSync("ed25519");
+
+export function signConfig(config: Parameters<typeof canonicalConfig>[0]): string {
+  return sign(null, canonicalConfig(config), PRESENTER_PAIR.privateKey).toString("base64");
+}
+
 export function makeEngine(overrides: Partial<{
   explorationRate: number;
   reminderLimit: 0 | 1;
@@ -27,7 +34,14 @@ export function makeEngine(overrides: Partial<{
     recoveryGraceDays: 3,
     ...overrides,
   });
-  engine.registerConfig({
+  // §5.4. A catalogue is signed by the presenter it names.
+  const presenterPair = PRESENTER_PAIR;
+  engine.registerIdentity(
+    "merchant-1",
+    presenterPair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    true
+  );
+  const config = {
     version: CONFIG_VERSION,
     presenter: "merchant-1",
     products: {
@@ -39,7 +53,8 @@ export function makeEngine(overrides: Partial<{
       "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, physical: PHYSICAL },
       "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, physical: PHYSICAL },
     },
-  });
+  };
+  engine.registerConfig(config, signConfig(config));
   engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
   return { engine, ledger };
 }

@@ -168,11 +168,19 @@ The floor counts novelty and nothing else. Which never-offered products a presen
 
 Without this the floor is satisfiable by relabelling. A presenter marks the items it most expects to be kept, the count is met, and clause 26 becomes a formality while every reading of §5 still passes. The permission above is on the presenter and cannot be checked from outside; this obligation is on the implementation and can be.
 
-### 5.2 Why
+### 5.2 A presenter is a key, not a name
+
+The floor counts what **this presenter** has offered this household, so what a presenter is decides what the floor is worth. A presenter is the holder of a key: a catalogue is accepted only when it is signed by the key registered for the presenter it names, so nobody publishes catalogues under another presenter's name, and a presenter cannot disown one it published.
+
+An offer says whether an identity root endorsed that key (`presenter_attested`, §7.1). Where it did, changing name means presenting a second identity to that root, which is a thing the root can see and a household can weigh. Where it did not, the name is the presenter's own word.
+
+**What this does not close, stated plainly.** An operator that can obtain two identities is two presenters as far as this specification can tell, and a household that has seen everything from one can be shown the same range again by the other, with the floor satisfied both times. Only the root that endorses identities can say the two are one. Nothing inside an engine can: it sees keys, and the question is about who holds them. This was measured on 2026-09-09, when an adversarial pass renamed a presenter and watched a household's history disappear.
+
+### 5.3 Why
 
 An engine that maximises the kept ratio stops exploring, removes the household's freedom to decline, and destroys the only output that cannot be obtained elsewhere: which declines predict the market. Selling out is therefore not an achievable state in a conforming implementation (clause 26).
 
-### 5.3 Disclosure
+### 5.4 Disclosure
 
 Exploration candidates MUST NOT be concealed. The presentation surface SHOULD indicate that a candidate is one this household has not been offered before. A household MAY reduce `rate` for its own offers. It MUST NOT be able to reach zero.
 

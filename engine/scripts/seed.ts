@@ -57,7 +57,40 @@ const post = async (path: string, body: unknown) => {
   return response.json();
 };
 
-await post("/_presenter/configs", {
+
+// §5.4. A catalogue is signed by the presenter it names. The reference
+// presenter's key is root-endorsed; the second one's is not, which is what a
+// rename looks like from outside: a new identity, visibly not the same one.
+const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; ships: string; price: number }> }) =>
+  Buffer.from(
+    [
+      c.version,
+      c.presenter,
+      ...Object.keys(c.products).sort().map((ref) => {
+        const e = c.products[ref]!;
+        return [ref, e.merchant, e.ships, String(e.price)].join(":");
+      }),
+    ].join("\n"),
+    "utf8"
+  );
+const presenterKeys: Record<string, ReturnType<typeof pairFor>> = {
+  "reference-merchant": pairFor("presenter:reference-merchant"),
+  "other-merchant": pairFor("presenter:other-merchant"),
+};
+for (const [name, pair] of Object.entries(presenterKeys)) {
+  await post("/_presenter/identities", {
+    key: name,
+    public_key: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    attested: name === "reference-merchant",
+  });
+}
+const postConfig = async (config: Parameters<typeof canonicalConfig>[0] & Record<string, unknown>) =>
+  post("/_presenter/configs", {
+    ...config,
+    signature: sign(null, canonicalConfig(config), presenterKeys[config.presenter]!.privateKey).toString("base64"),
+  });
+
+await postConfig({
   version: "cfg-conformance",
   presenter: "reference-merchant",
   products: {
@@ -76,7 +109,7 @@ await post("/_presenter/configs", {
 // it a merchant export that leaked every offer in the engine would look
 // identical to one that leaked none, because there would be nothing to leak:
 // measured 2026-09-09, when merchant_export_leaks_others failed no probe.
-await post("/_presenter/configs", {
+await postConfig({
   version: "cfg-other-merchant",
   presenter: "other-merchant",
   products: {
@@ -102,7 +135,7 @@ await post("/offers", {
 // §5. A narrower catalogue under the same presenter: what the presenter still
 // has to offer is counted over every catalogue it registered, so an offer
 // under this one cannot escape the floor by naming fewer products.
-await post("/_presenter/configs", {
+await postConfig({
   version: "cfg-conformance-narrow",
   presenter: "reference-merchant",
   products: {
@@ -111,7 +144,7 @@ await post("/_presenter/configs", {
   },
 });
 
-await post("/_presenter/configs", {
+await postConfig({
   version: "cfg-conformance-v2",
   presenter: "reference-merchant",
   products: {

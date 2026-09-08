@@ -83,6 +83,7 @@ function offerView(o: Offer) {
     binding: o.binding,
     household: o.household,
     presenter: o.presenter,
+    presenter_attested: o.presenter_attested,
     purpose: o.purpose,
     price_band: o.price_band,
     giver: o.giver,
@@ -169,7 +170,7 @@ async function route(
     if (method === "POST" && parts[1] === "configs") {
       const raw = strict(
         await body(request),
-        ["version", "presenter", "products"],
+        ["version", "presenter", "products", "signature"],
         "config"
       );
       const products = raw.products;
@@ -207,11 +208,14 @@ async function route(
         };
       }
       return json(
-        engine.registerConfig({
-          version: requireString(raw, "version", "config"),
-          presenter: requireString(raw, "presenter", "config"),
-          products: entries,
-        }),
+        engine.registerConfig(
+          {
+            version: requireString(raw, "version", "config"),
+            presenter: requireString(raw, "presenter", "config"),
+            products: entries,
+          },
+          raw.signature === undefined ? undefined : requireString(raw, "signature", "config")
+        ),
         201
       );
     }
