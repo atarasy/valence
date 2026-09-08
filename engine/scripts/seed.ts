@@ -236,8 +236,45 @@ console.log(
 console.log(
   Buffer.from(mandatePair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), "utf8").toString("base64")
 );
-console.log(Buffer.from(JSON.stringify(seedKeys), "utf8").toString("base64"));
+// §16. A mandate for the conformance household, with one co-signer: the
+// probes raise and lower the ceiling to see which changes need whose
+// signature. The household's own key doubles as the mandate key, which is
+// what the engine already resolves for a signed decided set (§10.5).
+const coSigner = pairFor("co-signer");
+await post("/_presenter/identities", {
+  key: "key-cosigner-conformance",
+  public_key: coSigner.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  attested: true,
+});
+// The household's own key, under its own name: §16 has a mandate signed by
+// the household, and §10.5 has a decided set signed by the key registered
+// for the offer's mandate reference. The same key answers to both names here.
+await post("/_presenter/identities", {
+  key: "household-conformance",
+  public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  attested: true,
+});
+const baseMandate = {
+  id: "mandate-conformance",
+  household: "household-conformance",
+  ceiling_out_of_network: 100000,
+  co_signers: ["key-cosigner-conformance"],
+  lapses_at: Date.now() + 365 * 86_400_000,
+  version: 1,
+};
+const canonicalMandate = (m: typeof baseMandate) =>
+  Buffer.from(
+    [m.id, m.household, String(m.ceiling_out_of_network), [...m.co_signers].sort().join(","), String(m.lapses_at), String(m.version)].join("\n"),
+    "utf8"
+  );
+await post("/_node/mandates", {
+  ...baseMandate,
+  signatures: {
+    "household-conformance": sign(null, canonicalMandate(baseMandate), mandatePair.privateKey).toString("base64"),
+  },
+});
 
+console.log(Buffer.from(JSON.stringify(seedKeys), "utf8").toString("base64"));
 // §7.1. A well-formed edge from the unattested key, for the probes.
 const strangerEdge = {
   from: "key-stranger-conformance",
@@ -253,4 +290,14 @@ console.log(
     ...strangerEdge,
     signature: sign(null, canonical(strangerEdge), stranger.privateKey).toString("base64"),
   })
+);
+
+console.log(
+  Buffer.from(
+    JSON.stringify({
+      ...baseMandate,
+      co_signer_key: Buffer.from(coSigner.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), "utf8").toString("base64"),
+    }),
+    "utf8"
+  ).toString("base64")
 );
