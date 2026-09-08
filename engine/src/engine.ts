@@ -34,7 +34,6 @@ export type EngineConfig = {
    * no setter, so nothing at runtime can reach zero or bypass the check.
    */
   explorationRate: number;
-  /** §5.1. A candidate at or below this is eligible to be marked exploration. */
   /** §10.4. At most one reminder. Kept configurable downward, never upward. */
   reminderLimit: 0 | 1;
   /**
