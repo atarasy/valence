@@ -290,7 +290,7 @@ There is no sponsored-placement field, and a conforming feed schema has no room 
 ```
 POST   /offers                      create. Validates the exploration floor.
 POST   /offers/{id}/present         ship or render. Reserves.
-POST   /offers/{id}/decisions       assign valences to candidates
+POST   /offers/{id}/decisions       assign valences to candidates (signed as the mandate, §10.5, clause 39)
 POST   /offers/{id}/settle          price, commit, return a signed receipt
 POST   /offers/{id}/withdraw        revoke, release
 POST   /offers/{id}/remind          the one reminder (§10.4, clause 37)
@@ -337,7 +337,14 @@ A conforming implementation does not have these routes. Their absence is checkab
 
    An implementation MUST refuse a deliberation whose reason is not in this list, with `400`. Adding a rule is a change to this specification, which is what makes an agent's routing auditable: every exclusion a person sees names a rule they can read here.
 4. **Decide.** Per candidate. One tap to confirm. At most one reminder (clause 37).
-5. **Sign.** The decided set is signed as an AP2 mandate.
+5. **Sign.** The decided set is signed as an AP2 mandate, and `POST /offers/{id}/decisions` carries the signature beside the decisions (clause 39). What is signed is the set in this canonical shape, so a signature made by one hub verifies at any conforming endpoint:
+
+   ```
+   <offer id>
+   <candidate>:<valence>:<kept_as or empty>:<lineage or empty>
+   ```
+
+   one line per decision in ascending candidate id, UTF-8, `\n` between lines; the signature is ed25519 over those bytes, base64, by the key registered for the offer's `mandate`. An implementation MUST refuse, with `422`, a decided set with no signature, a signature by another key, or a signature over a set other than the one sent; nothing is written on refusal.
 6. **Order.** Kept candidates proceed to an ACP checkout session.
 
 Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
