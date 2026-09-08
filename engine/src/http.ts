@@ -195,10 +195,14 @@ async function route(
       );
     }
     if (method === "POST" && parts[1] === "identities") {
-      const raw = strict(await body(request), ["key", "public_key"], "identity");
+      const raw = strict(await body(request), ["key", "public_key", "attested"], "identity");
+      // §7.1. `attested` says an identity root endorsed this key. It is a
+      // fixture flag here: who endorses a key is clause 2's root and not the
+      // engine's business, and a conforming host reads it from that root.
       engine.registerIdentity(
         requireString(raw, "key", "identity"),
-        requireString(raw, "public_key", "identity")
+        requireString(raw, "public_key", "identity"),
+        raw.attested === true
       );
       return json({ ok: true }, 201);
     }
