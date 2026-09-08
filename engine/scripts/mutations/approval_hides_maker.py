@@ -1,0 +1,10 @@
+import pathlib
+# Clauses 12, 26: the screen the person signs from names maker, carrier and band. Drop them.
+p = pathlib.Path("src/approval.ts"); s = p.read_text()
+old = "        merchant: c.merchant,\n        ships: c.ships,\n"
+assert old in s
+s = s.replace(old, "", 1)
+old2 = "      price_band: offer.price_band,\n"
+assert old2 in s
+s = s.replace(old2, "      price_band: null,\n", 1)
+p.write_text(s)
