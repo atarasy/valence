@@ -14,7 +14,14 @@ const base = process.env.BASE ?? "http://localhost:8788";
 const post = async (path: string, body: unknown) => {
   const response = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      // The seed is the reference implementation's own tooling, so it says so.
+      // Left as Bun's default, a mutation that discriminates on the client
+      // rejected the seed's own lineage post and the run died before any probe
+      // executed, which reads in the log as a mutation nothing caught.
+      "user-agent": "atarasy-reference/0.0.0",
+    },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -90,6 +97,25 @@ const secondHop = {
 await post("/lineage", {
   ...secondHop,
   signature: sign(null, canonical(secondHop), onward.privateKey).toString("base64"),
+});
+
+// An act, so the giver's surface has something on it.
+//
+// Both edges above are gifts, and gifts are excluded from the acts stream by
+// clause 20. Without a thanks the giver's stream is empty, and every probe
+// about what it does or does not disclose compares two empty responses.
+const thanks = {
+  from: "key-recipient-conformance",
+  to: giver,
+  product: "tea-a",
+  merchant: "reference-merchant",
+  kind: "thanks" as const,
+  occasion: "birth",
+  receipt: "receipt-conformance-3",
+};
+await post("/lineage", {
+  ...thanks,
+  signature: sign(null, canonical(thanks), onward.privateKey).toString("base64"),
 });
 
 console.log(

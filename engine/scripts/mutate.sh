@@ -48,7 +48,12 @@ echo -n "  conformance: "
 grep -E '^ *[0-9]+ (pass|fail)' "/tmp/mutation-${NAME}.log" | tr '\n' ' '
 echo ""
 grep -hE '^\(fail\)' "/tmp/mutation-${NAME}-unit.log" "/tmp/mutation-${NAME}.log" | head -12
-if [ "$UNIT" -eq 0 ] && [ "$STATUS" -eq 0 ]; then
+if ! grep -q 'bun test v' "/tmp/mutation-${NAME}.log" 2>/dev/null; then
+  # The run never reached a probe. A mutation that breaks the setup proves
+  # nothing about the probes, and its log looks identical to a clean pass to
+  # anything that greps for failures.
+  echo "ABORTED: the suite never started. The mutation broke the setup, not a probe."
+elif [ "$UNIT" -eq 0 ] && [ "$STATUS" -eq 0 ]; then
   echo "SURVIVED: no test failed under this mutation"
 fi
 git checkout -- src

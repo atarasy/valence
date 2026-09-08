@@ -1,5 +1,10 @@
-import { ValenceError, badRequest, notFound } from "./errors.js";
+import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./errors.js";
 import type { ValenceEngine } from "./engine.js";
+import {
+  exportNode,
+  type NodeExport,
+  type RecoveryRegister,
+} from "./node.js";
 import {
   optionalUnitInterval,
   requireBoolean,
@@ -68,10 +73,10 @@ function offerView(o: Offer) {
   };
 }
 
-export function createApp(engine: ValenceEngine) {
+export function createApp(engine: ValenceEngine, recovery: RecoveryRegister) {
   return async function handle(request: Request): Promise<Response> {
     try {
-      return await route(engine, request);
+      return await route(engine, recovery, request);
     } catch (err) {
       if (err instanceof ValenceError) {
         return json({ error: err.code, message: err.message }, err.status);
@@ -96,6 +101,7 @@ async function body(request: Request): Promise<unknown> {
 
 async function route(
   engine: ValenceEngine,
+  recovery: RecoveryRegister,
   request: Request
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -143,6 +149,51 @@ async function route(
         requireString(raw, "key", "identity"),
         requireString(raw, "public_key", "identity")
       );
+      return json({ ok: true }, 201);
+    }
+  }
+
+  // Out of specification: naming recoverers and their notification channels.
+  // Who a household's recoverers are is open question 17, so the shape is
+  // here and the choice is not.
+  if (parts[0] === "_node") {
+    if (method === "POST" && parts[1] === "recoverers") {
+      const raw = strict(await body(request), ["household", "keys"], "recoverers");
+      const keys = raw.keys;
+      if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) {
+        throw badRequest("malformed", "keys must be an array of strings");
+      }
+      recovery.nameRecoverers(
+        requireString(raw, "household", "recoverers"),
+        keys as string[]
+      );
+      return json({ ok: true }, 201);
+    }
+    if (method === "POST" && parts[1] === "channels") {
+      const raw = strict(await body(request), ["household", "channels"], "channels");
+      const channels = raw.channels;
+      if (!Array.isArray(channels)) {
+        throw badRequest("malformed", "channels must be an array");
+      }
+      const parsed = channels.map((c, i) => {
+        const entry = strict(c, ["channel", "controlled_by_recoverer"], `channel ${i}`);
+        return {
+          channel: requireString(entry, "channel", `channel ${i}`),
+          controlled_by_recoverer: requireBoolean(
+            entry,
+            "controlled_by_recoverer",
+            `channel ${i}`
+          ),
+        };
+      });
+      try {
+        recovery.registerChannels(
+          requireString(raw, "household", "channels"),
+          parsed
+        );
+      } catch (err) {
+        throw unprocessable("no_independent_channel", (err as Error).message);
+      }
       return json({ ok: true }, 201);
     }
   }
@@ -261,6 +312,13 @@ async function route(
         });
         return json(offerView(engine.decide(id, decisions)));
       }
+      if (method === "GET" && action === "settlement") {
+        // §6. A receipt a household cannot ask for again is a receipt it can
+        // lose by closing a tab.
+        const settlement = engine.settlement(id);
+        if (!settlement) throw notFound(`offer ${id} has no settlement`);
+        return json(settlement);
+      }
       if (method === "POST" && action === "settle") {
         strict(await body(request), [], "settle");
         return json(await engine.settle(id));
@@ -336,6 +394,50 @@ async function route(
       // §7.2. Acts only. No row names the gift it answers, and there is no
       // count, so nothing here reports that a recipient did not respond.
       return json({ acts: engine.actsVisibleToGiver(giver) });
+    }
+  }
+
+  if (parts[0] === "households" && parts[1] && parts[2] === "export") {
+    // Clause 47. Everything the household holds, whatever a surface shows.
+    if (method === "GET") {
+      return json(exportNode(engine, recovery, parts[1]));
+    }
+  }
+
+  if (parts[0] === "households" && parts[1] && parts[2] === "import") {
+    // Clause 61. The receiving host of a move.
+    if (method === "POST") {
+      const body_ = (await body(request)) as NodeExport;
+      if (!body_ || body_.format !== "valence-node/1") {
+        throw badRequest("malformed", "unknown export format");
+      }
+      for (const offer of body_.offers ?? []) engine.importOffer(offer);
+      for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
+      for (const n of body_.notes ?? []) engine.importNote(n);
+      for (const e of body_.lineage ?? []) engine.importEdge(e);
+      engine.importReceipts(parts[1], body_.receipts ?? []);
+      return json({ imported: true }, 201);
+    }
+  }
+
+  if (parts[0] === "households" && parts[1] && parts[2] === "recoveries") {
+    // Clause 62. The log a person reads after being locked out.
+    if (method === "GET") {
+      return json({ recoveries: recovery.logFor(parts[1]) });
+    }
+    if (method === "POST") {
+      const raw = strict(await body(request), ["by"], "recovery");
+      try {
+        return json(
+          recovery.recover({
+            household: parts[1],
+            by: requireString(raw, "by", "recovery"),
+          }),
+          201
+        );
+      } catch (err) {
+        throw conflict("recovery_refused", (err as Error).message);
+      }
     }
   }
 

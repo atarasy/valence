@@ -509,8 +509,51 @@ export class ValenceEngine {
     return rows;
   }
 
+  /** Whether the identity root has attested this key. Used by a mutation. */
+  isKnownKey(key: string): boolean {
+    return this.identities.has(key);
+  }
+
   edge(id: string): LineageEdge | undefined {
     return this.edges.get(id);
+  }
+
+  /**
+   * Every edge this household is an endpoint of, in both directions.
+   *
+   * Not a surface. §7.2 keeps the outgoing edges off the giver's screen, and
+   * clause 47 keeps them in the household's own record: what a surface
+   * withholds, an export still carries, or a member changing hosts loses what
+   * they gave.
+   */
+  edgesTouching(household: string): LineageEdge[] {
+    return [...this.edges.values()].filter(
+      (e) => e.from === household || e.to === household
+    );
+  }
+
+  /** Restores an exported node into an empty engine. Clause 61. */
+  importOffer(offer: Offer): void {
+    this.offers.set(offer.id, offer);
+    for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);
+  }
+
+  importSettlement(settlement: Settlement): void {
+    this.settlements.set(settlement.offer, settlement);
+  }
+
+  importNote(note: Note): void {
+    const list = this.notes.get(note.candidate) ?? [];
+    list.push(note);
+    this.notes.set(note.candidate, list);
+  }
+
+  importEdge(edge: LineageEdge): void {
+    this.edges.set(edge.id, edge);
+  }
+
+  importReceipts(household: string, rows: { ref: string; at: number }[]): void {
+    this.receipts.set(household, [...rows]);
   }
 
   // ---- reads ---------------------------------------------------------------

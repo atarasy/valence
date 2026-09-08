@@ -28,6 +28,15 @@ cd "$HERE"
 PORT="$PORT" VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 SERVER_PID=$!
+
+# A second host, so `exit/` has somewhere to move a node to. Clause 61 says a
+# member can move an entire node, and a suite with one host can only check that
+# a file was produced.
+SECOND_PORT=$((PORT + 100))
+SECOND="http://localhost:${SECOND_PORT}"
+PORT="$SECOND_PORT" VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+  bun src/server.ts &
+SECOND_PID=$!
 # PIPE matters: piping this script into `tail` kills it before an EXIT-only
 # trap runs, and the server outlives the run and blocks the next one.
 cleanup() {
@@ -37,8 +46,11 @@ cleanup() {
   # next run refuses to start, which reads as a broken suite rather than a
   # stale process. So the port is what gets cleared, not a remembered pid.
   kill "$SERVER_PID" 2>/dev/null || true
-  lsof -ti ":${PORT}" 2>/dev/null | while read -r pid; do
-    kill "$pid" 2>/dev/null || true
+  kill "${SECOND_PID:-0}" 2>/dev/null || true
+  for p in "${PORT}" "$((PORT + 100))"; do
+    lsof -ti ":${p}" 2>/dev/null | while read -r pid; do
+      kill "$pid" 2>/dev/null || true
+    done
   done
 }
 trap cleanup EXIT INT TERM HUP PIPE
@@ -48,7 +60,15 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
+for _ in $(seq 1 50); do
+  if curl -fsS -o /dev/null "$SECOND/offers?household=probe" 2>/dev/null; then break; fi
+  sleep 0.1
+done
+
 EDGE="$(BASE="$BASE" bun scripts/seed.ts)"
+# The receiving host needs the same catalogue, or an imported offer names a
+# config version it has never seen.
+BASE="$SECOND" bun scripts/seed.ts > /dev/null
 
 cd "$TESTS"
 VALENCE_BASE_URL="$BASE" \
@@ -60,6 +80,7 @@ VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
 VALENCE_LINEAGE_EDGE="$EDGE" \
 VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
 VALENCE_BINDINGS="digital,physical" \
+VALENCE_SECOND_HOST_URL="$SECOND" \
 VALENCE_CONFIG_VERSION_LATER="cfg-conformance-v2" \
 VALENCE_PRICES_LATER='{"tea-a":9900,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
-  bun test ${SUITES:-absence floor silence lineage opacity binding}
+  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit}

@@ -288,6 +288,7 @@ POST   /offers/{id}/settle          price, commit, return a signed receipt
 POST   /offers/{id}/withdraw        revoke, release
 POST   /offers/{id}/remind          the one reminder (§10.4, clause 37)
 GET    /offers/{id}                 one offer, with its candidates
+GET    /offers/{id}/settlement      the settlement, once there is one
 GET    /offers?household={id}       the presenter's vertical view
 POST   /candidates/{id}/note        one line
 POST   /lineage                     accept an edge
@@ -299,6 +300,8 @@ Three of these lines were corrected on 2026-09-08, after the conformance suites 
 
 - **The reserve moves from `POST /offers` to `POST /offers/{id}/present`.** The earlier text put it on creation, which contradicts §6.4's table and orphans a hold every time the exploration floor refuses an offer.
 - **`POST /offers/{id}/remind` and `GET /offers/{id}` are named.** Both were required by the specification's own prose, §10.4 and §2.1, and neither appeared here. An implementation built from this section alone had no route for the one reminder clause 37 permits, and no way to read back the state the state machine describes.
+
+A fourth line was added on 2026-09-09. **`GET /offers/{id}/settlement`** reads a settlement back. §6 delivers a signed receipt to the household in the response to `POST /offers/{id}/settle` and gave no way to ask for it again, so a household that lost that response had lost its receipt, and clause 47's export could omit settlements while every read still agreed. A conformance probe comparing two hosts found it: the export dropped the settlements and the hosts still answered alike, because nothing asked.
 
 An endpoint a conformance test depends on belongs in this list. Where the two disagree, this list is what an implementer reads.
 
