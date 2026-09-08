@@ -317,7 +317,17 @@ A conforming implementation does not have these routes. Their absence is checkab
 
 1. **Input.** History from the presenter's vertical ledger, season, prior valences, the exploration floor.
 2. **Generate.** Either the merchant's agent or the household's agent composes candidates. Both enter through `POST /offers`. The specification does not care which, and the endpoint MUST NOT behave differently.
-3. **Present.** Rendered in the household's approval surface with alternatives, and with the reason any candidate was excluded — including detection of auto-renewal, obstructed cancellation or manufactured scarcity (clause 52).
+3. **Present.** Rendered in the household's approval surface with alternatives, and with the reason any candidate was excluded. The reason is one of the published rules and nothing else (clause 6, clause 40):
+
+   | Rule | What it means |
+   |---|---|
+   | `auto_renewal` | the candidate carries an auto-renewing subscription (clause 52) |
+   | `obstructed_cancellation` | cancelling it is harder than buying it (clause 52) |
+   | `manufactured_scarcity` | the offer manufactures urgency or scarcity (clause 52) |
+   | `outside_mandate` | the candidate falls outside the mandate the household gave |
+   | `declined_before` | the household returned this product before, and the agent is not offering it again |
+
+   An implementation MUST refuse a deliberation whose reason is not in this list, with `400`. Adding a rule is a change to this specification, which is what makes an agent's routing auditable: every exclusion a person sees names a rule they can read here.
 4. **Decide.** Per candidate. One tap to confirm. At most one reminder (clause 37).
 5. **Sign.** The decided set is signed as an AP2 mandate.
 6. **Order.** Kept candidates proceed to an ACP checkout session.

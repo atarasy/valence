@@ -5,7 +5,7 @@ import {
   type NodeExport,
   type RecoveryRegister,
 } from "./node.js";
-import type { ApprovalDesk } from "./approval.js";
+import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./approval.js";
 import type { PermissionLedger } from "./permissions.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./registry.js";
 import {
@@ -444,10 +444,15 @@ async function route(
         }
         const excluded = excludedRaw.map((e, i) => {
           const entry = strict(e, ["product", "reason"], `excluded ${i}`);
-          return {
-            product: requireString(entry, "product", `excluded ${i}`),
-            reason: requireString(entry, "reason", `excluded ${i}`),
-          };
+          const reason = requireString(entry, "reason", `excluded ${i}`);
+          // Clause 6: an exclusion names the published rule that made it.
+          if (!(EXCLUSION_RULES as readonly string[]).includes(reason)) {
+            throw badRequest(
+              "unknown_rule",
+              `excluded ${i}: reason must be one of ${EXCLUSION_RULES.join(", ")}`
+            );
+          }
+          return { product: requireString(entry, "product", `excluded ${i}`), reason: reason as ExclusionRule };
         });
         const mandateRaw = strict(
           raw.mandate,

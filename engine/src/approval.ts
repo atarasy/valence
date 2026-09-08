@@ -27,6 +27,21 @@ export type ApprovalCandidate = {
   argument_against: string;
 };
 
+/**
+ * Clause 6 and clause 40. The reason a candidate was left out is one of these
+ * and nothing else. A free string would let an agent exclude for any reason
+ * and describe it however it liked, which is a routing rule nobody can audit.
+ * The list is the published rule set; extending it is a specification change.
+ */
+export const EXCLUSION_RULES = [
+  "auto_renewal",
+  "obstructed_cancellation",
+  "manufactured_scarcity",
+  "outside_mandate",
+  "declined_before",
+] as const;
+export type ExclusionRule = (typeof EXCLUSION_RULES)[number];
+
 export type Approval = {
   offer: string;
   presenter: string;
@@ -41,7 +56,7 @@ export type Approval = {
   };
   candidates: ApprovalCandidate[];
   /** Clause 40. The reason an order was not executed, shown to the person. */
-  excluded: { product: string; reason: string }[];
+  excluded: { product: string; reason: ExclusionRule }[];
 };
 
 /**
@@ -54,7 +69,7 @@ export type Approval = {
 export type Deliberation = {
   offer: string;
   perCandidate: Record<string, { alternatives: string[]; argument_against: string }>;
-  excluded: { product: string; reason: string }[];
+  excluded: { product: string; reason: ExclusionRule }[];
   mandate: { kind: "standing" | "individual"; scope: string; lapses_at: number | null };
 };
 
