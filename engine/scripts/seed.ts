@@ -8,6 +8,7 @@
  */
 import { generateKeyPairSync, sign } from "node:crypto";
 import { canonical } from "../src/lineage.js";
+import { canonicalEntry } from "../src/registry.js";
 
 const base = process.env.BASE ?? "http://localhost:8788";
 
@@ -126,6 +127,27 @@ await post("/lineage", {
   ...thanks,
   signature: sign(null, canonical(thanks), onward.privateKey).toString("base64"),
 });
+
+// §15. Two registry entries, one carrying the mark and one not, so the
+// probes can check that the mark is recorded and never a gate. Their keys are
+// chosen so that key order and registration order disagree: "b-merchant" is
+// registered first and must still come second.
+for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-marked", true]] as const) {
+  const pair = generateKeyPairSync("ed25519");
+  await post("/registry/attest", {
+    merchant,
+    public_key: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  });
+  const entry = {
+    merchant,
+    endpoints: { valence: `https://${merchant}.example/valence`, acp: `https://${merchant}.example/acp` },
+    mark,
+  };
+  await post("/registry", {
+    ...entry,
+    signature: sign(null, canonicalEntry(entry), pair.privateKey).toString("base64"),
+  });
+}
 
 console.log(
   JSON.stringify({

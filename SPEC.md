@@ -399,3 +399,50 @@ Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Pas
 - Multi-hop lineage attribution, where a product passes through several households before a purchase. The settlement side is out of scope here.
 - Whether the feed extension should be proposed to the ACP community or remain a private extension.
 - Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure.
+
+----
+
+## 15. The endpoint registry
+
+Added 2026-09-09. A merchant that speaks Valence has to be findable by a household's agent, and clause 1 forbids the infrastructure from being the place where things are found. Those two hold together only if the registry **resolves and does not rank**.
+
+### 15.1 What it is
+
+A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 2 calls shared and neutral, made concrete.
+
+```
+entry
+  merchant      the merchant's key identifier, which is the entry's only name
+  endpoints     { valence, acp, ucp, ap2, mcp }  each a URL or absent
+  mark          whether the merchant carries the Ataraxia mark. Recorded, never required
+  signature     by the merchant's key, over the entry
+  registered_at
+```
+
+### 15.2 What it never does
+
+The line between a directory and the intent layer is whether the answer depends on anything but the question. A registry that returns different results to different askers, or in an order that says something, is ranking.
+
+- **No order that means anything.** A list is returned in key order and in no other. There is no field for rank, score, popularity, relevance, featured, or recommended, and no parameter that sorts.
+- **No query by intent.** The registry is queried by key or by protocol. It is not queried by product, category, occasion, price or any word a person would type when they want something. `?q=` is not a parameter and returns `404`, not an empty list.
+- **No per-asker answer.** The same query returns the same list to every caller. There is no personalisation and no field that identifies who asked.
+- **The mark is not a gate** (clause 64). An entry is listed whether or not it carries the mark. The mark is a fact in the entry, and an agent MAY prefer it, and the registry MUST NOT filter on it unless asked to by the caller.
+- **No product data.** The entry names endpoints. What the merchant sells is behind those endpoints, in the merchant's own feed, and the registry does not copy it.
+
+### 15.3 Why the line is here
+
+Discovery in this design is vertical. A household's agent reads merchant feeds through the endpoints the registry resolves, and forms its own view in the household's own node. The index lives with the person. A registry that indexed products would move the index to the centre, and whoever holds the index takes the rent, which is the sentence clause 1 exists to make false.
+
+A registry of endpoints is plumbing. A registry of products, however neutrally it answered, would be the layer that decides what a person sees, and that is the seat this specification returns to the person.
+
+### 15.4 Conformance
+
+An implementation of the registry is conformant when it:
+
+1. lists entries in key order and accepts no sort parameter
+2. carries no field from the list in §15.2 on any entry
+3. refuses a query by product, category, occasion or free text with `404`
+4. returns the same list to every caller for the same query
+5. lists an entry that carries no mark
+
+----

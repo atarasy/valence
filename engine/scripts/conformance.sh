@@ -84,4 +84,4 @@ VALENCE_RECOVERY_GRACE_DAYS="0" \
 VALENCE_SECOND_HOST_URL="$SECOND" \
 VALENCE_CONFIG_VERSION_LATER="cfg-conformance-v2" \
 VALENCE_PRICES_LATER='{"tea-a":9900,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
-  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions}
+  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry}

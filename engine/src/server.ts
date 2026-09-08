@@ -5,6 +5,7 @@ import { createApp } from "./http.js";
 import { RecoveryRegister } from "./node.js";
 import { ApprovalDesk } from "./approval.js";
 import { PermissionLedger } from "./permissions.js";
+import { Registry } from "./registry.js";
 
 const rate = Number(process.env.VALENCE_EXPLORATION_RATE);
 if (!(rate > 0)) {
@@ -45,6 +46,7 @@ const hub = {
   recovery: new RecoveryRegister(),
   approvals: new ApprovalDesk(),
   permissions: new PermissionLedger(),
+  registry: new Registry(),
 };
 
 const port = Number(process.env.PORT ?? 8787);

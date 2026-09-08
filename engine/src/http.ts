@@ -7,6 +7,7 @@ import {
 } from "./node.js";
 import type { ApprovalDesk } from "./approval.js";
 import type { PermissionLedger } from "./permissions.js";
+import { PROTOCOLS, type Protocol, type Registry } from "./registry.js";
 import {
   optionalUnitInterval,
   requireBoolean,
@@ -79,6 +80,7 @@ export type Hub = {
   recovery: RecoveryRegister;
   approvals: ApprovalDesk;
   permissions: PermissionLedger;
+  registry: Registry;
 };
 
 export function createApp(engine: ValenceEngine, hub: Hub) {
@@ -112,7 +114,7 @@ async function route(
   hub: Hub,
   request: Request
 ): Promise<Response> {
-  const { recovery, approvals, permissions } = hub;
+  const { recovery, approvals, permissions, registry } = hub;
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
@@ -220,6 +222,65 @@ async function route(
         throw unprocessable("no_independent_channel", (err as Error).message);
       }
       return json({ ok: true }, 201);
+    }
+  }
+
+  // ---- §15: the endpoint registry -----------------------------------------
+  // Resolves and does not rank. Every refusal below is the line in §15.2.
+  if (parts[0] === "registry") {
+    if (method === "POST" && parts[1] === "attest") {
+      // Out of specification: attesting a merchant key is identity-root plumbing.
+      const raw = strict(await body(request), ["merchant", "public_key"], "attest");
+      registry.attest(
+        requireString(raw, "merchant", "attest"),
+        requireString(raw, "public_key", "attest")
+      );
+      return json({ ok: true }, 201);
+    }
+    if (method === "POST" && parts.length === 1) {
+      const raw = strict(
+        await body(request),
+        ["merchant", "endpoints", "mark", "signature"],
+        "entry"
+      );
+      const endpointsRaw = raw.endpoints;
+      if (typeof endpointsRaw !== "object" || endpointsRaw === null) {
+        throw badRequest("malformed", "endpoints must be an object");
+      }
+      const endpoints = strict(endpointsRaw, PROTOCOLS, "endpoints") as Partial<
+        Record<Protocol, string>
+      >;
+      return json(
+        registry.register({
+          merchant: requireString(raw, "merchant", "entry"),
+          endpoints,
+          mark: requireBoolean(raw, "mark", "entry"),
+          signature: requireString(raw, "signature", "entry"),
+        }),
+        201
+      );
+    }
+    if (method === "GET" && parts.length === 1) {
+      // §15.2. The only parameters are a protocol and, by name, the mark.
+      // Anything a person would type when they want something is not one.
+      for (const key of url.searchParams.keys()) {
+        if (key !== "protocol" && key !== "mark") {
+          throw notFound(`${key} is not a registry parameter`);
+        }
+      }
+      const protocol = url.searchParams.get("protocol");
+      if (protocol !== null && !PROTOCOLS.includes(protocol as Protocol)) {
+        throw badRequest("malformed", `unknown protocol ${protocol}`);
+      }
+      return json({
+        entries: registry.list({
+          protocol: (protocol as Protocol | null) ?? undefined,
+          markOnly: url.searchParams.get("mark") === "true",
+        }),
+      });
+    }
+    if (method === "GET" && parts.length === 2 && parts[1]) {
+      return json(registry.resolve(parts[1]));
     }
   }
 
