@@ -5,6 +5,8 @@ import { canonical, type EdgeInput } from "../src/lineage.js";
 
 export const CONFIG_VERSION = "cfg-1";
 
+export const PHYSICAL = { ambient: true, keeps_for_days: 365, fits_ten_per_container: true, regulated: false };
+
 export function makeEngine(overrides: Partial<{
   explorationRate: number;
   explorationThreshold: number;
@@ -15,17 +17,20 @@ export function makeEngine(overrides: Partial<{
     explorationRate: 0.2,
     explorationThreshold: 0.2,
     reminderLimit: 1,
+    recoveryGraceDays: 3,
     ...overrides,
   });
   engine.registerConfig({
     version: CONFIG_VERSION,
     presenter: "merchant-1",
     products: {
-      "tea-a": { price: 1200, cost: 400 },
-      "tea-b": { price: 900, cost: 300 },
-      "coffee-a": { price: 1500, cost: 600 },
-      "miso-a": { price: 700, cost: 250 },
-      "nori-a": { price: 1100, cost: 380 },
+      // §11.1. Ambient, long-keeping, ten to a container, unregulated: the
+      // band the physical binding can carry.
+      "tea-a": { price: 1200, cost: 400, physical: PHYSICAL },
+      "tea-b": { price: 900, cost: 300, physical: PHYSICAL },
+      "coffee-a": { price: 1500, cost: 600, physical: PHYSICAL },
+      "miso-a": { price: 700, cost: 250, physical: PHYSICAL },
+      "nori-a": { price: 1100, cost: 380, physical: PHYSICAL },
     },
   });
   return { engine, ledger };

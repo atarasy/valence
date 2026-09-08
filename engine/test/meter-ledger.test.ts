@@ -80,6 +80,7 @@ const makeEngine = (ledger: MeterLedger) => {
     explorationRate: 0.2,
     explorationThreshold: 0.2,
     reminderLimit: 1,
+    recoveryGraceDays: 3,
   });
   engine.registerConfig({
     version: CONFIG_VERSION,

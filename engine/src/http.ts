@@ -15,7 +15,7 @@ import {
   requireString,
   strict,
 } from "./validate.js";
-import type { Candidate, KeptAs, Offer, Valence } from "./types.js";
+import type { Candidate, CatalogueEntry, KeptAs, Offer, Valence } from "./types.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -133,14 +133,30 @@ async function route(
       if (typeof products !== "object" || products === null) {
         throw badRequest("malformed", "config: products must be an object");
       }
-      const entries: Record<string, { price: number; cost: number }> = {};
+      const entries: Record<string, CatalogueEntry> = {};
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["price", "cost"], `product ${ref}`);
+        const entry = strict(value, ["price", "cost", "physical"], `product ${ref}`);
+        const physicalRaw = entry.physical;
+        let physical;
+        if (physicalRaw !== undefined) {
+          const e = strict(
+            physicalRaw,
+            ["ambient", "keeps_for_days", "fits_ten_per_container", "regulated"],
+            `product ${ref} eligibility`
+          );
+          physical = {
+            ambient: requireBoolean(e, "ambient", `product ${ref}`),
+            keeps_for_days: requireInteger(e, "keeps_for_days", `product ${ref}`, 0),
+            fits_ten_per_container: requireBoolean(e, "fits_ten_per_container", `product ${ref}`),
+            regulated: requireBoolean(e, "regulated", `product ${ref}`),
+          };
+        }
         entries[ref] = {
           price: requireInteger(entry, "price", `product ${ref}`, 0),
           cost: requireInteger(entry, "cost", `product ${ref}`, 0),
+          physical,
         };
       }
       return json(
@@ -401,6 +417,35 @@ async function route(
           },
         });
         return json({ ok: true }, 201);
+      }
+      if (method === "GET" && action === "recovery") {
+        // §11. What the route is due to do, and what it found.
+        const row = engine.recoveries.for(id);
+        if (!row) throw notFound(`offer ${id} has no recovery`);
+        return json(row);
+      }
+      if (method === "POST" && action === "recovery") {
+        const raw = strict(
+          await body(request),
+          ["returned", "consumed"],
+          "recovery"
+        );
+        for (const key of ["returned", "consumed"] as const) {
+          const list = raw[key];
+          if (!Array.isArray(list) || list.some((x) => typeof x !== "string")) {
+            throw badRequest("malformed", `${key} must be an array of candidate ids`);
+          }
+        }
+        const collected = engine.recoveries.collect({
+          offer: id,
+          returned: raw.returned as string[],
+          consumed: raw.consumed as string[],
+          at: Date.now(),
+        });
+        // The collection is what the household never said. Apply it now so a
+        // settlement after this call sees the valences it produced.
+        engine.applyRecoveryTo(id);
+        return json(collected);
       }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can

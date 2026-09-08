@@ -34,12 +34,54 @@ export type KeptAs = "self" | "gift" | "order";
 export type CatalogueEntry = {
   price: number;
   cost: number;
+  /** §11.1. Absent for a product that is never placed in a home. */
+  physical?: PhysicalEligibility;
 };
 
 export type PresenterConfig = {
   version: string;
   presenter: string;
   products: Record<string, CatalogueEntry>;
+};
+
+/**
+ * §11.1. What makes a product eligible for the physical binding.
+ *
+ * Recorded per product on the catalogue rather than judged at offer time,
+ * because eligibility is a fact about the goods and the presenter is the party
+ * that knows it. An offer that places an ineligible product in someone's home
+ * is refused at creation, which is the only point at which refusing it costs
+ * nothing.
+ */
+export type PhysicalEligibility = {
+  /** Ambient. Chilled and frozen are out of scope for this binding. */
+  ambient: boolean;
+  /** Days the product keeps. §11.1 asks for three times the offer period. */
+  keeps_for_days: number;
+  /** Ten fit in one container, per §11.1. */
+  fits_ten_per_container: boolean;
+  /** Regulated categories are out of scope entirely, whatever else holds. */
+  regulated: boolean;
+};
+
+/**
+ * §11. What happened to a physical offer after it was presented.
+ *
+ * Separate from the offer because the offer is what was proposed and this is
+ * what the route did. A recovery that never happened is the absence of a row
+ * here, and the loss deadline reads that absence.
+ */
+export type Recovery = {
+  offer: string;
+  /** When the presenter is due to collect. Set at presentation. */
+  due_at: number;
+  /** Days after `due_at` before an uncollected candidate becomes `lost`. */
+  grace_days: number;
+  collected_at: number | null;
+  /** Candidates found unopened and taken back. */
+  returned: string[];
+  /** Candidates the household used while trying. Charged at cost (§6.2). */
+  consumed: string[];
 };
 
 export type Candidate = {

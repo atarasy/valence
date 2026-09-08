@@ -2,6 +2,11 @@ import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "./errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "./lineage.js";
+import {
+  applyRecovery,
+  ineligibleReason,
+  RecoveryLedger,
+} from "./physical.js";
 import type {
   Binding,
   Candidate,
@@ -29,6 +34,12 @@ export type EngineConfig = {
   explorationThreshold: number;
   /** §10.4. At most one reminder. Kept configurable downward, never upward. */
   reminderLimit: 0 | 1;
+  /**
+   * §11. Days after the recovery deadline before an uncollected candidate is
+   * `lost`. A deployment parameter with no recommended figure, like the
+   * exploration rate, so it is required rather than defaulted.
+   */
+  recoveryGraceDays: number;
 };
 
 export function explorationFloor(candidateCount: number, rate: number): number {
@@ -54,6 +65,13 @@ export class ValenceEngine {
   private readonly receipts = new Map<string, { ref: string; at: number }[]>();
   private readonly candidateIndex = new Map<string, string>();
 
+  /**
+   * §11. The physical binding's operations. Empty for a digital-only
+   * deployment, which is why it is a member rather than a constructor
+   * argument: an implementation that never places goods never touches it.
+   */
+  readonly recoveries = new RecoveryLedger();
+
   readonly config: EngineConfig;
 
   constructor(
@@ -71,6 +89,9 @@ export class ValenceEngine {
     }
     if (config.explorationRate > 1) {
       throw new Error("explorationRate must not exceed 1");
+    }
+    if (!Number.isInteger(config.recoveryGraceDays) || config.recoveryGraceDays < 0) {
+      throw new Error("recoveryGraceDays must be an integer of at least zero");
     }
     this.config = { ...config };
     Object.freeze(this.config);
@@ -118,6 +139,21 @@ export class ValenceEngine {
       const entry = config.products[c.product];
       if (!entry) {
         throw notFound(`no product ${c.product} in config ${config.version}`);
+      }
+      if (input.binding === "physical") {
+        // §11.1. Refused at creation rather than at placement: a lorry is a
+        // bad place to discover that a product cannot go in a home.
+        const periodDays = Math.max(
+          1,
+          Math.ceil((input.expires_at - Date.now()) / 86_400_000)
+        );
+        const reason = ineligibleReason(entry.physical, periodDays);
+        if (reason) {
+          throw unprocessable(
+            "not_eligible_for_placement",
+            `${c.product} cannot be placed in a home: ${reason}`
+          );
+        }
       }
       if (c.is_exploration) {
         const unknownToHousehold = !this.householdHasSeen(
@@ -204,6 +240,13 @@ export class ValenceEngine {
     });
     offer.state = "presented";
     offer.presented_at = now;
+    if (offer.binding === "physical") {
+      this.recoveries.open({
+        offer: offer.id,
+        dueAt: offer.expires_at,
+        graceDays: this.config.recoveryGraceDays,
+      });
+    }
     return offer;
   }
 
@@ -354,6 +397,17 @@ export class ValenceEngine {
   private applyExpiry(offer: Offer, now: number): void {
     if (offer.state !== "presented") return;
     if (offer.expires_at > now) return;
+    if (offer.binding === "physical") {
+      // §11. What the route found decides first, and the deadline decides the
+      // rest. Silence does not become `returned` here as it does in the
+      // digital binding: the goods are in someone's home, and nobody has
+      // looked at them yet.
+      applyRecovery(offer, this.recoveries.for(offer.id), now);
+      if (offer.candidates.every((c) => c.valence !== "offered")) {
+        offer.state = "expired";
+      }
+      return;
+    }
     const undecided = offer.candidates.filter((c) => c.valence === "offered");
     if (offer.purpose === "ceremonial" && undecided.length > 0) {
       const first = undecided[0]!;
@@ -367,6 +421,25 @@ export class ValenceEngine {
       }
     }
     offer.state = "expired";
+  }
+
+  /**
+   * Folds a recorded collection into the offer's valences.
+   *
+   * Called when the route reports, rather than only at expiry, because a
+   * collection that happened before the deadline should settle on the day it
+   * happened and not on the day the deadline passes.
+   */
+  applyRecoveryTo(offerId: string, now = Date.now()): Offer {
+    const offer = this.mustGet(offerId);
+    applyRecovery(offer, this.recoveries.for(offerId), now);
+    if (
+      offer.state === "presented" &&
+      offer.candidates.every((c) => c.valence !== "offered")
+    ) {
+      offer.state = "decided";
+    }
+    return offer;
   }
 
   sweep(now = Date.now()): Offer[] {

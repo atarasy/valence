@@ -33,6 +33,7 @@ describe("construction", () => {
           explorationRate: 0,
           explorationThreshold: 0.2,
           reminderLimit: 1,
+          recoveryGraceDays: 3,
         })
     ).toThrow(/greater than zero/);
   });

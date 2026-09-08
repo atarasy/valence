@@ -335,9 +335,24 @@ Drafting from history alone converges on last week's order. The exploration floo
 | loss | after the recovery deadline plus a grace period, `lost`. Borne by the stock holder, never billed to the household. |
 | cadence | monthly settlement |
 
+### 11.2 Silence does not mean the same thing in the two bindings
+
+§2.2 makes an undecided digital candidate `returned` at expiry, because an order is a debt and none should be created by silence. **The physical binding does not follow that rule and must not.** The goods are in a household's home. Nobody has looked at them, and recording them as returned is a claim about the world rather than a default.
+
+So an undecided physical candidate stays undecided at expiry, and only two things resolve it:
+
+- **the collection**, which records what came back unopened as `returned` and what was used as `consumed`
+- **the deadline**, after which anything neither collected nor decided becomes `lost`
+
+The grace period after the recovery deadline is a deployment parameter with no recommended figure, as the exploration rate is. An implementation MUST NOT make an uncollected physical candidate `returned`, and MUST NOT bill a household for one that became `lost`.
+
+A candidate MUST NOT appear in both the returned and the consumed list of one collection, and a collection MUST NOT be recorded twice for one offer.
+
 ### 11.1 Eligibility
 
 A product is eligible for the physical binding when it is ambient, keeps for at least three times the offer period, is small enough that ten fit in one container, and carries enough margin to absorb recovery and redistribution. Chilled and bulky goods are out of scope for this binding. Regulated categories, including alcohol and medicines, are out of scope entirely.
+
+**Eligibility is recorded on the presenter's catalogue and checked when the offer is created**, not when the goods are loaded. The presenter is the party that knows whether a product is ambient and how long it keeps, and creation is the last moment at which refusing costs nothing.
 
 The digital binding has no eligibility restriction.
 

@@ -11,6 +11,15 @@ import { canonical } from "../src/lineage.js";
 
 const base = process.env.BASE ?? "http://localhost:8788";
 
+// §11.1. Every seeded product is ambient, long-keeping, small and unregulated,
+// so the physical binding can carry all of them and the probes can choose.
+const PHYSICAL = {
+  ambient: true,
+  keeps_for_days: 365,
+  fits_ten_per_container: true,
+  regulated: false,
+};
+
 const post = async (path: string, body: unknown) => {
   const response = await fetch(`${base}${path}`, {
     method: "POST",
@@ -34,11 +43,11 @@ await post("/_presenter/configs", {
   version: "cfg-conformance",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { price: 1200, cost: 400 },
-    "tea-b": { price: 900, cost: 300 },
-    "coffee-a": { price: 1500, cost: 600 },
-    "miso-a": { price: 700, cost: 250 },
-    "nori-a": { price: 1100, cost: 380 },
+    "tea-a": { price: 1200, cost: 400, physical: PHYSICAL },
+    "tea-b": { price: 900, cost: 300, physical: PHYSICAL },
+    "coffee-a": { price: 1500, cost: 600, physical: PHYSICAL },
+    "miso-a": { price: 700, cost: 250, physical: PHYSICAL },
+    "nori-a": { price: 1100, cost: 380, physical: PHYSICAL },
   },
 });
 
@@ -49,11 +58,11 @@ await post("/_presenter/configs", {
   version: "cfg-conformance-v2",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { price: 9900, cost: 400 },
-    "tea-b": { price: 900, cost: 300 },
-    "coffee-a": { price: 1500, cost: 600 },
-    "miso-a": { price: 700, cost: 250 },
-    "nori-a": { price: 1100, cost: 380 },
+    "tea-a": { price: 9900, cost: 400, physical: PHYSICAL },
+    "tea-b": { price: 900, cost: 300, physical: PHYSICAL },
+    "coffee-a": { price: 1500, cost: 600, physical: PHYSICAL },
+    "miso-a": { price: 700, cost: 250, physical: PHYSICAL },
+    "nori-a": { price: 1100, cost: 380, physical: PHYSICAL },
   },
 });
 

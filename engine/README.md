@@ -8,9 +8,18 @@ It lives beside the specification it implements, in `../SPEC.md`, because the
 two change together: three corrections to the specification came out of writing
 this, and each was made in the same pass as the code that found it.
 
-**Digital binding only.** No inventory, no recovery, no redistribution, no
-hardware. That is the whole of Stage 0 and it is deliberate: the physical
-binding adds operations without adding anything the constitution needs tested.
+**Both bindings, without the hardware.** The digital binding is complete. The
+physical binding has its valences, its eligibility check, its recovery and its
+loss deadline; what it does not have is a scanner, a route, or a temperature
+log, which are operations rather than rules.
+
+The physical half was built on 2026-09-09, when the Stage 0 replenishment
+customer was decided as a type whose whole decision criterion is recovery in
+item count. Until then it was out of scope on the ground that it adds
+operations without adding anything the constitution needs tested. That was
+true of the rules and false of the deadline: **an undecided physical candidate
+must not become `returned` at expiry**, and nothing in the digital binding
+says so.
 
 **Not a product, and not the hub.** A member opens Atarasy. This is the engine
 underneath an offer.
