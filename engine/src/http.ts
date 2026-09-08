@@ -241,8 +241,8 @@ async function route(
     }
   }
 
-  // ---- §15: the endpoint registry -----------------------------------------
-  // Resolves and does not rank. Every refusal below is the line in §15.2.
+  // ---- §16: the endpoint registry -----------------------------------------
+  // Resolves and does not rank. Every refusal below is the line in §16.2.
   if (parts[0] === "registry") {
     if (method === "POST" && parts[1] === "attest") {
       // Out of specification: attesting a merchant key is identity-root plumbing.
@@ -277,7 +277,7 @@ async function route(
       );
     }
     if (method === "GET" && parts.length === 1) {
-      // §15.2. The only parameters are a protocol and, by name, the mark.
+      // §16.2. The only parameters are a protocol and, by name, the mark.
       // Anything a person would type when they want something is not one.
       for (const key of url.searchParams.keys()) {
         if (key !== "protocol" && key !== "mark") {

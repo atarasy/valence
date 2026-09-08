@@ -65,7 +65,7 @@ drafted ──present──▶ presented ──decide───▶ decided ──
 | `present` | physical: shipped. digital: rendered in the approval surface. Sets `presented_at`. |
 | `decide` | one or more candidates receive a valence. An offer MAY be decided partially and decided again before expiry. |
 | `expire` | `expires_at` passed. See §2.2. |
-| `withdraw` | the presenter revokes. Any undecided candidate becomes `returned`. No charge. |
+| `withdraw` | the presenter revokes, from `drafted` or `presented` and no later. Any undecided candidate becomes `returned`. No charge. A decided offer carries the household's signature over what it decided (§10.5), and a presenter that could withdraw under it could void that signature, so an implementation MUST refuse with `409`. |
 | `settle` | the offer is priced and closed. See §6. |
 | `settle_default` | expiry path for offers that carry a default (§2.2). |
 
@@ -113,7 +113,7 @@ candidate
 |---|---|---|
 | `kept` | taken up | charged at `unit_price` |
 | `returned` | declined, or undecided at expiry | not charged |
-| `consumed` | physical only. Used while trying. | charged at cost, not price (§6.2) |
+| `consumed` | physical only. Used while trying. Recorded by the collection (§11.2), never decided by a household. | charged at cost, not price (§6.2) |
 | `defaulted` | ceremonial only. Shipped because nothing was chosen. | charged at `unit_price` |
 | `lost` | physical only. Not recovered by the recovery deadline. | not charged to the household |
 
@@ -137,7 +137,7 @@ note
   shared_with  [] | subset of { recipient, merchant }. Whom the writer chose to show the line to (clause 31)
 ```
 
-`GET /candidates/{id}/note?as=recipient|merchant` returns the lines the writer shared with that party, as text and date, and `404` when there are none. There is no rating, no score, no route that aggregates notes across candidates or households, and no party other than the writer, the recipient and the merchant that a line can be shared with. A note written before giving becomes the message that accompanies the gift; a note shared with the merchant is the one line of feedback a maker receives, and it arrives as a line.
+`GET /candidates/{id}/note?as=recipient|merchant` returns the lines the writer shared with that party, as text and date, and `404` when there are none. A writer has one line per candidate: a second note by the same author on the same candidate is refused with `409`, because a list of lines is a count and a count is an aggregate. There is no rating, no score, no route that aggregates notes across candidates or households, and no party other than the writer, the recipient and the merchant that a line can be shared with. A note written before giving becomes the message that accompanies the gift; a note shared with the merchant is the one line of feedback a maker receives, and it arrives as a line.
 
 ----
 
@@ -149,7 +149,7 @@ note
 floor(n) = min(max(1, ceil(n * rate)), novel)
 ```
 
-where `novel` is the number of products in the presenter's catalogue that this household has never been offered by this presenter (§5.1). A presenter that has offered a household everything it has carries no exploration to that household until its catalogue grows; the floor asks for what exists and no more. Added 2026-09-09, when the conformance suite found that under §5.1 a five-product catalogue could make a second offer to the same household impossible.
+where `novel` is the number of products **across every catalogue version this presenter has registered** that this household has never been offered by this presenter (§5.1). Counting over the version an offer names would let a presenter register a narrower catalogue per offer and owe no exploration, which an adversarial pass measured on 2026-09-09. A presenter that has offered a household everything it has carries no exploration to that household until its catalogue grows; the floor asks for what exists and no more. Added 2026-09-09, when the conformance suite found that under §5.1 a five-product catalogue could make a second offer to the same household impossible.
 
 `rate` is a deployment parameter. It MUST be greater than zero. A conforming implementation MUST NOT expose a configuration that sets it to zero or that bypasses the check.
 
@@ -157,7 +157,7 @@ where `novel` is the number of products in the presenter's catalogue that this h
 
 A candidate MAY be marked `is_exploration` only when this presenter has never offered the product to this household and the household has not been given it: no prior presentation, whatever its verdict, and no lineage edge to the household for the product. A product the household bought, was given, or declined is not exploration.
 
-A candidate that fails this **MUST NOT** be counted toward the floor, and `POST /offers` **MUST** reject an offer that marks one.
+A candidate that fails this **MUST NOT** be counted toward the floor, and `POST /offers` **MUST** reject an offer that marks one. A product appears at most once in an offer: a line carries a quantity, and the same product on two lines is one novelty counted twice toward the floor. An implementation MUST refuse a duplicate with `400`.
 
 The floor counts novelty and nothing else. Which never-offered products a presenter puts in the floor is its own best guess, and the specification does not judge the guess: a prediction is the presenter's own number, and a rule that asked for a low one would fill the floor with what the presenter expects to fail, which is waste, not exploration. A presenter that wants the floor to be worth carrying fills it with the never-offered products it thinks most likely to be kept. Earlier versions of this section admitted a candidate on a low prediction alone; that was withdrawn on 2026-09-09.
 
@@ -374,6 +374,8 @@ So an undecided physical candidate stays undecided at expiry, and only two thing
 
 The grace period after the recovery deadline is a deployment parameter with no recommended figure, as the exploration rate is. An implementation MUST NOT make an uncollected physical candidate `returned`, and MUST NOT bill a household for one that became `lost`.
 
+**Neither `consumed` nor `lost` is a verdict a decision may carry.** `POST /offers/{id}/decisions` MUST refuse a decided set naming either, with `422`. Both are facts the collection or the deadline records about goods in a home, and a household that could declare them would pay cost for what it kept, or nothing for what it lost. This was added on 2026-09-09, after an adversarial pass measured a household signing `consumed` and `lost` over its own goods and paying 2000 of 6000.
+
 A candidate MUST NOT appear in both the returned and the consumed list of one collection, and a collection MUST NOT be recorded twice for one offer.
 
 ### 11.1 Eligibility
@@ -390,11 +392,13 @@ The digital binding has no eligibility restriction.
 
 The purpose `ceremonial` covers the return gift: the offer sent to many recipients after a wedding, a birth, or a funeral, where the giver has chosen a price band and each recipient chooses one item.
 
+A ceremonial offer names a `giver` beside its `price_band`, and the giver is the payer: the reserve is held against the giver and the settlement's `payer` names them. The `household` on the offer is the recipient, who chooses. An implementation MUST refuse a ceremonial offer that names no giver, and MUST refuse `giver` or `price_band` on any other purpose. Before 2026-09-09 the engine reserved and committed against the household on the offer, which billed the recipient of a return gift for the gift.
+
 | requirement | clause |
 |---|---|
 | The recipient chooses; the giver does not see the candidates | 27 |
-| The offer carries the band the giver chose, shown to the recipient, and no candidate lies outside it: a candidate outside the band is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 26 |
-| If nothing is chosen before expiry, one candidate is `defaulted` and shipped | 28 |
+| The offer carries the band the giver chose, shown to the recipient on the approval surface as well as the offer, and no candidate lies outside it. The band bounds the **line**, `unit_price × quantity`, not the unit: five units of something inside the band is five times the band. A candidate outside it is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 26 |
+| If nothing is chosen before expiry, one candidate is `defaulted` and shipped. "Nothing chosen" is the whole condition: a recipient who kept one item and left the rest has chosen, and no default ships beside a kept candidate | 28 |
 | Nothing is earned from an unredeemed offer | 28 |
 | Cards, wrapping and denominational wording match local convention exactly | 29 |
 
@@ -416,12 +420,34 @@ An implementation is Valence-conformant when it:
 6. freezes terms at `config_version` (§6.3)
 7. accepts well-formed lineage edges regardless of client (§7.1)
 8. bills no household for `lost` (§3.2)
+9. refuses `consumed` and `lost` as decisions, and refuses to withdraw a decided offer (§2.1, §11.2)
+10. bills the giver of a ceremonial offer, not the recipient, and ships a default only when nothing was chosen (§12)
+11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.1)
+
+Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine.
 
 Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Passing them is what entitles an implementation to the mark.
 
 ----
 
-## 14. Open
+## 14. Moving a node
+
+A household moves its node by exporting it from one host and importing it at another (clauses 47, 61). The export carries the household's offers, settlements, notes, receipts and the lineage edges it is an endpoint of.
+
+### 14.1 What an import verifies
+
+An import is an arrival from outside, not a restore of the host's own backup, so it verifies what it is handed:
+
+- **Every edge is verified as if it had arrived at `POST /lineage`** (§7.1): the giver's key is attested and the signature covers the edge. An import that trusts an edge is a route around clause 25, and an edge is what makes a product no longer novel to a household (§5.1), so an unverified edge is also a way to shrink somebody else's exploration floor.
+- **Every edge touches the household whose path it arrives on**, as `from` or as `to`. Another household's edges are not this node's to carry.
+- **Every offer belongs to that household.** An import scoped only by the path writes other households' offers under it.
+- **A settled offer is never overwritten.** §2.1 makes `settled` terminal, and an import that replaces one has moved an offer out of it.
+
+An implementation MUST refuse the whole import with `422` when any of these fails, and MUST refuse an export whose `format` it does not recognise with `400`. Added on 2026-09-09: the reference engine's import verified none of it, and an adversarial pass planted a forged edge that made a product unofferable to a household that had never seen it.
+
+----
+
+## 15. Open
 
 - Binding an AP2 mandate to direct-debit rails. The specification is written for card authorisation; no equivalent exists for account transfer, and one is needed.
 - Multi-hop lineage attribution, where a product passes through several households before a purchase. The settlement side is out of scope here.
@@ -430,11 +456,11 @@ Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Pas
 
 ----
 
-## 15. The endpoint registry
+## 16. The endpoint registry
 
 Added 2026-09-09. A merchant that speaks Valence has to be findable by a household's agent, and clause 1 forbids the infrastructure from being the place where things are found. Those two hold together only if the registry **resolves and does not rank**.
 
-### 15.1 What it is
+### 16.1 What it is
 
 A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 2 calls shared and neutral, made concrete.
 
@@ -447,7 +473,7 @@ entry
   registered_at
 ```
 
-### 15.2 What it never does
+### 16.2 What it never does
 
 The line between a directory and the intent layer is whether the answer depends on anything but the question. A registry that returns different results to different askers, or in an order that says something, is ranking.
 
@@ -457,18 +483,18 @@ The line between a directory and the intent layer is whether the answer depends 
 - **The mark is not a gate** (clause 64). An entry is listed whether or not it carries the mark. The mark is a fact in the entry, and an agent MAY prefer it, and the registry MUST NOT filter on it unless asked to by the caller.
 - **No product data.** The entry names endpoints. What the merchant sells is behind those endpoints, in the merchant's own feed, and the registry does not copy it.
 
-### 15.3 Why the line is here
+### 16.3 Why the line is here
 
 Discovery in this design is vertical. A household's agent reads merchant feeds through the endpoints the registry resolves, and forms its own view in the household's own node. The index lives with the person. A registry that indexed products would move the index to the centre, and whoever holds the index takes the rent, which is the sentence clause 1 exists to make false.
 
 A registry of endpoints is plumbing. A registry of products, however neutrally it answered, would be the layer that decides what a person sees, and that is the seat this specification returns to the person.
 
-### 15.4 Conformance
+### 16.4 Conformance
 
 An implementation of the registry is conformant when it:
 
 1. lists entries in key order and accepts no sort parameter
-2. carries no field from the list in §15.2 on any entry
+2. carries no field from the list in §16.2 on any entry
 3. refuses a query by product, category, occasion or free text with `404`
 4. returns the same list to every caller for the same query
 5. lists an entry that carries no mark
