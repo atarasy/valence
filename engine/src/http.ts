@@ -1,10 +1,6 @@
 import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./errors.js";
 import type { ValenceEngine } from "./engine.js";
-import {
-  exportNode,
-  type NodeExport,
-  type RecoveryRegister,
-} from "./node.js";
+import { exportNode, type NodeExport, type RecoveryRegister, exportMerchant } from "./node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./approval.js";
 import type { PermissionLedger } from "./permissions.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./registry.js";
@@ -706,6 +702,13 @@ async function route(
   // a live action, and the asking is written into the household's own record.
   // Until 2026-09-09 the ledger was a list no route read, so eleven probes
   // proved properties of something nothing consulted.
+  // Clauses 5 and 43. A shop leaves with its ledgers: every catalogue version,
+  // every offer it made, how each settled, its own recovery rows, and the
+  // lines households chose to share with it. Nothing of another presenter's.
+  if (parts[0] === "presenters" && parts[1] && parts[2] === "export" && method === "GET") {
+    return json(exportMerchant(engine, decodeURIComponent(parts[1])));
+  }
+
   if (parts[0] === "households" && parts[1] && parts[2] === "duplicate-check" && method === "POST") {
     const household = decodeURIComponent(parts[1]);
     const raw = strict(await body(request), ["product", "asked_by", "asked_from"], "duplicate check");

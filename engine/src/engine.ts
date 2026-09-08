@@ -807,6 +807,17 @@ export class ValenceEngine {
     return [...this.offers.values()].filter((o) => o.household === household);
   }
 
+  /** Clauses 5 and 43. Every catalogue version this presenter registered. */
+  configsForPresenter(presenter: string): PresenterConfig[] {
+    return [...this.configs.values()].filter((c) => c.presenter === presenter);
+  }
+
+  /** Clauses 5 and 43. Every offer this presenter made, whatever its state. */
+  offersForPresenter(presenter: string, now = Date.now()): Offer[] {
+    this.sweep(now);
+    return [...this.offers.values()].filter((o) => o.presenter === presenter);
+  }
+
   settlement(offerId: string): Settlement | undefined {
     return this.settlements.get(offerId);
   }

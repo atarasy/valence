@@ -435,7 +435,7 @@ An implementation is Valence-conformant when it:
 8. bills no household for `lost` (§3.2)
 9. refuses `consumed` and `lost` as decisions, refuses to withdraw a decided offer, and never bills a recipient for a candidate that was given (§2.1, §6.2, §11.2)
 10. bills the giver of a ceremonial offer, not the recipient, and ships a default only when nothing was chosen (§12)
-11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.1)
+11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.2), and exports a shop's ledgers in full (§14.1)
 
 Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine.
 
@@ -447,7 +447,25 @@ Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Pas
 
 A household moves its node by exporting it from one host and importing it at another (clauses 43, 52). The export carries the household's offers, settlements, notes, receipts and the lineage edges it is an endpoint of.
 
-### 14.1 What an import verifies
+### 14.1 A shop leaves with its ledgers
+
+Clauses 5 and 43 say a merchant can leave a platform with its data and that a shop's product ledger and customer ledger are the shop's, exportable in full, in a standard format, at any time. `GET /presenters/{id}/export` is that format:
+
+```
+merchant export
+  format         "valence-merchant/1"
+  presenter
+  exported_at
+  configs[]      every catalogue version this presenter registered
+  offers[]       every offer it made, whatever the state
+  settlements[]  how each settled
+  notes[]        only the lines households chose to share with the merchant (clause 27)
+  recoveries[]   the recovery rows of its own physical offers
+```
+
+It carries nothing of another presenter's, and nothing of a household's beyond what this presenter already holds, which is its own vertical view (clause 8). There is no import beside it: where a shop goes with its ledgers is the receiving platform's business, and what this specification owes the shop is that leaving is possible and complete. Added 2026-09-09; until then two clauses promised an export that no route provided.
+
+### 14.2 What an import verifies
 
 An import is an arrival from outside, not a restore of the host's own backup, so it verifies what it is handed:
 

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ValenceEngine } from "./engine.js";
-import type { LineageEdge, Note, Offer, Settlement } from "./types.js";
+import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "./types.js";
 
 /**
  * A household's node, and what leaves with it.
@@ -170,4 +170,58 @@ export function digest(node: NodeExport): string {
     recoveries: node.recoveries,
   };
   return createHash("sha256").update(JSON.stringify(stable)).digest("hex");
+}
+
+/**
+ * Clauses 5 and 43. What a shop leaves with.
+ *
+ * A shop's ledgers are the shop's: every catalogue version it registered,
+ * every offer it made and how each settled, the recovery rows of its own
+ * physical offers, and the lines households chose to share with it. Nothing
+ * of another presenter's, and nothing of a household's beyond what this
+ * presenter already holds, which is its own vertical view (clause 8).
+ *
+ * There is no import beside it. Where a shop goes with its ledgers is the
+ * receiving platform's business; what this specification owes the shop is
+ * that leaving is possible and complete.
+ */
+export const MERCHANT_EXPORT_FORMAT_VERSION = "valence-merchant/1";
+
+export type MerchantExport = {
+  format: string;
+  presenter: string;
+  exported_at: number;
+  configs: PresenterConfig[];
+  offers: Offer[];
+  settlements: Settlement[];
+  /** Only the lines a household shared with the merchant (clause 27). */
+  notes: Note[];
+  recoveries: Recovery[];
+};
+
+export function exportMerchant(
+  engine: ValenceEngine,
+  presenter: string,
+  now = Date.now()
+): MerchantExport {
+  const offers = engine.offersForPresenter(presenter, now);
+  const settlements = offers
+    .map((o) => engine.settlement(o.id))
+    .filter((s): s is Settlement => s !== undefined);
+  const notes = offers.flatMap((o) =>
+    o.candidates.flatMap((c) => engine.notesSharedWith(c.id, "merchant"))
+  );
+  const recoveries = offers
+    .map((o) => engine.recoveries.for(o.id))
+    .filter((r): r is Recovery => r !== undefined);
+  return {
+    format: MERCHANT_EXPORT_FORMAT_VERSION,
+    presenter,
+    exported_at: now,
+    configs: engine.configsForPresenter(presenter),
+    offers,
+    settlements,
+    notes,
+    recoveries,
+  };
 }
