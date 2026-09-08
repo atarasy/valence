@@ -47,6 +47,12 @@ export class Registry {
   private readonly keys = new Map<string, string>();
 
   attest(merchant: string, publicKeyPem: string): void {
+    // A key, once attested, is not replaced by a later caller: whoever could
+    // overwrite it could sign entries as the merchant (§15.1).
+    const existing = this.keys.get(merchant);
+    if (existing !== undefined && existing !== publicKeyPem) {
+      throw conflict("identity_exists", `a key is already attested for ${merchant}`);
+    }
     this.keys.set(merchant, publicKeyPem);
   }
 

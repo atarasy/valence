@@ -110,6 +110,12 @@ export class ValenceEngine {
   }
 
   registerIdentity(key: string, publicKeyPem: string): void {
+    // A key, once attested, is not replaced by a later caller: whoever could
+    // overwrite it could sign as the person (clauses 25, 39).
+    const existing = this.identities.get(key);
+    if (existing !== undefined && existing !== publicKeyPem) {
+      throw conflict("identity_exists", `a key is already registered for ${key}`);
+    }
     this.identities.set(key, publicKeyPem);
   }
 
@@ -123,6 +129,7 @@ export class ValenceEngine {
     expires_at: number;
     mandate: string;
     price_band: PriceBand | null;
+    giver: string | null;
     candidates: {
       product: string;
       quantity: number;
@@ -136,6 +143,15 @@ export class ValenceEngine {
     }
     if (input.candidates.length < 1) {
       throw badRequest("malformed", "an offer needs at least one candidate");
+    }
+    // One line per product. A product listed twice is one novelty counted
+    // twice toward the floor, and a quantity is what a line carries.
+    const products = new Set<string>();
+    for (const c of input.candidates) {
+      if (products.has(c.product)) {
+        throw badRequest("malformed", `product ${c.product} appears twice; use quantity`);
+      }
+      products.add(c.product);
     }
 
     const candidates: Candidate[] = input.candidates.map((c) => {
@@ -192,7 +208,16 @@ export class ValenceEngine {
     // says, and no more than the presenter still has: a presenter that has
     // offered this household everything in its catalogue has no exploration
     // left to carry, and the floor cannot ask for what does not exist.
-    const novelLeft = Object.keys(config.products).filter(
+    // Counted over every catalogue this presenter has ever registered, not
+    // the one this offer names: a narrower version registered for one offer
+    // must not shrink what the presenter still has to show.
+    const everyProduct = new Set<string>();
+    for (const cfg of this.configs.values()) {
+      if (cfg.presenter === config.presenter) {
+        for (const ref of Object.keys(cfg.products)) everyProduct.add(ref);
+      }
+    }
+    const novelLeft = [...everyProduct].filter(
       (ref) => !this.householdHasSeen(input.household, config.presenter, ref)
     ).length;
     const required = Math.min(
@@ -214,16 +239,22 @@ export class ValenceEngine {
       if (!input.price_band) {
         throw badRequest("malformed", "a ceremonial offer carries a price_band");
       }
+      if (!input.giver) {
+        throw badRequest("malformed", "a ceremonial offer names its giver, who pays");
+      }
       for (const c of candidates) {
-        if (c.unit_price < input.price_band.min || c.unit_price > input.price_band.max) {
+        // The band bounds what a recipient's choice costs the giver: the line,
+        // not the unit. Five units inside the band is five times the band.
+        const line = c.unit_price * c.quantity;
+        if (line < input.price_band.min || line > input.price_band.max) {
           throw unprocessable(
             "outside_band",
-            `candidate ${c.product} at ${c.unit_price} lies outside the band ${input.price_band.min} to ${input.price_band.max}`
+            `candidate ${c.product} at ${line} lies outside the band ${input.price_band.min} to ${input.price_band.max}`
           );
         }
       }
-    } else if (input.price_band) {
-      throw badRequest("malformed", "price_band belongs to a ceremonial offer only");
+    } else if (input.price_band || input.giver) {
+      throw badRequest("malformed", "price_band and giver belong to a ceremonial offer only");
     }
 
     const offer: Offer = {
@@ -233,6 +264,7 @@ export class ValenceEngine {
       presenter: config.presenter,
       purpose: input.purpose,
       price_band: input.price_band,
+      giver: input.giver,
       config_version: config.version,
       presented_at: null,
       expires_at: input.expires_at,
@@ -259,7 +291,9 @@ export class ValenceEngine {
     // at: every candidate kept, at the frozen price.
     await this.ledger.reserve({
       requestId: offer.id,
-      household: offer.household,
+      // Clause 28. A ceremonial offer is the giver's to pay; the recipient of
+      // a return gift is never the party charged.
+      household: offer.giver ?? offer.household,
       amount: this.upperBound(offer),
       expiresAt: offer.expires_at,
     });
@@ -296,9 +330,18 @@ export class ValenceEngine {
     if (!verifyDecisions(offerId, decisions, signature, mandateKey)) {
       throw unprocessable("bad_signature", "the signature does not cover this decided set");
     }
+    // §10.5: nothing is written on refusal. Every line is checked before any
+    // line is applied, so a set that is refused leaves the offer as it was
+    // and the written set is always the signed set.
+    const plan: { candidate: Candidate; d: (typeof decisions)[number] }[] = [];
+    const seen = new Set<string>();
     for (const d of decisions) {
       const candidate = offer.candidates.find((c) => c.id === d.candidate);
       if (!candidate) throw notFound(`no candidate ${d.candidate} in this offer`);
+      if (seen.has(d.candidate)) {
+        throw badRequest("malformed", `candidate ${d.candidate} decided twice in one set`);
+      }
+      seen.add(d.candidate);
       if (candidate.valence !== "offered") {
         throw conflict(
           "already_decided",
@@ -318,13 +361,18 @@ export class ValenceEngine {
             throw notFound(`no lineage edge ${d.lineage}`);
           }
         }
-        candidate.kept_as = d.kept_as;
-        candidate.lineage = d.lineage ?? null;
       } else if (d.kept_as || d.lineage) {
         throw badRequest(
           "malformed",
           "kept_as and lineage are only present when kept"
         );
+      }
+      plan.push({ candidate, d });
+    }
+    for (const { candidate, d } of plan) {
+      if (d.valence === "kept") {
+        candidate.kept_as = d.kept_as!;
+        candidate.lineage = d.lineage ?? null;
       }
       candidate.valence = d.valence;
       candidate.decided_at = now;
@@ -350,7 +398,9 @@ export class ValenceEngine {
 
   async withdraw(offerId: string, now = Date.now()): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
-    if (offer.state === "settled" || offer.state === "withdrawn") {
+    // §2.1: withdraw leaves from drafted or presented. A signed decision is
+    // the person's, and the presenter cannot void it by withdrawing under it.
+    if (offer.state !== "drafted" && offer.state !== "presented") {
       throw conflict("bad_state", `cannot withdraw an offer in ${offer.state}`);
     }
     for (const c of offer.candidates) {
@@ -420,6 +470,7 @@ export class ValenceEngine {
       lost_amount: lost,
       charged,
       lines,
+      payer: offer.giver ?? offer.household,
       // Clause 11. The presenter is not the seller; it signs for the
       // merchants named on the lines, as their disclosed agent.
       signed_by: offer.presenter,
@@ -457,7 +508,10 @@ export class ValenceEngine {
       return;
     }
     const undecided = offer.candidates.filter((c) => c.valence === "offered");
-    if (offer.purpose === "ceremonial" && undecided.length > 0) {
+    // Clause 28: a default ships if nothing was chosen. A recipient who kept
+    // one item and left the rest has chosen; nothing else ships.
+    const nothingKept = offer.candidates.every((c) => c.valence !== "kept");
+    if (offer.purpose === "ceremonial" && undecided.length > 0 && nothingKept) {
       const first = undecided[0]!;
       first.valence = "defaulted";
       first.decided_at = now;
@@ -519,6 +573,11 @@ export class ValenceEngine {
       created_at: input.now ?? Date.now(),
     };
     const list = this.notes.get(input.candidate) ?? [];
+    // Clause 31: one line, written by oneself. A second line from the same
+    // author is refused rather than appended; a count is an aggregate.
+    if (list.some((n) => n.author === input.author)) {
+      throw conflict("note_exists", "one line per author on a candidate");
+    }
     list.push(note);
     this.notes.set(input.candidate, list);
     return note;
@@ -663,7 +722,14 @@ export class ValenceEngine {
   }
 
   /** Restores an exported node into an empty engine. Clause 61. */
-  importOffer(offer: Offer): void {
+  importOffer(offer: Offer, household: string): void {
+    if (offer.household !== household) {
+      throw unprocessable("wrong_household", `offer ${offer.id} belongs to ${offer.household}`);
+    }
+    const existing = this.offers.get(offer.id);
+    if (existing && existing.state === "settled") {
+      throw conflict("bad_state", `offer ${offer.id} is settled here and does not move`);
+    }
     this.offers.set(offer.id, offer);
     for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);
   }
@@ -678,7 +744,17 @@ export class ValenceEngine {
     this.notes.set(note.candidate, list);
   }
 
-  importEdge(edge: LineageEdge): void {
+  importEdge(edge: LineageEdge, household: string): void {
+    // Clause 25 holds on a move as it does on arrival: an edge is recognised
+    // by the giver's attested key, and an edge that touches neither end of
+    // the moving household is not this node's to carry.
+    if (edge.from !== household && edge.to !== household) {
+      throw unprocessable("wrong_household", `edge ${edge.id} does not touch ${household}`);
+    }
+    const publicKey = this.identities.get(edge.from);
+    if (!publicKey || !verifyEdge(edge, publicKey)) {
+      throw unprocessable("bad_signature", `edge ${edge.id} does not verify`);
+    }
     this.edges.set(edge.id, edge);
   }
 
@@ -760,12 +836,14 @@ export class ValenceEngine {
       );
     }
     if (valence === "consumed" || valence === "lost") {
-      if (offer.binding !== "physical") {
-        throw unprocessable(
-          "binding_mismatch",
-          `${valence} exists only in the physical binding`
-        );
-      }
+      // §11. What was used is what the collection found; what was never
+      // collected is what the deadline decides. Neither is a verdict a
+      // household gives itself, since either would let it pay cost, or
+      // nothing, for what it kept.
+      throw unprocessable(
+        "not_decidable",
+        `${valence} is recorded by the collection or the deadline, not decided`
+      );
     }
   }
 }

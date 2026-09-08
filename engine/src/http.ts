@@ -76,6 +76,7 @@ function offerView(o: Offer) {
     presenter: o.presenter,
     purpose: o.purpose,
     price_band: o.price_band,
+    giver: o.giver,
     config_version: o.config_version,
     presented_at: o.presented_at,
     expires_at: o.expires_at,
@@ -313,6 +314,7 @@ async function route(
           "expires_at",
           "mandate",
           "price_band",
+          "giver",
           "candidates",
         ],
         "offer"
@@ -353,8 +355,13 @@ async function route(
           throw badRequest("malformed", "price_band: max is below min");
         }
       }
+      const giverRaw = raw.giver;
+      if (giverRaw !== undefined && giverRaw !== null && typeof giverRaw !== "string") {
+        throw badRequest("malformed", "giver must be a string");
+      }
       const offer = engine.createOffer({
         price_band: priceBand,
+        giver: (giverRaw as string | undefined) ?? null,
         binding: requireEnum(raw, "binding", "offer", BINDINGS),
         household: requireString(raw, "household", "offer"),
         purpose: requireEnum(raw, "purpose", "offer", PURPOSES),
@@ -721,10 +728,11 @@ async function route(
       if (!body_ || body_.format !== "valence-node/1") {
         throw badRequest("malformed", "unknown export format");
       }
-      for (const offer of body_.offers ?? []) engine.importOffer(offer);
+      const moving = decodeURIComponent(parts[1]);
+      for (const offer of body_.offers ?? []) engine.importOffer(offer, moving);
       for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
       for (const n of body_.notes ?? []) engine.importNote(n);
-      for (const e of body_.lineage ?? []) engine.importEdge(e);
+      for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
       engine.importReceipts(parts[1], body_.receipts ?? []);
       return json({ imported: true }, 201);
     }

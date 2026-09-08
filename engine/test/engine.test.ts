@@ -17,6 +17,7 @@ const baseOffer = (candidates: {
   expires_at: Date.now() + HOUR,
   mandate: "mandate-1",
   price_band: null,
+  giver: null,
   candidates: candidates.map((c) => ({
     product: c.product,
     quantity: c.quantity ?? 1,
@@ -183,7 +184,7 @@ describe("silence", () => {
           { product: "nori-a" },
           { product: "miso-a", is_exploration: true, predicted_conversion: 0.05 },
         ],
-        { purpose: "ceremonial", expires_at: now + 1000, price_band: { min: 0, max: 100000 } }
+        { purpose: "ceremonial", expires_at: now + 1000, price_band: { min: 0, max: 100000 }, giver: "giver-1" }
       )
     );
     await engine.present(offer.id, now);
@@ -225,25 +226,27 @@ describe("settlement", () => {
   });
 
   test("lost is reported and not charged", async () => {
+    // §11. Lost is what the deadline decides about goods nobody collected;
+    // no household or presenter declares it. The offer expires, the grace
+    // period passes with no collection, and both candidates are lost.
     const { engine } = makeEngine();
+    const expiresAt = Date.now() + 1000;
     const offer = engine.createOffer(
       baseOffer(
         [
           { product: "tea-a" },
           { product: "tea-b", is_exploration: true, predicted_conversion: 0.05 },
         ],
-        { binding: "physical" }
+        { binding: "physical", expires_at: expiresAt }
       )
     );
     await engine.present(offer.id);
-    decideSigned(engine, offer.id, [
-      { candidate: offer.candidates[0]!.id, valence: "lost" },
-      { candidate: offer.candidates[1]!.id, valence: "consumed" },
-    ]);
-    const settlement = await engine.settle(offer.id);
-    expect(settlement.lost_amount).toBe(1200);
+    const afterGrace = expiresAt + 4 * 86_400_000;
+    const settlement = await engine.settle(offer.id, afterGrace);
+    expect(settlement.lost_amount).toBe(1200 + 900);
     expect(settlement.kept_amount).toBe(0);
-    expect(settlement.consumed_amount).toBe(300);
+    expect(settlement.consumed_amount).toBe(0);
+    expect(settlement.charged).toBe(0);
   });
 
   test("consumed settles at cost, not price", async () => {
@@ -258,17 +261,19 @@ describe("settlement", () => {
       )
     );
     await engine.present(offer.id);
-    decideSigned(engine, offer.id, [
-      { candidate: offer.candidates[0]!.id, valence: "consumed" },
-    ]);
-    decideSigned(engine, offer.id, [
-      { candidate: offer.candidates[1]!.id, valence: "returned" },
-    ]);
+    // §11. Consumed is what the collection found, not a verdict.
+    engine.recoveries.collect({
+      offer: offer.id,
+      returned: [offer.candidates[1]!.id],
+      consumed: [offer.candidates[0]!.id],
+      at: Date.now(),
+    });
+    engine.applyRecoveryTo(offer.id);
     const settlement = await engine.settle(offer.id);
     expect(settlement.consumed_amount).toBe(600);
   });
 
-  test("consumed and lost do not exist in the digital binding", async () => {
+  test("consumed and lost are never a household's decision", async () => {
     const { engine } = makeEngine();
     const offer = engine.createOffer(
       baseOffer([
@@ -281,7 +286,7 @@ describe("settlement", () => {
       decideSigned(engine, offer.id, [
         { candidate: offer.candidates[0]!.id, valence: "consumed" },
       ])
-    ).toThrow(/physical binding/);
+    ).toThrow(/collection/);
   });
 
   test("settled is terminal", async () => {

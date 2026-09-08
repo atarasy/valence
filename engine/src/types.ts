@@ -121,6 +121,12 @@ export type Offer = {
   purpose: Purpose;
   /** Clause 26. Present on a ceremonial offer, null otherwise. Shown to the recipient. */
   price_band: PriceBand | null;
+  /**
+   * Clause 28, §12. Who pays a ceremonial offer: the giver, who chose the
+   * band. The recipient of a return gift is never the party charged. Present
+   * on a ceremonial offer, null otherwise.
+   */
+  giver: string | null;
   config_version: string;
   presented_at: number | null;
   expires_at: number;
@@ -166,6 +172,8 @@ export type Settlement = {
    * merchants' disclosed agent, which is what `signed_as` records.
    */
   lines: SettlementLine[];
+  /** Clause 28, §12. Who is billed: the giver of a ceremonial offer, the household otherwise. */
+  payer: string;
   signed_by: string;
   signed_as: "agent";
   receipt: string;

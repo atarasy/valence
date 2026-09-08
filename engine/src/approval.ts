@@ -15,6 +15,9 @@ import type { Offer } from "./types.js";
  * it. One such field and the merchant draws the screen after all.
  */
 export type ApprovalCandidate = {
+  /** Clauses 11, 12. The screen the person signs from names the maker and the carrier. */
+  merchant: string;
+  ships: string;
   id: string;
   product: string;
   quantity: number;
@@ -44,6 +47,8 @@ export const EXCLUSION_RULES = [
 export type ExclusionRule = (typeof EXCLUSION_RULES)[number];
 
 export type Approval = {
+  /** Clause 26. The giver's band on a ceremonial offer, null otherwise. */
+  price_band: { min: number; max: number } | null;
   offer: string;
   presenter: string;
   expires_at: number;
@@ -111,6 +116,8 @@ export class ApprovalDesk {
         product: c.product,
         quantity: c.quantity,
         unit_price: c.unit_price,
+        merchant: c.merchant,
+        ships: c.ships,
         is_exploration: c.is_exploration,
         alternatives: entry.alternatives,
         argument_against: entry.argument_against,
@@ -122,6 +129,9 @@ export class ApprovalDesk {
       expires_at: offer.expires_at,
       reminded: offer.reminders_sent > 0,
       mandate: deliberation.mandate,
+      // Clause 26. The band the giver chose is never hidden from the recipient,
+      // and the recipient decides on this screen.
+      price_band: offer.price_band,
       candidates,
       excluded: deliberation.excluded,
     };

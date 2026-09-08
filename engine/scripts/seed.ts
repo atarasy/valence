@@ -55,6 +55,18 @@ await post("/_presenter/configs", {
 // A second catalogue version, at a different price for the same product.
 // §6.3 says a settlement uses the version stamped on the offer, and that is
 // only checkable against a catalogue that has since moved.
+// §5. A narrower catalogue under the same presenter: what the presenter still
+// has to offer is counted over every catalogue it registered, so an offer
+// under this one cannot escape the floor by naming fewer products.
+await post("/_presenter/configs", {
+  version: "cfg-conformance-narrow",
+  presenter: "reference-merchant",
+  products: {
+    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, cost: 400, physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300, physical: PHYSICAL },
+  },
+});
+
 await post("/_presenter/configs", {
   version: "cfg-conformance-v2",
   presenter: "reference-merchant",
