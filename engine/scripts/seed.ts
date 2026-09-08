@@ -7,6 +7,23 @@
  * variables instead of calling these routes themselves.
  */
 import { generateKeyPairSync, sign } from "node:crypto";
+// The same people and merchants on every host. A second host seeded with
+// fresh keys could not verify an edge that moved to it (import checks the
+// giver's signature), so the first run prints its private keys and the
+// harness hands them to the next run as SEED_KEYS.
+import { createPrivateKey, createPublicKey, type KeyObject } from "node:crypto";
+const seedKeys: Record<string, string> = process.env.SEED_KEYS
+  ? (JSON.parse(Buffer.from(process.env.SEED_KEYS, "base64").toString("utf8")) as Record<string, string>)
+  : {};
+function pairFor(name: string): { publicKey: KeyObject; privateKey: KeyObject } {
+  if (!seedKeys[name]) {
+    const fresh = generateKeyPairSync("ed25519");
+    seedKeys[name] = fresh.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  }
+  const privateKey = createPrivateKey(seedKeys[name]!);
+  return { publicKey: createPublicKey(privateKey), privateKey };
+}
+
 import { canonical } from "../src/lineage.js";
 import { canonicalEntry } from "../src/registry.js";
 
@@ -79,7 +96,7 @@ await post("/_presenter/configs", {
   },
 });
 
-const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+const { publicKey, privateKey } = pairFor("giver");
 const giver = "key-giver-conformance";
 await post("/_presenter/identities", {
   key: giver,
@@ -102,7 +119,7 @@ const edge = {
 // expand into, so a probe that checks the circle does not walk past direct
 // edges passes against an implementation that would. The chain is deployment
 // plumbing, so the seed posts it rather than the suite building it.
-const onward = generateKeyPairSync("ed25519");
+const onward = pairFor("onward");
 await post("/_presenter/identities", {
   key: "key-recipient-conformance",
   public_key: onward.publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -145,7 +162,7 @@ await post("/lineage", {
 // chosen so that key order and registration order disagree: "b-merchant" is
 // registered first and must still come second.
 for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-marked", true]] as const) {
-  const pair = generateKeyPairSync("ed25519");
+  const pair = pairFor(`registry:${merchant}`);
   await post("/registry/attest", {
     merchant,
     public_key: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -164,7 +181,7 @@ for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-mark
 // Clause 39. The key that confirms offers under the conformance mandate. The
 // public half is registered here; the private half goes to the suite on the
 // second output line, base64 of the PEM, so the probes can sign decisions.
-const mandatePair = generateKeyPairSync("ed25519");
+const mandatePair = pairFor("mandate");
 await post("/_presenter/identities", {
   key: "mandate-conformance",
   public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -179,3 +196,4 @@ console.log(
 console.log(
   Buffer.from(mandatePair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), "utf8").toString("base64")
 );
+console.log(Buffer.from(JSON.stringify(seedKeys), "utf8").toString("base64"));

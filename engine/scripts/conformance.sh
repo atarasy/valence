@@ -68,9 +68,11 @@ done
 SEED_OUT="$(BASE="$BASE" bun scripts/seed.ts)"
 EDGE="$(printf '%s\n' "$SEED_OUT" | sed -n 1p)"
 MANDATE_KEY="$(printf '%s\n' "$SEED_OUT" | sed -n 2p)"
+SEED_KEYS="$(printf '%s\n' "$SEED_OUT" | sed -n 3p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
-BASE="$SECOND" bun scripts/seed.ts > /dev/null
+# The same keys on the second host, or nothing that moved there would verify.
+SEED_KEYS="$SEED_KEYS" BASE="$SECOND" bun scripts/seed.ts > /dev/null
 
 cd "$TESTS"
 VALENCE_BASE_URL="$BASE" \
