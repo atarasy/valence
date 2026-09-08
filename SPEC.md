@@ -276,17 +276,26 @@ There is no sponsored-placement field, and a conforming feed schema has no room 
 ## 9. Endpoints
 
 ```
-POST   /offers                      create. Validates the exploration floor. Reserves.
-POST   /offers/{id}/present         ship or render
+POST   /offers                      create. Validates the exploration floor.
+POST   /offers/{id}/present         ship or render. Reserves.
 POST   /offers/{id}/decisions       assign valences to candidates
 POST   /offers/{id}/settle          price, commit, return a signed receipt
 POST   /offers/{id}/withdraw        revoke, release
+POST   /offers/{id}/remind          the one reminder (§10.4, clause 37)
+GET    /offers/{id}                 one offer, with its candidates
 GET    /offers?household={id}       the presenter's vertical view
 POST   /candidates/{id}/note        one line
 POST   /lineage                     accept an edge
 ```
 
 The same operations SHOULD be exposed as MCP tools, so that a merchant's agent and a household's agent call the same surface.
+
+Three of these lines were corrected on 2026-09-08, after the conformance suites were written and found to require a surface this section did not describe.
+
+- **The reserve moves from `POST /offers` to `POST /offers/{id}/present`.** The earlier text put it on creation, which contradicts §6.4's table and orphans a hold every time the exploration floor refuses an offer.
+- **`POST /offers/{id}/remind` and `GET /offers/{id}` are named.** Both were required by the specification's own prose, §10.4 and §2.1, and neither appeared here. An implementation built from this section alone had no route for the one reminder clause 37 permits, and no way to read back the state the state machine describes.
+
+An endpoint a conformance test depends on belongs in this list. Where the two disagree, this list is what an implementer reads.
 
 ### 9.1 Endpoints that must not exist
 
