@@ -72,6 +72,33 @@ await post("/_presenter/configs", {
 // A second catalogue version, at a different price for the same product.
 // §6.3 says a settlement uses the version stamped on the offer, and that is
 // only checkable against a catalogue that has since moved.
+// A second presenter, with its own catalogue and one offer of its own. Without
+// it a merchant export that leaked every offer in the engine would look
+// identical to one that leaked none, because there would be nothing to leak:
+// measured 2026-09-09, when merchant_export_leaks_others failed no probe.
+await post("/_presenter/configs", {
+  version: "cfg-other-merchant",
+  presenter: "other-merchant",
+  products: {
+    "salt-a": { merchant: "maker-b", ships: "carrier-b", price: 500, physical: PHYSICAL },
+    "salt-b": { merchant: "maker-b", ships: "carrier-b", price: 600, physical: PHYSICAL },
+  },
+});
+await post("/offers", {
+  binding: "digital",
+  household: "household-other",
+  purpose: "replenish",
+  config_version: "cfg-other-merchant",
+  expires_at: Date.now() + 3_600_000,
+  mandate: "mandate-conformance",
+  price_band: null,
+  giver: null,
+  candidates: [
+    { product: "salt-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true },
+    { product: "salt-b", quantity: 1, predicted_conversion: 0.5, is_exploration: true },
+  ],
+});
+
 // §5. A narrower catalogue under the same presenter: what the presenter still
 // has to offer is counted over every catalogue it registered, so an offer
 // under this one cannot escape the floor by naming fewer products.
