@@ -37,6 +37,7 @@ export const EXCLUSION_RULES = [
   "auto_renewal",
   "obstructed_cancellation",
   "manufactured_scarcity",
+  "late_price",
   "outside_mandate",
   "declined_before",
 ] as const;

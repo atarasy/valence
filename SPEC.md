@@ -332,6 +332,7 @@ A conforming implementation does not have these routes. Their absence is checkab
    | `auto_renewal` | the candidate carries an auto-renewing subscription (clause 52) |
    | `obstructed_cancellation` | cancelling it is harder than buying it (clause 52) |
    | `manufactured_scarcity` | the offer manufactures urgency or scarcity (clause 52) |
+   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 52; inside the network clause 10 prevents it, outside it does not) |
    | `outside_mandate` | the candidate falls outside the mandate the household gave |
    | `declined_before` | the household returned this product before, and the agent is not offering it again |
 
