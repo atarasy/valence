@@ -631,7 +631,24 @@ export class ValenceEngine {
 
   // ---- reads ---------------------------------------------------------------
 
-  offersForHousehold(household: string, now = Date.now()): Offer[] {
+  /**
+   * A presenter's vertical view of a household: its own offers and nothing
+   * declined to anyone else (clause 8). The union across presenters exists
+   * only in the household's own export.
+   */
+  offersForHousehold(household: string, presenter: string, now = Date.now()): Offer[] {
+    this.sweep(now);
+    return [...this.offers.values()].filter(
+      (o) => o.household === household && o.presenter === presenter
+    );
+  }
+
+  /**
+   * The household's union across presenters. This is the person's own record
+   * and it is read by nothing but the household's export (clause 8): no route
+   * serves it to a presenter.
+   */
+  unionForHousehold(household: string, now = Date.now()): Offer[] {
     this.sweep(now);
     return [...this.offers.values()].filter((o) => o.household === household);
   }

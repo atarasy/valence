@@ -131,7 +131,7 @@ export function exportNode(
   household: string,
   now = Date.now()
 ): NodeExport {
-  const offers = engine.offersForHousehold(household, now);
+  const offers = engine.unionForHousehold(household, now);
   const settlements = offers
     .map((o) => engine.settlement(o.id))
     .filter((s): s is Settlement => s !== undefined);

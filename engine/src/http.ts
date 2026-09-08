@@ -340,13 +340,15 @@ async function route(
 
     if (method === "GET" && parts.length === 1) {
       const household = url.searchParams.get("household");
-      if (!household) {
-        throw badRequest("malformed", "household is required");
+      const presenter = url.searchParams.get("presenter");
+      if (!household || !presenter) {
+        throw badRequest("malformed", "household and presenter are required");
       }
       // §7.5 applies to lineage, and the same discipline is kept here: the
-      // list carries no total and no ranking.
+      // list carries no total and no ranking. Clause 8: it is one presenter's
+      // view, never the household's union.
       return json({
-        offers: engine.offersForHousehold(household).map(offerView),
+        offers: engine.offersForHousehold(household, presenter).map(offerView),
       });
     }
 

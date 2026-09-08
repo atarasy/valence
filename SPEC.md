@@ -289,7 +289,7 @@ POST   /offers/{id}/withdraw        revoke, release
 POST   /offers/{id}/remind          the one reminder (§10.4, clause 37)
 GET    /offers/{id}                 one offer, with its candidates
 GET    /offers/{id}/settlement      the settlement, once there is one
-GET    /offers?household={id}       the presenter's vertical view
+GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
 POST   /candidates/{id}/note        one line
 POST   /lineage                     accept an edge
 ```
