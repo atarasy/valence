@@ -52,11 +52,23 @@ Valence conformance is a requirement of the [Ataraxia](https://github.com/ataras
 - **No negative signal to the giver** (clause 19). Nothing in the gift-facing response surface can express a recipient's inaction.
 - **Absent capabilities** (clauses 32, 33, 34). There is no discount object, no per-person event store, no urgency field. Not disabled — absent.
 
-Conformance tests live in the Ataraxia repository.
+Conformance tests live in the Ataraxia repository. Four of the six suites are written, and they run against any implementation over HTTP.
+
+## The reference engine
+
+[`engine/`](engine/) implements the digital binding. It exists so the conformance suites have a subject, and it is not the hub: a member opens Atarasy, and this is the engine underneath an offer. Everything is held in memory, there is no persistence and no identity root, and it should not be deployed.
+
+**The specification is the normative half.** Where the two disagree, `SPEC.md` wins, and a change to the engine that would make the specification false is a change to the specification that has not been written yet.
+
+Writing it found three holes in this document, each corrected in the same pass:
+
+- The exploration floor could be satisfied by relabelling. §5.1 gave the merchant permission to mark a candidate and forbade nothing, so marking the items most expected to be kept met the count and clause 30 cost nothing to obey.
+- §9 listed eight endpoints and the conformance suites needed two more, so an implementation built from that section alone failed the suite. The same section put the reserve at offer creation, which contradicts §6.4 and orphans a hold every time the floor refuses an offer.
+- §6.4's ceiling has no owner but the implementation. A reserve-and-commit ledger does not supply it: the ones this maps onto treat a commit above the hold as an adjustment and refuse it only when the balance cannot cover the difference, which makes a funded household the case that slips through.
 
 ## Status
 
-Draft, September 2026. The specification is written; no production implementation exists. Expect breaking changes.
+Draft, September 2026. The specification is written and the reference engine passes the four written conformance suites. No production implementation exists. Expect breaking changes.
 
 ## Licence
 
