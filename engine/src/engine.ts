@@ -206,13 +206,13 @@ export class ValenceEngine {
     });
 
     // §5. The floor is checked before anything is written.
-    // §5. The floor asks for as many never-offered candidates as the rate
-    // says, and no more than the presenter still has: a presenter that has
-    // offered this household everything in its catalogue has no exploration
-    // left to carry, and the floor cannot ask for what does not exist.
-    // Counted over every catalogue this presenter has ever registered, not
-    // the one this offer names: a narrower version registered for one offer
-    // must not shrink what the presenter still has to show.
+    // §5. The floor is the rate's, and it does not bend to what the presenter
+    // has left. A presenter that has shown this household everything it has
+    // owes it an offer only once its range grows: selling out is not a state
+    // a conforming implementation reaches, and a cap that let the floor fall
+    // to zero made that sentence false for any small catalogue.
+    // Novelty is counted over every catalogue this presenter has registered,
+    // not the one this offer names, so a narrower version cannot shrink it.
     const everyProduct = new Set<string>();
     for (const cfg of this.configs.values()) {
       if (cfg.presenter === config.presenter) {
@@ -222,10 +222,16 @@ export class ValenceEngine {
     const novelLeft = [...everyProduct].filter(
       (ref) => !this.householdHasSeen(input.household, config.presenter, ref)
     ).length;
-    const required = Math.min(
-      explorationFloor(candidates.length, this.config.explorationRate),
-      novelLeft
+    const required = explorationFloor(
+      candidates.length,
+      this.config.explorationRate
     );
+    if (novelLeft === 0) {
+      throw unprocessable(
+        "nothing_new",
+        "this presenter has offered this household everything it has; the floor cannot be met until its range grows"
+      );
+    }
     const marked = candidates.filter((c) => c.is_exploration).length;
     if (marked < required) {
       throw unprocessable(

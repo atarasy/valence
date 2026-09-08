@@ -1,8 +1,9 @@
 import pathlib
-# §5: the floor asks for what exists. Drop the cap, so a presenter that has
-# offered a household everything can never offer it anything again.
+# §5: a presenter with nothing new for this household makes it no offer.
+# Let it offer anyway, with no exploration, which is the sell-out the cap
+# would have licensed.
 p = pathlib.Path("src/engine.ts"); s = p.read_text()
-old = "    const required = Math.min(\n      explorationFloor(candidates.length, this.config.explorationRate),\n      novelLeft\n    );"
+old = "    if (novelLeft === 0) {"
 assert old in s
-s = s.replace(old, "    const required = explorationFloor(candidates.length, this.config.explorationRate);", 1)
+s = s.replace(old, "    if (false) {", 1)
 p.write_text(s)

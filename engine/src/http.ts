@@ -596,7 +596,13 @@ async function route(
     );
     // Clause 31. The writer says who else sees the line, at the moment of
     // writing it: the recipient, the merchant, both or neither.
-    const sharedRaw = raw.shared_with;
+    // Clause 31. The recipient sees the line unless the writer says not to:
+    // a line written before giving is the message that accompanies the gift,
+    // which is the only reason the field exists, and a default of nobody
+    // would make the writer opt in to the thing they were writing for. The
+    // merchant is the other way round, since a merchant is a party to the
+    // trade and not to the gift.
+    const sharedRaw = raw.shared_with === undefined ? ["recipient"] : raw.shared_with;
     if (!Array.isArray(sharedRaw)) {
       throw badRequest("malformed", "note: shared_with must be an array");
     }

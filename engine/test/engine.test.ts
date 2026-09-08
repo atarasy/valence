@@ -83,18 +83,21 @@ describe("exploration floor", () => {
     expect(offer.state).toBe("drafted");
   });
 
-  test("a presenter that has offered everything owes no exploration", async () => {
+  test("a presenter with nothing new for this household makes it no offer", async () => {
     const { engine } = makeEngine();
     const all = ["tea-a", "tea-b", "coffee-a", "miso-a", "nori-a"];
     const first = engine.createOffer(
       baseOffer(all.map((product, i) => ({ product, is_exploration: i === 0, predicted_conversion: 0.5 })))
     );
     await engine.present(first.id);
-    // Every product has now been offered; nothing qualifies as exploration,
-    // and the floor asks for min(required, 0) = 0 rather than refusing.
+    // Every product has now been offered, so nothing qualifies as
+    // exploration. The floor does not fall to zero: the offer is refused
+    // until the presenter's range grows (§5, clause 30). A cap that let the
+    // floor fall was written and withdrawn on 2026-09-09, because it made
+    // selling out reachable for any small catalogue.
     expect(() =>
       engine.createOffer(baseOffer(all.map((product) => ({ product, is_exploration: false, predicted_conversion: 0.5 }))))
-    ).not.toThrow();
+    ).toThrow(/nothing_new|everything it has/);
   });
 
   test("a product already offered to the household cannot pad the floor", async () => {

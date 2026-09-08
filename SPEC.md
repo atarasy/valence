@@ -138,6 +138,8 @@ note
   shared_with  [] | subset of { recipient, merchant }. Whom the writer chose to show the line to (clause 31)
 ```
 
+`shared_with` defaults to `["recipient"]` when the field is absent: a line written before giving is the message that accompanies the gift, which is the only reason the field exists, and a default of nobody would make a writer opt in to the thing they were writing for. A writer who wants the line kept to themselves sends `[]`. The merchant is the other way round and is never a default, because a merchant is a party to the trade and not to the gift.
+
 `GET /candidates/{id}/note?as=recipient|merchant` returns the lines the writer shared with that party, as text and date, and `404` when there are none. A writer has one line per candidate: a second note by the same author on the same candidate is refused with `409`, because a list of lines is a count and a count is an aggregate. There is no rating, no score, no route that aggregates notes across candidates or households, and no party other than the writer, the recipient and the merchant that a line can be shared with. A note written before giving becomes the message that accompanies the gift; a note shared with the merchant is the one line of feedback a maker receives, and it arrives as a line.
 
 ----
@@ -147,10 +149,12 @@ note
 **`POST /offers` MUST reject an offer whose candidates include fewer than `floor(n)` marked `is_exploration`, where n is the candidate count.** The rejection is `422`.
 
 ```
-floor(n) = min(max(1, ceil(n * rate)), novel)
+floor(n) = max(1, ceil(n * rate))
 ```
 
-where `novel` is the number of products **across every catalogue version this presenter has registered** that this household has never been offered by this presenter (§5.1). Counting over the version an offer names would let a presenter register a narrower catalogue per offer and owe no exploration, which an adversarial pass measured on 2026-09-09. A presenter that has offered a household everything it has carries no exploration to that household until its catalogue grows; the floor asks for what exists and no more. Added 2026-09-09, when the conformance suite found that under §5.1 a five-product catalogue could make a second offer to the same household impossible.
+**A presenter that has nothing new for this household cannot make an offer at all.** When no product across every catalogue version this presenter has registered is novel to the household (§5.1), `POST /offers` MUST refuse with `422 nothing_new`. The floor does not fall to what the presenter has left: a cap of that shape was written on 2026-09-09 and withdrawn the same day, because it made selling out reachable for any small catalogue, which §5.2 and clause 30 say it is not. What it costs is that a presenter with a narrow range cannot offer to a household it has already shown everything to, until its range grows. That is the pressure the clause is for.
+
+Novelty is counted **across every catalogue version this presenter has registered**, not the version an offer names: counting over the named version would let a presenter register a narrower catalogue per offer and owe no exploration, which an adversarial pass measured.
 
 `rate` is a deployment parameter. It MUST be greater than zero. A conforming implementation MUST NOT expose a configuration that sets it to zero or that bypasses the check.
 
