@@ -392,7 +392,7 @@ async function route(
       if (!household || !presenter) {
         throw badRequest("malformed", "household and presenter are required");
       }
-      // §7.5 applies to lineage, and the same discipline is kept here: the
+      // §7.6 applies to lineage, and the same discipline is kept here: the
       // list carries no total and no ranking. Clause 8: it is one presenter's
       // view, never the household's union.
       return json({
@@ -672,7 +672,7 @@ async function route(
     if (method === "GET" && parts[1] === "circle") {
       const viewer = url.searchParams.get("viewer");
       if (!viewer) throw badRequest("malformed", "viewer is required");
-      // §7.5 and clause 21. No count, no network size, no ranking.
+      // §7.6 and clause 21. No count, no network size, no ranking.
       return json({ edges: engine.circleFor(viewer) });
     }
     if (method === "GET" && parts[1] === "acts") {
@@ -697,6 +697,37 @@ async function route(
         201
       );
     }
+  }
+
+  // Clause 20, §4.2 of the hub surfaces. Duplicate avoidance: the one read
+  // path that consults the permission ledger. A giver about to give asks
+  // whether this household already has this product, and gets one bit, only
+  // under a grant this household gave that giver for this use, only against
+  // a live action, and the asking is written into the household's own record.
+  // Until 2026-09-09 the ledger was a list no route read, so eleven probes
+  // proved properties of something nothing consulted.
+  if (parts[0] === "households" && parts[1] && parts[2] === "duplicate-check" && method === "POST") {
+    const household = decodeURIComponent(parts[1]);
+    const raw = strict(await body(request), ["product", "asked_by", "asked_from"], "duplicate check");
+    const asked_by = requireString(raw, "asked_by", "duplicate check");
+    const product = requireString(raw, "product", "duplicate check");
+    const asked_from = requireString(raw, "asked_from", "duplicate check");
+    if (!permissions.allows({ household, grantee: asked_by, field: "duplicate_check" })) {
+      throw unprocessable(
+        "no_grant",
+        "the recipient alone decides whether this query runs, and has granted nothing to this giver"
+      );
+    }
+    const answered = engine.hasBeenGiven(household, product);
+    // The row is written before the answer is returned: a query that could be
+    // asked without appearing in the record is a read of the list nobody sees.
+    permissions.recordQuery({ household, asked_by, product, asked_from, answered });
+    return json({ already_received: answered });
+  }
+
+  // §4.2. Who asked what, in the recipient's own record.
+  if (parts[0] === "households" && parts[1] && parts[2] === "queries" && method === "GET") {
+    return json({ queries: permissions.queriesFor(decodeURIComponent(parts[1])) });
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "permissions") {
@@ -784,7 +815,7 @@ async function route(
     method === "GET" &&
     parts[1]
   ) {
-    // §7.4. The fact of receipt, and nothing else.
+    // §7.5. The fact of receipt, and nothing else.
     return json({ receipts: engine.receiptsFor(parts[1]) });
   }
 

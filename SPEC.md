@@ -266,11 +266,17 @@ This is a constraint on the schema, not on the interface. A conforming API has n
 
 An implementation MAY make reciprocation easy. It MUST NOT notify, remind, or impose a deadline on it (clause 18).
 
-### 7.4 The recipient's record
+### 7.4 Duplicate avoidance
+
+A giver about to give may ask whether this household already has a product, and the answer is one bit. It runs only under a grant the recipient gave that giver for this use (clause 20, §9), only against a live action, and the asking is written into the recipient's own record, readable at `GET /households/{id}/queries`. An implementation MUST refuse the query with `422` when there is no live grant or no live action, and MUST record the row before returning the answer.
+
+There is no route that enumerates what a household has received (clause 20). One bit at a time is still a read of the list, which is why the two bounds above exist and why the reads are visible to the person whose list it is.
+
+### 7.5 The recipient's record
 
 A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 19). No preference, no profile, no score is derived from having received.
 
-### 7.5 Display
+### 7.6 Display
 
 Lineage is displayed as density within the viewer's own circle. Totals, network size and popularity rankings MUST NOT be displayed (clause 21). The merchant is never hidden.
 

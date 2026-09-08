@@ -40,6 +40,20 @@ export type Permission = {
   revoked_at: number | null;
 };
 
+/**
+ * §4.2 of the hub surfaces. Who asked what, kept in the recipient's own
+ * record. A duplicate check is one bit at a time, and one bit at a time is
+ * still a read of the list, so the reads are visible to the person whose
+ * list it is.
+ */
+export type Query = {
+  id: string;
+  asked_by: string;
+  product: string;
+  answered: boolean;
+  at: number;
+};
+
 export type PendingAction = {
   id: string;
   household: string;
@@ -51,6 +65,7 @@ export type PendingAction = {
 export class PermissionLedger {
   private readonly rows = new Map<string, Permission[]>();
   private readonly actions = new Map<string, PendingAction>();
+  private readonly queries = new Map<string, Query[]>();
 
   /**
    * Opens an action that a permission can be asked for. Deployment plumbing:
@@ -160,6 +175,47 @@ export class PermissionLedger {
    * Expiry is evaluated here rather than swept, so that a permission which has
    * lapsed stops working at the moment it lapses rather than at the next sweep.
    */
+  /**
+   * §4.2. A duplicate check runs against a live action, under a grant this
+   * household gave this giver for this use, and it leaves a row in the
+   * household's own record. It answers one bit and enumerates nothing.
+   */
+  recordQuery(input: {
+    household: string;
+    asked_by: string;
+    product: string;
+    asked_from: string;
+    answered: boolean;
+    now?: number;
+  }): Query {
+    const now = input.now ?? Date.now();
+    const action = this.actions.get(input.asked_from);
+    if (!action || action.household !== input.household) {
+      throw unprocessable(
+        "no_live_action",
+        "a duplicate check is asked at the moment of use, and this names no action of this household"
+      );
+    }
+    if (action.expires_at <= now) {
+      throw unprocessable("stale_action", "that action is no longer live");
+    }
+    const row: Query = {
+      id: randomUUID(),
+      asked_by: input.asked_by,
+      product: input.product,
+      answered: input.answered,
+      at: now,
+    };
+    const list = this.queries.get(input.household) ?? [];
+    list.push(row);
+    this.queries.set(input.household, list);
+    return row;
+  }
+
+  queriesFor(household: string): Query[] {
+    return [...(this.queries.get(household) ?? [])];
+  }
+
   allows(input: {
     household: string;
     grantee: string;

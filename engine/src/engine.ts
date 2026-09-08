@@ -56,7 +56,7 @@ export class ValenceEngine {
   private readonly edges = new Map<string, LineageEdge>();
   private readonly identities = new Map<string, string>();
   /**
-   * §7.4 and clause 19. The value stored beside the time is an opaque token,
+   * §7.5 and clause 19. The value stored beside the time is an opaque token,
    * not the edge's identifier.
    *
    * Returning the edge id looked like the fact of receipt and was a purchase
@@ -644,7 +644,7 @@ export class ValenceEngine {
       created_at: input.now ?? Date.now(),
     };
     this.edges.set(edge.id, edge);
-    // §7.4. The recipient's record holds the fact of receipt and nothing else.
+    // §7.5. The recipient's record holds the fact of receipt and nothing else.
     // No preference, no profile, no score is derived from having received.
     const received = this.receipts.get(edge.to) ?? [];
     received.push({ ref: randomUUID(), at: edge.created_at });
@@ -657,7 +657,7 @@ export class ValenceEngine {
    *
    * The giver's own outgoing edges are not returned here and no row carries a
    * reference to the gift it answers, so no field's value or absence reports
-   * that a recipient did not respond. §7.5: no total, no network size, no
+   * that a recipient did not respond. §7.6: no total, no network size, no
    * ranking is computed or returned.
    */
   actsVisibleToGiver(giver: string): LineageEdge[] {
@@ -668,6 +668,18 @@ export class ValenceEngine {
       acts.push(edge);
     }
     return acts.sort((a, b) => a.created_at - b.created_at);
+  }
+
+  /**
+   * §4.2. One bit: has this household been given this product. Nothing here
+   * enumerates, and the caller reaches it only through the route, which
+   * requires a grant and leaves a row in the household's own record.
+   */
+  hasBeenGiven(household: string, product: string): boolean {
+    for (const edge of this.edges.values()) {
+      if (edge.to === household && edge.product === product) return true;
+    }
+    return false;
   }
 
   receiptsFor(household: string): { ref: string; at: number }[] {
