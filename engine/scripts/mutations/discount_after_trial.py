@@ -1,5 +1,8 @@
 import pathlib
 p=pathlib.Path("src/engine.ts"); s=p.read_text()
+assert '  private readonly settlements = new Map<string, Settlement>();' in s
+assert '        unit_price: entry.price,' in s
+assert '      } else if (c.valence === "consumed") {' in s
 s=s.replace("  private readonly settlements = new Map<string, Settlement>();",
             "  private readonly settlements = new Map<string, Settlement>();\n  private readonly tried = new Set<string>();",1)
 s=s.replace("        unit_price: entry.price,",

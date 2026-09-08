@@ -1,5 +1,7 @@
 import pathlib
 p = pathlib.Path("src/engine.ts"); s = p.read_text()
+assert '  private readonly settlements = new Map<string, Settlement>();' in s
+assert '    const charged = kept + consumed;' in s
 # Accrue what was consumed and spend it down on the next settlement.
 s = s.replace("  private readonly settlements = new Map<string, Settlement>();",
               "  private readonly settlements = new Map<string, Settlement>();\n  private readonly balances = new Map<string, number>();", 1)
