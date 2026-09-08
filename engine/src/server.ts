@@ -35,17 +35,30 @@ const ledger = process.env.METER_BASE_URL
     })
   : new InMemoryLedger();
 
+// Clause 46. The registry is what "in the network" means, so it is built
+// before the engine and handed in: a person's ceiling on the rest is theirs,
+// and the engine needs to know which merchants the rest are.
+const registry = new Registry();
+
 const engine = new ValenceEngine(ledger, {
   explorationRate: rate,
   reminderLimit: 1,
   recoveryGraceDays: Number(process.env.VALENCE_RECOVERY_GRACE_DAYS ?? 3),
+  isInNetwork: (merchant) => {
+    try {
+      registry.resolve(merchant);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 });
 
 const hub = {
   recovery: new RecoveryRegister(),
   approvals: new ApprovalDesk(),
   permissions: new PermissionLedger(),
-  registry: new Registry(),
+  registry,
 };
 
 const port = Number(process.env.PORT ?? 8787);

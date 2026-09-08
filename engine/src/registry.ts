@@ -2,7 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "./errors.js";
 
 /**
- * The endpoint registry. §16.
+ * The endpoint registry. §17.
  *
  * A shared, neutral directory that resolves a merchant's key to its endpoints
  * and does nothing else. The line it must not cross is ranking: a registry
@@ -48,7 +48,7 @@ export class Registry {
 
   attest(merchant: string, publicKeyPem: string): void {
     // A key, once attested, is not replaced by a later caller: whoever could
-    // overwrite it could sign entries as the merchant (§16.1).
+    // overwrite it could sign entries as the merchant (§17.1).
     const existing = this.keys.get(merchant);
     if (existing !== undefined && existing !== publicKeyPem) {
       throw conflict("identity_exists", `a key is already attested for ${merchant}`);

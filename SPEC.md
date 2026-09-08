@@ -442,6 +442,7 @@ An implementation is Valence-conformant when it:
 9. refuses `consumed` and `lost` as decisions, refuses to withdraw a decided offer, and never bills a recipient for a candidate that was given (§2.1, §6.2, §11.2)
 10. bills the giver of a ceremonial offer, not the recipient, and ships a default only when nothing was chosen (§12)
 11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.2), and exports a shop's ledgers in full (§14.1)
+12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
 
 Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine.
 
@@ -493,11 +494,41 @@ An implementation MUST refuse the whole import with `422` when any of these fail
 
 ----
 
-## 16. The endpoint registry
+## 16. Mandates
+
+A mandate is the person's standing protections, and clauses 46, 47 and 58 are about what may change in it and who has to sign. Until 2026-09-09 it was a reference an offer carried, so all three were promises.
+
+```
+mandate
+  id
+  household
+  ceiling_out_of_network   what one offer may cost at merchants the registry does not list (clause 46)
+  co_signers[]             keys named while the person had capacity (clause 47)
+  lapses_at                a standing mandate lapses unless renewed (clause 58)
+  version                  1 for a new mandate, then one more each time
+```
+
+### 16.1 Who signs a change
+
+Every version is signed by the household over the canonical form: the fields above, one per line, in the order listed, with `co_signers` sorted and comma-separated, and the version inside the bytes so that an old signature cannot be replayed onto a new record.
+
+A change **loosens** when it raises the ceiling, pushes `lapses_at` further out, or drops a co-signer. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone. An implementation MUST refuse with `422` a version that is unsigned, signed by the wrong key, or missing a co-signer's signature on a loosening, and MUST refuse a version that is not exactly one more than the last.
+
+This is what clause 47 means by "nothing else changes it": not the person alone, not a co-signer alone, and no layer, which holds no key at all.
+
+### 16.2 The ceiling
+
+At presentation, an implementation that holds a mandate for the offer MUST refuse with `422` when what the offer could cost at merchants the registry does not list exceeds `ceiling_out_of_network`, and MUST refuse when the mandate has lapsed. The registry is what "in the network" means (§17); a person's limit on the rest is applied inside their own mandate, which is where clause 55 says an exclusion may live.
+
+An offer whose mandate this implementation does not hold is left alone. A deployment may carry mandates elsewhere, and refusing every offer whose mandate is unknown would be a gate rather than a protection.
+
+----
+
+## 17. The endpoint registry
 
 Added 2026-09-09. A merchant that speaks Valence has to be findable by a household's agent, and clause 1 forbids the infrastructure from being the place where things are found. Those two hold together only if the registry **resolves and does not rank**.
 
-### 16.1 What it is
+### 17.1 What it is
 
 A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 2 calls shared and neutral, made concrete.
 
@@ -510,7 +541,7 @@ entry
   registered_at
 ```
 
-### 16.2 What it never does
+### 17.2 What it never does
 
 The line between a directory and the intent layer is whether the answer depends on anything but the question. A registry that returns different results to different askers, or in an order that says something, is ranking.
 
@@ -520,18 +551,18 @@ The line between a directory and the intent layer is whether the answer depends 
 - **The mark is not a gate** (clause 55). An entry is listed whether or not it carries the mark. The mark is a fact in the entry, and an agent MAY prefer it, and the registry MUST NOT filter on it unless asked to by the caller.
 - **No product data.** The entry names endpoints. What the merchant sells is behind those endpoints, in the merchant's own feed, and the registry does not copy it.
 
-### 16.3 Why the line is here
+### 17.3 Why the line is here
 
 Discovery in this design is vertical. A household's agent reads merchant feeds through the endpoints the registry resolves, and forms its own view in the household's own node. The index lives with the person. A registry that indexed products would move the index to the centre, and whoever holds the index takes the rent, which is the sentence clause 1 exists to make false.
 
 A registry of endpoints is plumbing. A registry of products, however neutrally it answered, would be the layer that decides what a person sees, and that is the seat this specification returns to the person.
 
-### 16.4 Conformance
+### 17.4 Conformance
 
 An implementation of the registry is conformant when it:
 
 1. lists entries in key order and accepts no sort parameter
-2. carries no field from the list in §16.2 on any entry
+2. carries no field from the list in §17.2 on any entry
 3. refuses a query by product, category, occasion or free text with `404`
 4. returns the same list to every caller for the same query
 5. lists an entry that carries no mark

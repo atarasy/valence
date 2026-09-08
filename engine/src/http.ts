@@ -253,8 +253,8 @@ async function route(
     }
   }
 
-  // ---- §16: the endpoint registry -----------------------------------------
-  // Resolves and does not rank. Every refusal below is the line in §16.2.
+  // ---- §17: the endpoint registry -----------------------------------------
+  // Resolves and does not rank. Every refusal below is the line in §17.2.
   if (parts[0] === "registry") {
     if (method === "POST" && parts[1] === "attest") {
       // Out of specification: attesting a merchant key is identity-root plumbing.
@@ -289,7 +289,7 @@ async function route(
       );
     }
     if (method === "GET" && parts.length === 1) {
-      // §16.2. The only parameters are a protocol and, by name, the mark.
+      // §17.2. The only parameters are a protocol and, by name, the mark.
       // Anything a person would type when they want something is not one.
       for (const key of url.searchParams.keys()) {
         if (key !== "protocol" && key !== "mark") {
@@ -709,6 +709,52 @@ async function route(
   // Clauses 5 and 43. A shop leaves with its ledgers: every catalogue version,
   // every offer it made, how each settled, its own recovery rows, and the
   // lines households chose to share with it. Nothing of another presenter's.
+  // Clauses 46, 47 and 58. A person's standing protections. Out of §9 by the
+  // same reasoning as the identity routes: who issues a mandate is the hub's
+  // business and the root's, not this engine's. What is in the specification
+  // is which changes need whose signature, and that is what runs here.
+  if (parts[0] === "_node" && parts[1] === "mandates" && method === "POST") {
+    const raw = strict(
+      await body(request),
+      ["id", "household", "ceiling_out_of_network", "co_signers", "lapses_at", "version", "signatures"],
+      "mandate"
+    );
+    const coRaw = raw.co_signers;
+    if (!Array.isArray(coRaw) || coRaw.some((k) => typeof k !== "string")) {
+      throw badRequest("malformed", "co_signers must be an array of keys");
+    }
+    const sigRaw = raw.signatures;
+    if (typeof sigRaw !== "object" || sigRaw === null || Array.isArray(sigRaw)) {
+      throw badRequest("malformed", "signatures is an object of key to signature");
+    }
+    const signatures: Record<string, string> = {};
+    for (const [k, v] of Object.entries(sigRaw as Record<string, unknown>)) {
+      if (typeof v !== "string") throw badRequest("malformed", `signature for ${k} is not a string`);
+      signatures[k] = v;
+    }
+    return json(
+      engine.mandates.record({
+        mandate: {
+          id: requireString(raw, "id", "mandate"),
+          household: requireString(raw, "household", "mandate"),
+          ceiling_out_of_network: requireInteger(raw, "ceiling_out_of_network", "mandate", 0),
+          co_signers: coRaw as string[],
+          lapses_at: requireInteger(raw, "lapses_at", "mandate", 0),
+          version: requireInteger(raw, "version", "mandate", 1),
+        },
+        signatures,
+        keyOf: (key) => engine.publicKeyFor(key),
+      }),
+      201
+    );
+  }
+
+  if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {
+    const m = engine.mandates.get(decodeURIComponent(parts[2]));
+    if (!m) throw notFound(`no mandate ${parts[2]}`);
+    return json(m);
+  }
+
   if (parts[0] === "presenters" && parts[1] && parts[2] === "export" && method === "GET") {
     return json(exportMerchant(engine, decodeURIComponent(parts[1])));
   }

@@ -3,6 +3,7 @@ import { badRequest, conflict, notFound, unprocessable } from "./errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "./lineage.js";
 import { verifyDecisions } from "./mandate.js";
+import { MandateRegister } from "./mandates.js";
 import {
   applyRecovery,
   ineligibleReason,
@@ -42,6 +43,13 @@ export type EngineConfig = {
    * exploration rate, so it is required rather than defaulted.
    */
   recoveryGraceDays: number;
+  /**
+   * Clause 46. Whether a merchant is one the registry lists, which is what
+   * "in the network" means. A deployment without a registry treats every
+   * merchant as in it, and the ceiling then binds nothing, which is the
+   * honest default rather than a silent one.
+   */
+  isInNetwork?: (merchant: string) => boolean;
 };
 
 export function explorationFloor(candidateCount: number, rate: number): number {
@@ -75,6 +83,7 @@ export class ValenceEngine {
    * argument: an implementation that never places goods never touches it.
    */
   readonly recoveries = new RecoveryLedger();
+  readonly mandates = new MandateRegister();
 
   readonly config: EngineConfig;
 
@@ -305,6 +314,26 @@ export class ValenceEngine {
     }
     // §6.4. The reserve is the upper bound of what this offer can ever settle
     // at: every candidate kept, at the frozen price.
+    // Clauses 46 and 58. The mandate is checked at presentation: it has not
+    // lapsed, and what this offer could cost at merchants the registry does
+    // not list is inside the ceiling the person signed. A mandate with no
+    // record is left alone, because a deployment may carry mandates outside
+    // this engine, and refusing every offer would be a gate rather than a
+    // protection.
+    const mandate = this.mandates.get(offer.mandate);
+    if (mandate) {
+      this.mandates.mustGet(offer.mandate, now);
+      const outside = offer.candidates
+        .filter((c) => !(this.config.isInNetwork ?? (() => true))(c.merchant))
+        .reduce((sum, c) => sum + c.unit_price * c.quantity, 0);
+      if (outside > mandate.ceiling_out_of_network) {
+        throw unprocessable(
+          "over_ceiling",
+          `this offer could cost ${outside} at merchants outside the network, above the ceiling of ${mandate.ceiling_out_of_network}`
+        );
+      }
+    }
+
     await this.ledger.reserve({
       requestId: offer.id,
       // Clause 25. A ceremonial offer is the giver's to pay; the recipient of
@@ -731,6 +760,11 @@ export class ValenceEngine {
       });
     }
     return rows;
+  }
+
+  /** The registered public key for a name, if there is one. */
+  publicKeyFor(key: string): string | undefined {
+    return this.identities.get(key);
   }
 
   /** Whether the identity root has attested this key. Used by a mutation. */
