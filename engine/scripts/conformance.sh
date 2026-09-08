@@ -65,7 +65,9 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-EDGE="$(BASE="$BASE" bun scripts/seed.ts)"
+SEED_OUT="$(BASE="$BASE" bun scripts/seed.ts)"
+EDGE="$(printf '%s\n' "$SEED_OUT" | sed -n 1p)"
+MANDATE_KEY="$(printf '%s\n' "$SEED_OUT" | sed -n 2p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 BASE="$SECOND" bun scripts/seed.ts > /dev/null
@@ -75,6 +77,7 @@ VALENCE_BASE_URL="$BASE" \
 VALENCE_CONFIG_VERSION="cfg-conformance" \
 VALENCE_HOUSEHOLD="household-conformance" \
 VALENCE_MANDATE="mandate-conformance" \
+VALENCE_MANDATE_KEY="$MANDATE_KEY" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
 VALENCE_LINEAGE_EDGE="$EDGE" \

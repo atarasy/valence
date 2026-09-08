@@ -392,7 +392,7 @@ async function route(
         return json(offerView(await engine.present(id)));
       }
       if (method === "POST" && action === "decisions") {
-        const raw = strict(await body(request), ["decisions"], "decisions");
+        const raw = strict(await body(request), ["decisions", "signature"], "decisions");
         const list = raw.decisions;
         if (!Array.isArray(list)) {
           throw badRequest("malformed", "decisions must be an array");
@@ -426,7 +426,7 @@ async function route(
                 : requireString(entry, "lineage", `decision ${i}`),
           };
         });
-        return json(offerView(engine.decide(id, decisions)));
+        return json(offerView(engine.decide(id, decisions, requireString(raw, "signature", "decisions"))));
       }
       if (method === "GET" && action === "approval") {
         // Clause 63. Data, never presentation. The hub draws the screen.

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ValenceEngine, explorationFloor } from "../src/engine.js";
 import { InMemoryLedger } from "../src/ledger.js";
 import { ValenceError } from "../src/errors.js";
-import { CONFIG_VERSION, HOUR, makeEngine, signer } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned } from "./helpers.js";
 
 const baseOffer = (candidates: {
   product: string;
@@ -130,7 +130,7 @@ describe("price", () => {
       presenter: "merchant-1",
       products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900, cost: 400 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300 } },
     });
-    engine.decide(offer.id, [
+    decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);
@@ -222,7 +222,7 @@ describe("settlement", () => {
       )
     );
     await engine.present(offer.id);
-    engine.decide(offer.id, [
+    decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "lost" },
       { candidate: offer.candidates[1]!.id, valence: "consumed" },
     ]);
@@ -244,10 +244,10 @@ describe("settlement", () => {
       )
     );
     await engine.present(offer.id);
-    engine.decide(offer.id, [
+    decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "consumed" },
     ]);
-    engine.decide(offer.id, [
+    decideSigned(engine, offer.id, [
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);
     const settlement = await engine.settle(offer.id);
@@ -264,7 +264,7 @@ describe("settlement", () => {
     );
     await engine.present(offer.id);
     expect(() =>
-      engine.decide(offer.id, [
+      decideSigned(engine, offer.id, [
         { candidate: offer.candidates[0]!.id, valence: "consumed" },
       ])
     ).toThrow(/physical binding/);
@@ -279,7 +279,7 @@ describe("settlement", () => {
       ])
     );
     await engine.present(offer.id);
-    engine.decide(offer.id, [
+    decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);

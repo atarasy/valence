@@ -149,9 +149,21 @@ for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-mark
   });
 }
 
+// Clause 39. The key that confirms offers under the conformance mandate. The
+// public half is registered here; the private half goes to the suite on the
+// second output line, base64 of the PEM, so the probes can sign decisions.
+const mandatePair = generateKeyPairSync("ed25519");
+await post("/_presenter/identities", {
+  key: "mandate-conformance",
+  public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+});
+
 console.log(
   JSON.stringify({
     ...edge,
     signature: sign(null, canonical(edge), privateKey).toString("base64"),
   })
+);
+console.log(
+  Buffer.from(mandatePair.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), "utf8").toString("base64")
 );

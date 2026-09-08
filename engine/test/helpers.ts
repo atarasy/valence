@@ -2,6 +2,15 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { ValenceEngine } from "../src/engine.js";
 import { InMemoryLedger } from "../src/ledger.js";
 import { canonical, type EdgeInput } from "../src/lineage.js";
+import { canonicalDecisions, type DecisionInput } from "../src/mandate.js";
+
+/** Clause 39. The key the unit tests confirm with, registered for "mandate-1". */
+export const MANDATE_PAIR = generateKeyPairSync("ed25519");
+
+export function decideSigned(engine: ValenceEngine, offerId: string, decisions: DecisionInput[]) {
+  const signature = sign(null, canonicalDecisions(offerId, decisions), MANDATE_PAIR.privateKey).toString("base64");
+  return engine.decide(offerId, decisions, signature);
+}
 
 export const CONFIG_VERSION = "cfg-1";
 
@@ -31,6 +40,7 @@ export function makeEngine(overrides: Partial<{
       "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, cost: 380, physical: PHYSICAL },
     },
   });
+  engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
   return { engine, ledger };
 }
 

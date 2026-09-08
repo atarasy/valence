@@ -2,6 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "./errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "./lineage.js";
+import { verifyDecisions } from "./mandate.js";
 import {
   applyRecovery,
   ineligibleReason,
@@ -271,11 +272,23 @@ export class ValenceEngine {
   decide(
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
+    signature: string,
     now = Date.now()
   ): Offer {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "presented") {
       throw conflict("bad_state", `cannot decide an offer in ${offer.state}`);
+    }
+    // Clause 39. A confirmation is the person's signature over the decided
+    // set. The key is the one registered for the offer's mandate; a set with
+    // no key, no signature, or a signature over some other set is refused
+    // before anything is written.
+    const mandateKey = this.identities.get(offer.mandate);
+    if (!mandateKey) {
+      throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
+    }
+    if (!verifyDecisions(offerId, decisions, signature, mandateKey)) {
+      throw unprocessable("bad_signature", "the signature does not cover this decided set");
     }
     for (const d of decisions) {
       const candidate = offer.candidates.find((c) => c.id === d.candidate);

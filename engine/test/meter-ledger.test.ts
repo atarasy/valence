@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { MeterLedger } from "../src/meter-ledger.js";
 import { ValenceEngine } from "../src/engine.js";
-import { CONFIG_VERSION, HOUR } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR } from "./helpers.js";
 
 /**
  * The adapter is tested against a stand-in that reproduces the behaviour
@@ -81,6 +81,7 @@ const makeEngine = (ledger: MeterLedger) => {
     reminderLimit: 1,
     recoveryGraceDays: 3,
   });
+  engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
   engine.registerConfig({
     version: CONFIG_VERSION,
     presenter: "merchant-1",
@@ -138,7 +139,7 @@ describe("MeterLedger", () => {
     const engine = makeEngine(ledger);
     const offer = offerFor(engine);
     await engine.present(offer.id);
-    engine.decide(offer.id, [
+    decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);
