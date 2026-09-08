@@ -286,11 +286,27 @@ A giver about to give may ask whether this household already has a product, and 
 
 There is no route that enumerates what a household has received (clause 20). One bit at a time is still a read of the list, which is why the two bounds above exist and why the reads are visible to the person whose list it is.
 
-### 7.5 The recipient's record
+### 7.5 A grant to a computation
+
+Clause 9 admits one calculation across nodes: a person may grant their data to it, the grant is asked for that use, and the result is a form from which no node can be recovered. Clause 39 names the same thing as the one exception to a person never selling their data.
+
+What runs is not this specification's business, and no computation is defined here. What is defined is the shape a grant must have to be one:
+
+```
+permission
+  kind          party | computation
+  result_form   "aggregate" on a computation, absent on a party grant
+```
+
+A grant with `kind: computation` MUST name `result_form: "aggregate"` and an implementation MUST refuse any other value with `422`, including one that names raw or per-person data. A grant to a party MUST NOT carry a result form at all. Everything else a grant must satisfy applies unchanged: it is asked against a live action, it is scoped, it is time-limited, it is revoked on its own, and it carries no price (clause 39).
+
+The enum has one member on purpose. A person cannot grant raw data to a computation even if they wish to, because a model trained on it cannot un-train a revoked grant (clause 40), and whoever held the raw data would be holding per-person events (clause 29). The limit is on what a grant can express, which is the only place it can be enforced.
+
+### 7.6 The recipient's record
 
 A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 19). No preference, no profile, no score is derived from having received.
 
-### 7.6 Display
+### 7.7 Display
 
 Lineage is displayed as density within the viewer's own circle. Totals, network size and popularity rankings MUST NOT be displayed (clause 21). The merchant is never hidden.
 

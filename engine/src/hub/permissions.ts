@@ -12,8 +12,29 @@ import { badRequest, conflict, notFound, unprocessable } from "../common/errors.
  * Six things are structural here rather than checked, because a rule that can
  * be turned off in configuration is not one of these clauses.
  */
+/**
+ * Clauses 9 and 39. What a grant is for. A grant to a party is a party
+ * reading something; a grant to a computation is this household's data
+ * joining a calculation that runs across nodes, which clause 9 admits and
+ * clause 39 names as the one exception to data never being sold.
+ */
+export type GrantKind = "party" | "computation";
+
+/**
+ * Clause 9. The form a cross-node result comes back in. `aggregate` is the
+ * only one, and the enum exists so that anything else is refused by name
+ * rather than by judgement: a person cannot grant raw data to a computation,
+ * because a model trained on it cannot un-train a revoked grant (clause 40),
+ * and whoever held the raw data would hold per-person events (clause 29).
+ */
+export type ResultForm = "aggregate";
+
 export type Permission = {
   id: string;
+  /** Clause 9. A party, or a computation across nodes. */
+  kind: GrantKind;
+  /** Clause 9. Present on a computation grant, absent on a party grant. */
+  result_form: ResultForm | null;
   /** Who may read. Never the household itself. */
   grantee: string;
   /** What, narrowly. A field set, not a category. */
@@ -93,8 +114,28 @@ export class PermissionLedger {
     purpose: string;
     expires_at: number;
     asked_from: string;
+    kind?: GrantKind;
+    result_form?: string;
     now?: number;
   }): Permission {
+    // Clause 9. A computation across nodes says what comes back, and the only
+    // answer is a form from which no node can be recovered. A grant to a
+    // party says nothing of the kind, because a party reads what the scope
+    // names and returns nothing.
+    const kind: GrantKind = input.kind ?? "party";
+    if (kind === "computation") {
+      if (input.result_form !== "aggregate") {
+        throw unprocessable(
+          "no_result_form",
+          "a computation across nodes returns an aggregate from which no node can be recovered, and nothing else"
+        );
+      }
+    } else if (input.result_form !== undefined) {
+      throw unprocessable(
+        "result_form_on_party",
+        "a result form belongs to a computation across nodes, not to a party reading a field"
+      );
+    }
     const now = input.now ?? Date.now();
 
     if (input.grantee === input.household) {
@@ -132,6 +173,8 @@ export class PermissionLedger {
 
     const permission: Permission = {
       id: randomUUID(),
+      kind,
+      result_form: kind === "computation" ? "aggregate" : null,
       grantee: input.grantee,
       scope: [...input.scope],
       purpose: input.purpose,

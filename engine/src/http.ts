@@ -417,7 +417,7 @@ async function route(
       if (!household || !presenter) {
         throw badRequest("malformed", "household and presenter are required");
       }
-      // §7.6 applies to lineage, and the same discipline is kept here: the
+      // §7.7 applies to lineage, and the same discipline is kept here: the
       // list carries no total and no ranking. Clause 8: it is one presenter's
       // view, never the household's union.
       return json({
@@ -697,7 +697,7 @@ async function route(
     if (method === "GET" && parts[1] === "circle") {
       const viewer = url.searchParams.get("viewer");
       if (!viewer) throw badRequest("malformed", "viewer is required");
-      // §7.6 and clause 21. No count, no network size, no ranking.
+      // §7.7 and clause 21. No count, no network size, no ranking.
       return json({ edges: engine.circleFor(viewer) });
     }
     if (method === "GET" && parts[1] === "acts") {
@@ -817,7 +817,7 @@ async function route(
     if (method === "POST" && parts.length === 3) {
       const raw = strict(
         await body(request),
-        ["grantee", "scope", "purpose", "expires_at", "asked_from"],
+        ["grantee", "scope", "purpose", "expires_at", "asked_from", "kind", "result_form"],
         "permission"
       );
       const scope = raw.scope;
@@ -832,6 +832,8 @@ async function route(
           purpose: requireString(raw, "purpose", "permission"),
           expires_at: requireInteger(raw, "expires_at", "permission", 0),
           asked_from: requireString(raw, "asked_from", "permission"),
+          kind: raw.kind === undefined ? undefined : (requireString(raw, "kind", "permission") as "party" | "computation"),
+          result_form: raw.result_form === undefined ? undefined : requireString(raw, "result_form", "permission"),
         }),
         201
       );
@@ -893,7 +895,7 @@ async function route(
     method === "GET" &&
     parts[1]
   ) {
-    // §7.5. The fact of receipt, and nothing else.
+    // §7.6. The fact of receipt, and nothing else.
     return json({ receipts: engine.receiptsFor(parts[1]) });
   }
 
