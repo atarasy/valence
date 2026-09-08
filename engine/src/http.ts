@@ -45,6 +45,18 @@ const VALENCES = [
 const KINDS = ["gift", "return", "regift", "thanks"] as const;
 const NOTE_PARTIES = ["recipient", "merchant"] as const;
 
+/**
+ * §6.2. A candidate names its giver when it was given; the field is optional
+ * and null by default, since most candidates are goods offered for sale.
+ */
+function optionalGiver(entry: Record<string, unknown>, where: string): string | null {
+  if (entry.given_by === undefined || entry.given_by === null) return null;
+  if (typeof entry.given_by !== "string" || entry.given_by === "") {
+    throw badRequest("malformed", `${where}: given_by names a giver`);
+  }
+  return entry.given_by;
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), {
     status,
@@ -61,6 +73,7 @@ function candidateView(c: Candidate) {
     ships: c.ships,
     predicted_conversion: c.predicted_conversion,
     is_exploration: c.is_exploration,
+    given_by: c.given_by,
     valence: c.valence,
     decided_at: c.decided_at,
     kept_as: c.kept_as,
@@ -150,7 +163,7 @@ async function route(
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["merchant", "ships", "price", "cost", "physical"], `product ${ref}`);
+        const entry = strict(value, ["merchant", "ships", "price", "physical"], `product ${ref}`);
         const physicalRaw = entry.physical;
         let physical;
         if (physicalRaw !== undefined) {
@@ -173,7 +186,6 @@ async function route(
           merchant: requireString(entry, "merchant", `product ${ref}`),
           ships: requireString(entry, "ships", `product ${ref}`),
           price: requireInteger(entry, "price", `product ${ref}`, 0),
-          cost: requireInteger(entry, "cost", `product ${ref}`, 0),
           physical,
         };
       }
@@ -326,7 +338,7 @@ async function route(
       const candidates = rawCandidates.map((c, i) => {
         const entry = strict(
           c,
-          ["product", "quantity", "predicted_conversion", "is_exploration"],
+          ["product", "quantity", "predicted_conversion", "is_exploration", "given_by"],
           `candidate ${i}`
         );
         return {
@@ -342,6 +354,7 @@ async function route(
             "is_exploration",
             `candidate ${i}`
           ),
+          given_by: optionalGiver(entry, `candidate ${i}`),
         };
       });
       let priceBand = null;

@@ -31,7 +31,8 @@ export type KeptAs = "self" | "gift" | "order";
  * (§6.3): changing prices mid-flight does not change what an outstanding offer
  * costs.
  *
- * `cost` is the presenter's own cost basis and is what a `consumed` candidate
+ * A catalogue entry carries no cost of goods: a sample is free and anything
+ * else used is bought at `price` (§6.2, clause 10).
  * settles at (§6.2). It is never returned to a household.
  */
 export type CatalogueEntry = {
@@ -40,7 +41,6 @@ export type CatalogueEntry = {
   /** Clause 12. Who carries it to the household. */
   ships: string;
   price: number;
-  cost: number;
   /** §11.1. Absent for a product that is never placed in a home. */
   physical?: PhysicalEligibility;
 };
@@ -87,7 +87,7 @@ export type Recovery = {
   collected_at: number | null;
   /** Candidates found unopened and taken back. */
   returned: string[];
-  /** Candidates the household used while trying. Charged at cost (§6.2). */
+  /** Candidates the household used while trying, at the merchant's price. Samples settle at zero (§6.2). */
   consumed: string[];
 };
 
@@ -107,6 +107,14 @@ export type Candidate = {
   ships: string;
   predicted_conversion: number | null;
   is_exploration: boolean;
+  /**
+   * Clause 10, §6.2. Who gave this candidate: a maker, a merchant or a
+   * friend, or null when it is goods offered for sale. A gift is never
+   * billed to the person who received it; anything else the collection
+   * records as `consumed` is bought at the merchant's price. There is no
+   * third basis and no cost field.
+   */
+  given_by: string | null;
   valence: Valence;
   decided_at: number | null;
   kept_as: KeptAs | null;

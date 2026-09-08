@@ -97,6 +97,7 @@ candidate
   ships                  who carries it to the household (clause 12). From the catalogue.
   predicted_conversion   0..1, or null. The presenter's own model output.
   is_exploration         boolean. Counts toward the floor (§5).
+  given_by               the key of whoever gave this candidate, or null. A gift is never billed to its recipient (§6.2, clause 10).
   valence                offered | kept | returned | consumed | defaulted | lost
   decided_at             timestamp, null while offered
   kept_as                self | gift | order. Present only when kept.
@@ -113,7 +114,7 @@ candidate
 |---|---|---|
 | `kept` | taken up | charged at `unit_price` |
 | `returned` | declined, or undecided at expiry | not charged |
-| `consumed` | physical only. Used while trying. Recorded by the collection (§11.2), never decided by a household. | charged at cost, not price (§6.2) |
+| `consumed` | physical only. Used while trying. Recorded by the collection (§11.2), never decided by a household. | the merchant's price, unless the candidate was given, and a gift is never billed to its recipient (§6.2) |
 | `defaulted` | ceremonial only. Shipped because nothing was chosen. | charged at `unit_price` |
 | `lost` | physical only. Not recovered by the recovery deadline. | not charged to the household |
 
@@ -180,7 +181,7 @@ settlement
   offer            reference
   settled_at       timestamp
   kept_amount      sum of unit_price * quantity over kept and defaulted
-  consumed_amount  sum of cost over consumed
+  consumed_amount  sum over consumed candidates that were not given, at the merchant's price
   lost_amount      sum over lost, informational, not billed to the household
   charged          what the household is actually billed
   lines[]          one per candidate charged or lost: candidate, product, merchant, ships, valence, amount (clause 11)
@@ -195,15 +196,17 @@ Every line names its merchant of record. A receipt that totals without saying wh
 
 The field is not redundant, and it was added on 2026-09-08 after a conformance probe failed to catch an implementation that billed for `lost`. Without it the settlement reports a breakdown and the ledger takes a number, and nothing in the record connects the two: a household reading a receipt that says nothing was kept has no way to see that it was charged anyway. An implementation whose `charged` disagrees with the sum above is not conformant even when every other amount is right.
 
-### 6.1 Deduction, not credit
+### 6.1 Nothing accrues
 
-Where a trial precedes a purchase — a household tries several things and gives one — the trial is **deducted from the eventual charge**, not credited to a balance.
+Nothing carries from one settlement to the next. There is no balance, and since 2026-09-09 there is nothing to deduct either: a trial is a sample, which is free, or it is goods, which are bought at the merchant's price. An implementation MUST NOT hold a household balance redeemable against future goods, which is a prepaid payment instrument in several jurisdictions and out of reach for most implementers.
 
-An implementation MUST NOT hold a household balance redeemable against future goods. Such a balance is a prepaid payment instrument in several jurisdictions and is out of reach for most implementers. Settle by deduction, or charge cost for what was consumed and nothing else.
+### 6.2 What was used is bought; what was given is a gift
 
-### 6.2 Consumed is charged at cost
+Two bases exist and no third. A candidate the collection records as `consumed` settles at the merchant's price, the same price the household would have paid to keep it: using something is buying it, which is the rule of 先用後利 (use first, settle after). A candidate that carries `given_by` was given, by a maker, by a merchant or by a friend, and **a gift is never billed to the person who received it**: its line settles at zero and names the giver. What the giver owes the merchant is settled between them, in flow C, where the recipient never sees it.
 
-`consumed` exists so that trying is not free and not full price. It is charged at cost, and the cost basis is the presenter's, recorded at `config_version`.
+**No cost of goods is ever quoted to a person, and no field carries one.** An earlier version of this section charged `consumed` at the presenter's cost basis, so that trying was "neither free nor full price". Two things were wrong with it. A cost basis in a household's receipt tells a person what the maker paid and prices the same goods two ways. And the middle term reads as a discount, which is what clause 32 removes everywhere else; goods that are normally sold at a price are not quietly worth less because a household is trying them. A maker that wants a person to try something gives it, at the price it is worth, and the record says who gave it. The catalogue has no `cost` field.
+
+A gift arriving this way is the same event as a gift between people (§7): whether a lineage edge exists for it is the giver's business, since an edge carries the giver's signature and a presenter cannot make one on their behalf.
 
 ### 6.3 Terms are frozen at presentation
 
@@ -271,12 +274,12 @@ Lineage is displayed as density within the viewer's own circle. Totals, network 
 
 ## 8. Feed extension
 
-A Valence-conformant merchant extends its ACP product feed:
+A Valence-conformant merchant extends its ACP product feed. The two gift fields were named `valence.sample_unit` and `valence.trial_eligible` until 2026-09-09: the same goods, described as a sample, are received as a promotion and read as worth less than their price, and described as a gift are received at their price from someone who chose to give them. The field names follow the thing rather than the trade's habit.
 
 | field | meaning |
 |---|---|
-| `valence.sample_unit` | the unit and quantity in which this product can be offered for trial |
-| `valence.trial_eligible` | whether it may appear as a trial candidate |
+| `valence.gift_unit` | the unit and quantity in which this product can be given rather than sold (§6.2) |
+| `valence.gift_eligible` | whether the maker allows it to be given |
 | `valence.gift_meta` | wrapping options, ceremonial eligibility, price band |
 | `valence.lineage_hook` | endpoint accepting lineage edges |
 | `valence.reciprocity` | whether purchase history is returned to the household in standard form |
@@ -420,7 +423,7 @@ An implementation is Valence-conformant when it:
 6. freezes terms at `config_version` (§6.3)
 7. accepts well-formed lineage edges regardless of client (§7.1)
 8. bills no household for `lost` (§3.2)
-9. refuses `consumed` and `lost` as decisions, and refuses to withdraw a decided offer (§2.1, §11.2)
+9. refuses `consumed` and `lost` as decisions, refuses to withdraw a decided offer, and never bills a recipient for a candidate that was given (§2.1, §6.2, §11.2)
 10. bills the giver of a ceremonial offer, not the recipient, and ships a default only when nothing was chosen (§12)
 11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.1)
 

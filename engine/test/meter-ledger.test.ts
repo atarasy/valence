@@ -85,7 +85,7 @@ const makeEngine = (ledger: MeterLedger) => {
   engine.registerConfig({
     version: CONFIG_VERSION,
     presenter: "merchant-1",
-    products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, cost: 400 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300 } },
+    products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
   });
   return engine;
 };
@@ -101,8 +101,8 @@ const offerFor = (engine: ValenceEngine) =>
     price_band: null,
     giver: null,
     candidates: [
-      { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: false },
-      { product: "tea-b", quantity: 1, predicted_conversion: 0.05, is_exploration: true },
+      { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: false, given_by: null },
+      { product: "tea-b", quantity: 1, predicted_conversion: 0.05, is_exploration: true, given_by: null },
     ],
   });
 
@@ -182,8 +182,8 @@ describe("MeterLedger", () => {
       price_band: null,
       giver: null,
       candidates: [
-        { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: false },
-        { product: "tea-b", quantity: 1, predicted_conversion: 0.05, is_exploration: true },
+        { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: false, given_by: null },
+        { product: "tea-b", quantity: 1, predicted_conversion: 0.05, is_exploration: true, given_by: null },
       ],
     });
     await engine.present(offer.id, now);

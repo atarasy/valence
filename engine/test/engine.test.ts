@@ -9,6 +9,7 @@ const baseOffer = (candidates: {
   quantity?: number;
   predicted_conversion?: number | null;
   is_exploration?: boolean;
+  given_by?: string | null;
 }[], overrides: Record<string, unknown> = {}) => ({
   binding: "digital" as const,
   household: "house-1",
@@ -23,6 +24,7 @@ const baseOffer = (candidates: {
     quantity: c.quantity ?? 1,
     predicted_conversion: c.predicted_conversion ?? 0.5,
     is_exploration: c.is_exploration ?? false,
+    given_by: c.given_by ?? null,
   })),
   ...overrides,
 });
@@ -143,7 +145,7 @@ describe("price", () => {
     engine.registerConfig({
       version: "cfg-2",
       presenter: "merchant-1",
-      products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900, cost: 400 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300 } },
+      products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
     });
     decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
@@ -249,12 +251,16 @@ describe("settlement", () => {
     expect(settlement.charged).toBe(0);
   });
 
-  test("consumed settles at cost, not price", async () => {
+  test("a gift is never billed to its recipient and anything else used is bought", async () => {
+    // §6.2, clause 10. Two bases and no third: the cost of goods left the
+    // model on 2026-09-09, when charging a household a cost basis was judged
+    // to price the same goods two ways.
     const { engine } = makeEngine();
     const offer = engine.createOffer(
       baseOffer(
         [
           { product: "coffee-a" },
+          { product: "miso-a", given_by: "maker-a" },
           { product: "tea-b", is_exploration: true, predicted_conversion: 0.05 },
         ],
         { binding: "physical" }
@@ -264,13 +270,17 @@ describe("settlement", () => {
     // §11. Consumed is what the collection found, not a verdict.
     engine.recoveries.collect({
       offer: offer.id,
-      returned: [offer.candidates[1]!.id],
-      consumed: [offer.candidates[0]!.id],
+      returned: [offer.candidates[2]!.id],
+      consumed: [offer.candidates[0]!.id, offer.candidates[1]!.id],
       at: Date.now(),
     });
     engine.applyRecoveryTo(offer.id);
     const settlement = await engine.settle(offer.id);
-    expect(settlement.consumed_amount).toBe(600);
+    // coffee-a at its price, the gift at nothing.
+    expect(settlement.consumed_amount).toBe(1500);
+    expect(settlement.charged).toBe(1500);
+    const giftLine = settlement.lines.find((l) => l.product === "miso-a")!;
+    expect(giftLine.amount).toBe(0);
   });
 
   test("consumed and lost are never a household's decision", async () => {

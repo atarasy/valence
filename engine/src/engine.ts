@@ -135,6 +135,7 @@ export class ValenceEngine {
       quantity: number;
       predicted_conversion: number | null;
       is_exploration: boolean;
+      given_by: string | null;
     }[];
   }): Offer {
     const config = this.configs.get(input.config_version);
@@ -196,6 +197,7 @@ export class ValenceEngine {
         ships: entry.ships,
         predicted_conversion: c.predicted_conversion,
         is_exploration: c.is_exploration,
+        given_by: c.given_by,
         valence: "offered",
         decided_at: null,
         kept_as: null,
@@ -444,10 +446,11 @@ export class ValenceEngine {
         kept += c.unit_price * c.quantity;
         line(c, c.unit_price * c.quantity);
       } else if (c.valence === "consumed") {
-        const entry = config.products[c.product];
-        if (!entry) throw conflict("config_missing", `no cost basis for ${c.product}`);
-        consumed += entry.cost * c.quantity;
-        line(c, entry.cost * c.quantity);
+        // §6.2. A gift is never billed to the person who received it; anything
+        // else used is bought at the merchant's price. No cost basis exists.
+        const amount = c.given_by ? 0 : c.unit_price * c.quantity;
+        consumed += amount;
+        line(c, amount);
       } else if (c.valence === "lost") {
         lost += c.unit_price * c.quantity;
         line(c, c.unit_price * c.quantity);
