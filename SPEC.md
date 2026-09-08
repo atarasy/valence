@@ -178,8 +178,13 @@ settlement
   kept_amount      sum of unit_price * quantity over kept and defaulted
   consumed_amount  sum of cost over consumed
   lost_amount      sum over lost, informational, not billed to the household
+  charged          what the household is actually billed
   receipt          signed by the presenter, delivered to the household
 ```
+
+`charged` **MUST** equal `kept_amount + consumed_amount`, and it is what the ledger commits.
+
+The field is not redundant, and it was added on 2026-09-08 after a conformance probe failed to catch an implementation that billed for `lost`. Without it the settlement reports a breakdown and the ledger takes a number, and nothing in the record connects the two: a household reading a receipt that says nothing was kept has no way to see that it was charged anyway. An implementation whose `charged` disagrees with the sum above is not conformant even when every other amount is right.
 
 ### 6.1 Deduction, not credit
 

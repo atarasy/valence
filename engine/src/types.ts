@@ -93,6 +93,16 @@ export type Settlement = {
   consumed_amount: number;
   /** Informational. Never billed to the household (§3.2). */
   lost_amount: number;
+  /**
+   * What the household is billed, and what the ledger commits. §6 requires it
+   * to equal kept_amount + consumed_amount.
+   *
+   * It exists because a breakdown is not a bill. Without this field the
+   * settlement reports three amounts and the ledger takes a fourth number
+   * nobody can see, and an implementation that quietly added `lost_amount` to
+   * the charge passed every probe: the breakdown it returned was correct.
+   */
+  charged: number;
   receipt: string;
 };
 

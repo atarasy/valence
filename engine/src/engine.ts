@@ -42,7 +42,16 @@ export class ValenceEngine {
   private readonly configs = new Map<string, PresenterConfig>();
   private readonly edges = new Map<string, LineageEdge>();
   private readonly identities = new Map<string, string>();
-  private readonly receipts = new Map<string, { edge: string; at: number }[]>();
+  /**
+   * §7.4 and clause 22. The value stored beside the time is an opaque token,
+   * not the edge's identifier.
+   *
+   * Returning the edge id looked like the fact of receipt and was a purchase
+   * history one hop long: an edge carries a product and a merchant, so the
+   * moment any route resolves the identifier the record stops being the bare
+   * fact. Nothing resolves this token, and no route accepts it.
+   */
+  private readonly receipts = new Map<string, { ref: string; at: number }[]>();
   private readonly candidateIndex = new Map<string, string>();
 
   readonly config: EngineConfig;
@@ -323,6 +332,7 @@ export class ValenceEngine {
       consumed_amount: consumed,
       // §3.2. Reported so the stock holder can see it. Not in `charged`.
       lost_amount: lost,
+      charged,
       receipt: createHash("sha256")
         .update(`${offer.id}:${now}:${kept}:${consumed}:${offer.presenter}`)
         .digest("hex"),
@@ -439,7 +449,7 @@ export class ValenceEngine {
     // §7.4. The recipient's record holds the fact of receipt and nothing else.
     // No preference, no profile, no score is derived from having received.
     const received = this.receipts.get(edge.to) ?? [];
-    received.push({ edge: edge.id, at: edge.created_at });
+    received.push({ ref: randomUUID(), at: edge.created_at });
     this.receipts.set(edge.to, received);
     return edge;
   }
@@ -462,8 +472,41 @@ export class ValenceEngine {
     return acts.sort((a, b) => a.created_at - b.created_at);
   }
 
-  receiptsFor(household: string): { edge: string; at: number }[] {
+  receiptsFor(household: string): { ref: string; at: number }[] {
     return this.receipts.get(household) ?? [];
+  }
+
+  /**
+   * §5 of 04b. The viewer's circle: edges among the people they already know.
+   *
+   * Two rules shape it. It does not expand past direct edges, because a walk
+   * two hops out has begun measuring network size (clause 24). And the
+   * viewer's own outgoing edges carry no date and no product, because those
+   * are what frame a window in which a response was due; without them the most
+   * that can be read is that someone is in the circle and has never acted.
+   */
+  circleFor(viewer: string): {
+    from: string;
+    to: string;
+    merchant: string;
+    kind: LineageKind;
+    at: number | null;
+    product: string | null;
+  }[] {
+    const rows = [];
+    for (const edge of this.edges.values()) {
+      const mine = edge.from === viewer;
+      if (!mine && edge.to !== viewer) continue;
+      rows.push({
+        from: edge.from,
+        to: edge.to,
+        merchant: edge.merchant,
+        kind: edge.kind,
+        at: mine ? null : edge.created_at,
+        product: mine ? null : edge.product,
+      });
+    }
+    return rows;
   }
 
   edge(id: string): LineageEdge | undefined {

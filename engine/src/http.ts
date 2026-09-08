@@ -324,6 +324,12 @@ async function route(
       });
       return json(edge, 201);
     }
+    if (method === "GET" && parts[1] === "circle") {
+      const viewer = url.searchParams.get("viewer");
+      if (!viewer) throw badRequest("malformed", "viewer is required");
+      // §7.5 and clause 24. No count, no network size, no ranking.
+      return json({ edges: engine.circleFor(viewer) });
+    }
     if (method === "GET" && parts[1] === "acts") {
       const giver = url.searchParams.get("giver");
       if (!giver) throw badRequest("malformed", "giver is required");

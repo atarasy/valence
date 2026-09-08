@@ -19,14 +19,19 @@ underneath an offer.
 
 Two things, and no others.
 
-1. Give the conformance suites a subject. Three of the five suites were written
+1. Give the conformance suites a subject. Six of the seven suites were written
    against it, and every probe in them has been shown to fail under a
    deliberate break of this code.
 2. Find out which requirements the specification states but no component
    supplies. One was found on the first pass and is recorded below.
 
-It holds everything in memory, has no persistence, no authentication and no
-identity root. Do not deploy it.
+It holds everything in memory by default, has no authentication and no identity
+root. Do not deploy it.
+
+Setting `METER_BASE_URL` swaps the in-memory ledger for `MeterLedger`, which
+speaks Meter's `authorize`, `commit` and `release` endpoints. That path has been
+exercised against a stand-in reproducing Meter's measured behaviour, and never
+against Meter itself.
 
 ## Running
 
@@ -79,6 +84,18 @@ floor suite passed against an implementation demanding twice the declared
 exploration rate, because every probe asked only whether an offer *below* the
 floor was refused. The suite now asks the deployment for its rate and checks
 the boundary from both sides.
+
+**A breakdown is not a bill.** A settlement reported `kept_amount`,
+`consumed_amount` and `lost_amount`, and the ledger took a fourth number nobody
+could see. An implementation that added the lost amount to the charge passed
+every probe, because everything it reported was true. §6 of the specification
+now names a `charged` amount and requires it to equal the first two.
+
+**A receipt with a resolvable identifier is a purchase history.** The engine
+returned the lineage edge's id as the fact of receipt. An edge carries a product
+and a merchant, so one route away from that identifier is the record clause 22
+says a recipient does not acquire by receiving. The token is opaque now and
+nothing resolves it.
 
 ## Structure
 

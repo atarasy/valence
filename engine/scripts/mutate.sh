@@ -11,6 +11,18 @@ cd "$HERE"
 # nothing said so: the suite went green against the older text. Refuse to run
 # unless src is clean, so the only thing a restore can throw away is the
 # mutation this script applied.
+# An untracked file under src is the same hazard by another route: the
+# restore is `git checkout -- src`, which does not touch what git does not
+# track, so a mutation applied to a new file survives the restore and every
+# run afterwards is measuring the mutated engine. Measured 2026-09-08 on
+# meter-ledger.ts before it was committed.
+if [ -n "$(git ls-files --others --exclude-standard -- src)" ]; then
+  echo "src has untracked files; commit them first." >&2
+  echo "The restore is 'git checkout -- src', which would leave them mutated." >&2
+  git ls-files --others --exclude-standard -- src >&2
+  exit 1
+fi
+
 if ! git diff --quiet -- src || ! git diff --cached --quiet -- src; then
   echo "src has uncommitted changes; commit or stash them first." >&2
   echo "This script restores with 'git checkout -- src' and would discard them." >&2
@@ -21,11 +33,24 @@ fi
 NAME="$1"; shift
 echo "=== mutation: $NAME"
 "$@"
+# Both suites, because they reach different code. The conformance probes talk
+# HTTP and never see the ledger adapters; the engine's own tests do. A harness
+# that ran only the first reported "0 fail" for a mutation that removed the
+# reserve ceiling from the Meter adapter, which is the requirement the adapter
+# exists to satisfy.
+bun test > "/tmp/mutation-${NAME}-unit.log" 2>&1
+UNIT=$?
 ./scripts/conformance.sh > "/tmp/mutation-${NAME}.log" 2>&1
 STATUS=$?
+echo -n "unit: "
+grep -E '^ *[0-9]+ (pass|fail)' "/tmp/mutation-${NAME}-unit.log" | tr '\n' ' '
+echo -n "  conformance: "
 grep -E '^ *[0-9]+ (pass|fail)' "/tmp/mutation-${NAME}.log" | tr '\n' ' '
 echo ""
-grep -E '^\(fail\)' "/tmp/mutation-${NAME}.log" | head -12
+grep -hE '^\(fail\)' "/tmp/mutation-${NAME}-unit.log" "/tmp/mutation-${NAME}.log" | head -12
+if [ "$UNIT" -eq 0 ] && [ "$STATUS" -eq 0 ]; then
+  echo "SURVIVED: no test failed under this mutation"
+fi
 git checkout -- src
 echo "=== restored (suite exit ${STATUS})"
 echo ""
