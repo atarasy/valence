@@ -4,7 +4,11 @@ Guidance for Claude Code working in this repository.
 
 ## What this repository is
 
-The **Valence Protocol**: a specification for offering goods to a person and recording what they declined. `atarasy/valence`, public, MIT. One document, `SPEC.md`, fourteen sections. No implementation yet, no build, no tests here.
+The **Valence Protocol**: a specification for offering goods to a person and recording what they declined, and the reference engine that implements it. `atarasy/valence`, public, MIT.
+
+`SPEC.md` is the specification, fourteen sections, and it is the normative half. `engine/` is a reference implementation of the digital binding, written so the Ataraxia conformance suites have a subject. It is not the hub: a member opens Atarasy, and this is the engine underneath an offer.
+
+**The two halves are not equal.** The specification is what an implementer reads and what the mark is granted against. The engine is one reading of it, and where they disagree the specification wins. A change to `engine/` that would make the specification false is a change to `SPEC.md` that has not been written yet.
 
 **All documents in this repository are in English.**
 
@@ -13,6 +17,7 @@ The **Valence Protocol**: a specification for offering goods to a person and rec
 | `~/Documents/GitHub/ataraxia` | the constitution this specification enforces, and the conformance tests |
 | `~/Documents/GitHub/hacci/Projects/Atarasy/` | the private Japanese strategy documents. `03_Spec_Valence_Engine.md` is the working copy of this specification |
 | `~/Documents/GitHub/meter` | the ledger this specification's §6.4 maps onto. `reserveCredits` → work → `commitReservedUsage` / `releaseCreditReservation` |
+| `engine/` | the reference implementation, in this repository since 2026-09-08. Read `engine/CLAUDE.md` before changing it |
 
 Change flows one way: **decide in the vault → specify here → implement.** A design decision made only in this repository will be lost.
 

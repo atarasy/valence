@@ -1,8 +1,12 @@
 # Valence Engine
 
-A reference implementation of the [Valence Protocol](https://github.com/atarasy/valence),
-written so the [Ataraxia](https://github.com/atarasy/ataraxia) conformance
-suites have something to run against.
+A reference implementation of the Valence Protocol, written so the
+[Ataraxia](https://github.com/atarasy/ataraxia) conformance suites have
+something to run against.
+
+It lives beside the specification it implements, in `../SPEC.md`, because the
+two change together: three corrections to the specification came out of writing
+this, and each was made in the same pass as the code that found it.
 
 **Digital binding only.** No inventory, no recovery, no redistribution, no
 hardware. That is the whole of Stage 0 and it is deliberate: the physical
@@ -27,6 +31,7 @@ identity root. Do not deploy it.
 ## Running
 
 ```
+cd engine
 bun install
 VALENCE_EXPLORATION_RATE=0.2 bun run src/server.ts
 ```
@@ -88,5 +93,5 @@ the boundary from both sides.
 
 ## Licence
 
-MIT. The licence does not grant rights to the Ataraxia, Atarasy or Valence
-names.
+MIT, from the repository root. The licence does not grant rights to the
+Ataraxia, Atarasy or Valence names.

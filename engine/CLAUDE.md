@@ -8,16 +8,25 @@ A reference implementation of the Valence Protocol, digital binding only,
 written so the Ataraxia conformance suites have a subject. Bun and TypeScript,
 no dependencies beyond type definitions, everything in memory.
 
+It sits inside the specification's own repository, under `engine/`. That is
+deliberate and it is the arrangement the constitution's README already
+described: three names, and the engine is part of Valence rather than a fourth
+thing. The cost of the arrangement is that a change here looks like a change to
+the specification, so read the next section before making one.
+
 **All documents and code here are in English.**
 
 | Related | What |
 |---|---|
-| `~/Documents/GitHub/valence` | the specification. Section numbers in comments refer to its `SPEC.md` |
+| `../SPEC.md` | the specification. Section numbers in comments refer to it |
 | `~/Documents/GitHub/ataraxia` | the constitution and the conformance suites this is run against |
 | `~/Documents/GitHub/hacci/Projects/Atarasy/` | the private Japanese strategy documents, where decisions are made |
 
-Change flows one way: **decide in the vault, specify in `valence`, implement
-here.** A design decision made only in this repository will be lost. What
+Change flows one way: **decide in the vault, specify in `../SPEC.md`, implement
+here.** Sharing a repository does not make the two halves equal. A change here
+that would make the specification false is a change to the specification that
+has not been written yet, and a design decision made only in `engine/` will be
+lost. What
 belongs here instead is the opposite direction: a requirement the specification
 states that turns out to have no owner. Record those, and open a correction in
 `valence`.
@@ -66,7 +75,12 @@ a policy rather than a structure.
 
 ## Git
 
-Ordinary git. Nothing here is published yet; the repository is local. Before it
-is pushed anywhere, decide whether the reference implementation belongs under
-the `atarasy` organisation at all, which is the same question the constitution's
-README already answers about itself and answers provisionally.
+Ordinary git, in the specification's repository. Public, so assume anything
+committed is permanent.
+
+This directory was a separate local repository until 2026-09-08 and was merged
+in with its history intact. It went here rather than into a repository of its
+own because the constitution's README and clause table both already said the
+engine is published at `atarasy/valence`; a fourth repository would have made
+that line false and added a fourth name to an argument that turns on there
+being three.
