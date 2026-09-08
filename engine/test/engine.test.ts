@@ -161,7 +161,7 @@ describe("silence", () => {
           { product: "nori-a" },
           { product: "miso-a", is_exploration: true, predicted_conversion: 0.05 },
         ],
-        { purpose: "ceremonial", expires_at: now + 1000 }
+        { purpose: "ceremonial", expires_at: now + 1000, price_band: { min: 0, max: 100000 } }
       )
     );
     await engine.present(offer.id, now);
