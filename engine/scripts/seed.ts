@@ -44,11 +44,11 @@ await post("/_presenter/configs", {
   version: "cfg-conformance",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { price: 1200, cost: 400, physical: PHYSICAL },
-    "tea-b": { price: 900, cost: 300, physical: PHYSICAL },
-    "coffee-a": { price: 1500, cost: 600, physical: PHYSICAL },
-    "miso-a": { price: 700, cost: 250, physical: PHYSICAL },
-    "nori-a": { price: 1100, cost: 380, physical: PHYSICAL },
+    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, cost: 400, physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300, physical: PHYSICAL },
+    "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, cost: 600, physical: PHYSICAL },
+    "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, cost: 250, physical: PHYSICAL },
+    "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, cost: 380, physical: PHYSICAL },
   },
 });
 
@@ -59,11 +59,11 @@ await post("/_presenter/configs", {
   version: "cfg-conformance-v2",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { price: 9900, cost: 400, physical: PHYSICAL },
-    "tea-b": { price: 900, cost: 300, physical: PHYSICAL },
-    "coffee-a": { price: 1500, cost: 600, physical: PHYSICAL },
-    "miso-a": { price: 700, cost: 250, physical: PHYSICAL },
-    "nori-a": { price: 1100, cost: 380, physical: PHYSICAL },
+    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900, cost: 400, physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300, physical: PHYSICAL },
+    "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, cost: 600, physical: PHYSICAL },
+    "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, cost: 250, physical: PHYSICAL },
+    "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, cost: 380, physical: PHYSICAL },
   },
 });
 

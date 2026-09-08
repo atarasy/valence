@@ -119,7 +119,7 @@ describe("price", () => {
     engine.registerConfig({
       version: "cfg-2",
       presenter: "merchant-1",
-      products: { "tea-a": { price: 9900, cost: 400 }, "tea-b": { price: 900, cost: 300 } },
+      products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900, cost: 400 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300 } },
     });
     engine.decide(offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },

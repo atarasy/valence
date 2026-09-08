@@ -26,11 +26,11 @@ export function makeEngine(overrides: Partial<{
     products: {
       // §11.1. Ambient, long-keeping, ten to a container, unregulated: the
       // band the physical binding can carry.
-      "tea-a": { price: 1200, cost: 400, physical: PHYSICAL },
-      "tea-b": { price: 900, cost: 300, physical: PHYSICAL },
-      "coffee-a": { price: 1500, cost: 600, physical: PHYSICAL },
-      "miso-a": { price: 700, cost: 250, physical: PHYSICAL },
-      "nori-a": { price: 1100, cost: 380, physical: PHYSICAL },
+      "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, cost: 400, physical: PHYSICAL },
+      "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300, physical: PHYSICAL },
+      "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, cost: 600, physical: PHYSICAL },
+      "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, cost: 250, physical: PHYSICAL },
+      "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, cost: 380, physical: PHYSICAL },
     },
   });
   return { engine, ledger };

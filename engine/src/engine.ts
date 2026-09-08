@@ -19,6 +19,7 @@ import type {
   Purpose,
   Settlement,
   Valence,
+  SettlementLine,
 } from "./types.js";
 
 export type EngineConfig = {
@@ -180,6 +181,8 @@ export class ValenceEngine {
         quantity: c.quantity,
         // §3.1. Taken from the frozen catalogue, never from the request.
         unit_price: entry.price,
+        merchant: entry.merchant,
+        ships: entry.ships,
         predicted_conversion: c.predicted_conversion,
         is_exploration: c.is_exploration,
         valence: "offered",
@@ -349,15 +352,21 @@ export class ValenceEngine {
         `config ${offer.config_version} is no longer available`
       );
     }
+    const lines: SettlementLine[] = [];
+    const line = (c: Candidate, amount: number) =>
+      lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, ships: c.ships, valence: c.valence, amount });
     for (const c of offer.candidates) {
       if (c.valence === "kept" || c.valence === "defaulted") {
         kept += c.unit_price * c.quantity;
+        line(c, c.unit_price * c.quantity);
       } else if (c.valence === "consumed") {
         const entry = config.products[c.product];
         if (!entry) throw conflict("config_missing", `no cost basis for ${c.product}`);
         consumed += entry.cost * c.quantity;
+        line(c, entry.cost * c.quantity);
       } else if (c.valence === "lost") {
         lost += c.unit_price * c.quantity;
+        line(c, c.unit_price * c.quantity);
       }
     }
 
@@ -376,6 +385,11 @@ export class ValenceEngine {
       // §3.2. Reported so the stock holder can see it. Not in `charged`.
       lost_amount: lost,
       charged,
+      lines,
+      // Clause 11. The presenter is not the seller; it signs for the
+      // merchants named on the lines, as their disclosed agent.
+      signed_by: offer.presenter,
+      signed_as: "agent",
       receipt: createHash("sha256")
         .update(`${offer.id}:${now}:${kept}:${consumed}:${offer.presenter}`)
         .digest("hex"),

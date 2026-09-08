@@ -92,6 +92,8 @@ candidate
   product                reference into the presenter's catalogue
   quantity               integer
   unit_price             the merchant's own price. Immutable within the offer.
+  merchant               who made it: the merchant of record (clauses 11, 12). From the catalogue, never the request.
+  ships                  who carries it to the household (clause 12). From the catalogue.
   predicted_conversion   0..1, or null. The presenter's own model output.
   is_exploration         boolean. Counts toward the floor (§5).
   valence                offered | kept | returned | consumed | defaulted | lost
@@ -102,7 +104,7 @@ candidate
 
 ### 3.1 Price
 
-`unit_price` is the price the merchant charges anyone. An implementation MUST NOT provide a field, a parameter or a configuration by which a presenter, a curator, or the platform raises the price a household pays above the merchant's own price (clause 10). A household never pays more through an offer than it would buying direct.
+`unit_price` is the price the merchant charges anyone, and it travels from the merchant's own feed (§8) into the presenter's catalogue with the merchant's name beside it. An implementation MUST NOT provide a field, a parameter or a configuration by which a presenter, a curator, or the platform raises the price a household pays above the merchant's own price (clause 10). A household never pays more through an offer than it would buying direct.
 
 ### 3.2 Valence
 
@@ -179,8 +181,13 @@ settlement
   consumed_amount  sum of cost over consumed
   lost_amount      sum over lost, informational, not billed to the household
   charged          what the household is actually billed
-  receipt          signed by the presenter, delivered to the household
+  lines[]          one per candidate charged or lost: candidate, product, merchant, ships, valence, amount (clause 11)
+  signed_by        the presenter
+  signed_as        "agent". The presenter is not the seller; it signs for the merchants named on the lines (clause 11)
+  receipt          signed by the presenter as the merchants' disclosed agent, delivered to the household
 ```
+
+Every line names its merchant of record. A receipt that totals without saying who sold each item has hidden the merchant behind the curator, which clause 12 forbids and clause 11 makes a question of who is liable.
 
 `charged` **MUST** equal `kept_amount + consumed_amount`, and it is what the ledger commits.
 

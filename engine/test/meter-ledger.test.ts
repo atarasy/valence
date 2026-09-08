@@ -85,7 +85,7 @@ const makeEngine = (ledger: MeterLedger) => {
   engine.registerConfig({
     version: CONFIG_VERSION,
     presenter: "merchant-1",
-    products: { "tea-a": { price: 1200, cost: 400 }, "tea-b": { price: 900, cost: 300 } },
+    products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, cost: 400 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, cost: 300 } },
   });
   return engine;
 };

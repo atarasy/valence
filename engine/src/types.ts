@@ -32,6 +32,10 @@ export type KeptAs = "self" | "gift" | "order";
  * settles at (§6.2). It is never returned to a household.
  */
 export type CatalogueEntry = {
+  /** Clause 11. Who made it: the merchant of record, on every line it appears in. */
+  merchant: string;
+  /** Clause 12. Who carries it to the household. */
+  ships: string;
   price: number;
   cost: number;
   /** §11.1. Absent for a product that is never placed in a home. */
@@ -95,6 +99,9 @@ export type Candidate = {
    * household pays above the merchant's own price (§3.1).
    */
   unit_price: number;
+  /** Clauses 11 and 12. Copied from the catalogue with the price; never from the request. */
+  merchant: string;
+  ships: string;
   predicted_conversion: number | null;
   is_exploration: boolean;
   valence: Valence;
@@ -145,7 +152,24 @@ export type Settlement = {
    * the charge passed every probe: the breakdown it returned was correct.
    */
   charged: number;
+  /**
+   * Clause 11. One line per candidate that was charged or lost, each naming
+   * its merchant of record. The presenter signs the receipt as the
+   * merchants' disclosed agent, which is what `signed_as` records.
+   */
+  lines: SettlementLine[];
+  signed_by: string;
+  signed_as: "agent";
   receipt: string;
+};
+
+export type SettlementLine = {
+  candidate: string;
+  product: string;
+  merchant: string;
+  ships: string;
+  valence: Valence;
+  amount: number;
 };
 
 export type LineageKind = "gift" | "return" | "regift" | "thanks";

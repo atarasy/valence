@@ -50,6 +50,8 @@ function candidateView(c: Candidate) {
     product: c.product,
     quantity: c.quantity,
     unit_price: c.unit_price,
+    merchant: c.merchant,
+    ships: c.ships,
     predicted_conversion: c.predicted_conversion,
     is_exploration: c.is_exploration,
     valence: c.valence,
@@ -139,7 +141,7 @@ async function route(
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["price", "cost", "physical"], `product ${ref}`);
+        const entry = strict(value, ["merchant", "ships", "price", "cost", "physical"], `product ${ref}`);
         const physicalRaw = entry.physical;
         let physical;
         if (physicalRaw !== undefined) {
@@ -156,6 +158,11 @@ async function route(
           };
         }
         entries[ref] = {
+          // Clauses 11 and 12. A catalogue entry that names no maker and no
+          // carrier is refused: the merchant is never hidden, and hiding
+          // starts at the catalogue.
+          merchant: requireString(entry, "merchant", `product ${ref}`),
+          ships: requireString(entry, "ships", `product ${ref}`),
           price: requireInteger(entry, "price", `product ${ref}`, 0),
           cost: requireInteger(entry, "cost", `product ${ref}`, 0),
           physical,
