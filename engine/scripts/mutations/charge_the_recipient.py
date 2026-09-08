@@ -1,6 +1,6 @@
 import pathlib
 # Clause 25: the giver pays a ceremonial offer. Bill the household on the offer, the recipient.
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 old = "      household: offer.giver ?? offer.household,"
 assert old in s
 s = s.replace(old, "      household: offer.household,", 1)

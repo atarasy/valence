@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from "node:crypto";
-import type { LineageKind } from "./types.js";
+import type { LineageKind } from "../common/types.js";
 
 export type EdgeInput = {
   from: string;

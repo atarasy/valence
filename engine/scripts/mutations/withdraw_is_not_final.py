@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 # Withdrawing leaves the candidates open, and a withdrawn offer can still be
 # decided. Either alone is caught by another rule; together they are the state
 # a presenter would need to reopen an offer it had revoked.

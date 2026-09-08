@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 old = """    if (offer.binding === "physical") {
       this.recoveries.open({"""
 assert old in s, "anchor drifted"

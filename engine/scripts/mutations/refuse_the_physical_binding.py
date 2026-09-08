@@ -1,5 +1,5 @@
 import pathlib
-p=pathlib.Path("src/engine.ts"); s=p.read_text()
+p=pathlib.Path("src/engine/offers.ts"); s=p.read_text()
 s=s.replace("""    if (input.candidates.length < 1) {""",
 """    if (input.binding === "physical") {
       throw badRequest("malformed", "physical offers are not accepted");

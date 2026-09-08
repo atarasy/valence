@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 s = s.replace("""    for (const d of decisions) {
       const candidate = offer.candidates.find((c) => c.id === d.candidate);""",
 """    if (decisions.length !== offer.candidates.length) {

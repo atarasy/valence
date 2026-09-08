@@ -1,11 +1,11 @@
-import { ValenceEngine } from "./engine.js";
-import { InMemoryLedger } from "./ledger.js";
-import { MeterLedger } from "./meter-ledger.js";
+import { ValenceEngine } from "./engine/offers.js";
+import { InMemoryLedger } from "./engine/ledger.js";
+import { MeterLedger } from "./engine/meter-ledger.js";
 import { createApp } from "./http.js";
-import { RecoveryRegister } from "./node.js";
-import { ApprovalDesk } from "./approval.js";
-import { PermissionLedger } from "./permissions.js";
-import { Registry } from "./registry.js";
+import { RecoveryRegister } from "./hub/node.js";
+import { ApprovalDesk } from "./hub/approval.js";
+import { PermissionLedger } from "./hub/permissions.js";
+import { Registry } from "./shared/registry.js";
 
 const rate = Number(process.env.VALENCE_EXPLORATION_RATE);
 if (!(rate > 0)) {

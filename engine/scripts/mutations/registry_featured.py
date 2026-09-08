@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/registry.ts"); s = p.read_text()
+p = pathlib.Path("src/shared/registry.ts"); s = p.read_text()
 old = "  mark: boolean;\n  signature: string;\n  registered_at: number;\n};"
 assert old in s, "anchor drifted"
 s = s.replace(old, "  mark: boolean;\n  featured?: boolean;\n  signature: string;\n  registered_at: number;\n};", 1)

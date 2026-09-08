@@ -24,8 +24,8 @@ function pairFor(name: string): { publicKey: KeyObject; privateKey: KeyObject } 
   return { publicKey: createPublicKey(privateKey), privateKey };
 }
 
-import { canonical } from "../src/lineage.js";
-import { canonicalEntry } from "../src/registry.js";
+import { canonical } from "../src/shared/lineage.js";
+import { canonicalEntry } from "../src/shared/registry.js";
 
 const base = process.env.BASE ?? "http://localhost:8788";
 

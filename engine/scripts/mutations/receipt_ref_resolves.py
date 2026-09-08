@@ -1,5 +1,5 @@
 import pathlib
-e = pathlib.Path("src/engine.ts"); s = e.read_text()
+e = pathlib.Path("src/engine/offers.ts"); s = e.read_text()
 s = s.replace("    received.push({ ref: randomUUID(), at: edge.created_at });",
               "    received.push({ ref: edge.id, at: edge.created_at });", 1)
 e.write_text(s)

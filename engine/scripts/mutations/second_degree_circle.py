@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 s = s.replace("""      const mine = edge.from === viewer;
       if (!mine && edge.to !== viewer) continue;""",
 """      const mine = edge.from === viewer;

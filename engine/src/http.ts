@@ -1,9 +1,9 @@
-import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./errors.js";
-import type { ValenceEngine } from "./engine.js";
-import { exportNode, type NodeExport, type RecoveryRegister, exportMerchant } from "./node.js";
-import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./approval.js";
-import type { PermissionLedger } from "./permissions.js";
-import { PROTOCOLS, type Protocol, type Registry } from "./registry.js";
+import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./common/errors.js";
+import type { ValenceEngine } from "./engine/offers.js";
+import { exportNode, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
+import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
+import type { PermissionLedger } from "./hub/permissions.js";
+import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
   requireBoolean,
@@ -11,7 +11,7 @@ import {
   requireInteger,
   requireString,
   strict,
-} from "./validate.js";
+} from "./common/validate.js";
 import type {
   Candidate,
   CatalogueEntry,
@@ -19,7 +19,7 @@ import type {
   Offer,
   Valence,
   NoteParty,
-} from "./types.js";
+} from "./common/types.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -103,6 +103,27 @@ export type Hub = {
   registry: Registry;
 };
 
+/**
+ * The composition root, and the only place the three sides meet.
+ *
+ * `src/engine/` is the presenter's: offers, decisions, settlement, the
+ * physical binding and the billing ledger. Anyone who presents runs it, and
+ * Vox is one implementation of it as a Shopify app would be another.
+ *
+ * `src/hub/` is the person's: the approval surface, the permission ledger,
+ * mandates, recovery and the node's export. A member opens it, and Atarasy
+ * is one implementation of it.
+ *
+ * `src/shared/` is neither: the endpoint registry, the canonical forms for a
+ * lineage edge and a decided set. Clause 1 says the infrastructure resolves
+ * and does not rank, and it is not the hub's field, which is what an earlier
+ * layout made it look like.
+ *
+ * They run in one process here so the suites can reach both over one port.
+ * The boundary is real all the same: the engine asks the hub for a mandate
+ * and for whether a merchant is in the network, and holds no reference to
+ * anything else of the hub's.
+ */
 export function createApp(engine: ValenceEngine, hub: Hub) {
   return async function handle(request: Request): Promise<Response> {
     try {

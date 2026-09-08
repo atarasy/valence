@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/approval.ts"); s = p.read_text()
+p = pathlib.Path("src/hub/approval.ts"); s = p.read_text()
 old = """    const deliberation = this.deliberations.get(offer.id);
     if (!deliberation) {
       return { missing: "no deliberation recorded for this offer (clause 59)" };

@@ -5,7 +5,7 @@ s = s.replace('          "candidates",\n        ],\n        "offer"',
 s = s.replace("        candidates,\n      });",
               "        candidates,\n        floorMet: raw.exploration_floor_met === true,\n      });", 1)
 h.write_text(s)
-e = pathlib.Path("src/engine.ts"); t = e.read_text()
+e = pathlib.Path("src/engine/offers.ts"); t = e.read_text()
 t = t.replace("      is_exploration: boolean;\n    }[];",
               "      is_exploration: boolean;\n    }[];\n    floorMet?: boolean;", 1)
 t = t.replace("    if (marked < required) {", "    if (!input.floorMet && marked < required) {", 1)

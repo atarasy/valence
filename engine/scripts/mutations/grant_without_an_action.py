@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/permissions.ts"); s = p.read_text()
+p = pathlib.Path("src/hub/permissions.ts"); s = p.read_text()
 old = """    const action = this.actions.get(input.asked_from);
     if (!action) {"""
 assert old in s, "anchor drifted"

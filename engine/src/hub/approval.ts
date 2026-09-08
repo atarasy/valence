@@ -1,5 +1,5 @@
-import type { ValenceEngine } from "./engine.js";
-import type { Offer } from "./types.js";
+import type { ValenceEngine } from "../engine/offers.js";
+import type { Offer } from "../common/types.js";
 
 /**
  * The approval surface.

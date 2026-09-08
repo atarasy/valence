@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { MeterLedger } from "../src/meter-ledger.js";
-import { ValenceEngine } from "../src/engine.js";
+import { MeterLedger } from "../src/engine/meter-ledger.js";
+import { ValenceEngine } from "../src/engine/offers.js";
 import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR } from "./helpers.js";
 
 /**

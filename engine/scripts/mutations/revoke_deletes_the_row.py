@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/permissions.ts"); s = p.read_text()
+p = pathlib.Path("src/hub/permissions.ts"); s = p.read_text()
 old = "    permission.revoked_at = now;\n    return permission;"
 assert old in s, "anchor drifted"
 s = s.replace(old, """    permission.revoked_at = now;

@@ -1,4 +1,4 @@
-import { conflict, unprocessable } from "./errors.js";
+import { conflict, unprocessable } from "../common/errors.js";
 
 /**
  * The authorising ledger, as §6.4 assumes it: reserve at presentation, commit

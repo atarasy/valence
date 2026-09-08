@@ -85,7 +85,7 @@ against Meter on 2026-09-08: a commit above the hold is charged as a
 cover the difference. **A funded household is exactly the case that slips
 through.** The claim covers funded accounts and no others; an earlier draft
 extended it to post-paid accounts inside their credit limit, which the code
-does not do. The ceiling is enforced in `src/ledger.ts` before anything is
+does not do. The ceiling is enforced in `src/engine/ledger.ts` before anything is
 delegated, and the specification now says so.
 
 **A green suite can miss the mutation it exists for.** The first version of the
@@ -110,11 +110,11 @@ nothing resolves it.
 
 | File | What is in it |
 |---|---|
-| `src/types.ts` | the domain, with the clause each shape answers to |
-| `src/engine.ts` | the state machine, the floor, expiry, settlement, lineage |
-| `src/ledger.ts` | the reserve-and-commit port, and the ceiling |
-| `src/lineage.ts` | the bytes a giver signs |
-| `src/validate.ts` | why an unknown field is refused rather than dropped |
+| `src/common/types.ts` | the domain, with the clause each shape answers to |
+| `src/engine/offers.ts` | the state machine, the floor, expiry, settlement, lineage |
+| `src/engine/ledger.ts` | the reserve-and-commit port, and the ceiling |
+| `src/shared/lineage.ts` | the bytes a giver signs |
+| `src/common/validate.ts` | why an unknown field is refused rather than dropped |
 | `src/http.ts` | the §9 surface, and nothing else |
 
 ## Licence

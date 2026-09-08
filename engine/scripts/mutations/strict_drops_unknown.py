@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/validate.ts")
+p = pathlib.Path("src/common/validate.ts")
 s = p.read_text()
 start = s.index("  if (unknown.length > 0) {")
 end = s.index("  }", s.index("    );", start)) + 4

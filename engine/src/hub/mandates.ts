@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from "node:crypto";
-import { conflict, notFound, unprocessable } from "./errors.js";
+import { conflict, notFound, unprocessable } from "../common/errors.js";
 
 /**
  * Clauses 46 and 47. A person's standing protections, in a record only that

@@ -1,8 +1,8 @@
 import { generateKeyPairSync, sign } from "node:crypto";
-import { ValenceEngine } from "../src/engine.js";
-import { InMemoryLedger } from "../src/ledger.js";
-import { canonical, type EdgeInput } from "../src/lineage.js";
-import { canonicalDecisions, type DecisionInput } from "../src/mandate.js";
+import { ValenceEngine } from "../src/engine/offers.js";
+import { InMemoryLedger } from "../src/engine/ledger.js";
+import { canonical, type EdgeInput } from "../src/shared/lineage.js";
+import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
 
 /** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");

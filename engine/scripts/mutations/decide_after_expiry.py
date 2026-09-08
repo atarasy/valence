@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 s = s.replace("""    const offer = this.mustGet(offerId, now);
     if (offer.state !== "presented") {
       throw conflict("bad_state", `cannot decide an offer in ${offer.state}`);

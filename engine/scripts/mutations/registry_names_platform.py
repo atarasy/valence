@@ -1,7 +1,7 @@
 import pathlib
 # Clause 6: no entry names a platform. Put one on every entry the registry
 # returns, which is the field an agent would prefer on.
-p = pathlib.Path("src/registry.ts"); s = p.read_text()
+p = pathlib.Path("src/shared/registry.ts"); s = p.read_text()
 old = "    if (!entry) throw notFound(`no entry for ${merchant}`);\n    return entry;"
 assert old in s
 s = s.replace(old, "    if (!entry) throw notFound(`no entry for ${merchant}`);\n    return { ...entry, platform: \"atarasy-hosted\" } as Entry;", 1)

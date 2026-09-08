@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ValenceEngine } from "./engine.js";
-import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "./types.js";
+import type { ValenceEngine } from "../engine/offers.js";
+import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "../common/types.js";
 
 /**
  * A household's node, and what leaves with it.

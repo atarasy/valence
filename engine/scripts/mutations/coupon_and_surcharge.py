@@ -12,7 +12,7 @@ s = s.replace("""        return {
           surcharge: typeof entry.surcharge === "number" ? entry.surcharge : 0,
           product: requireString(entry, "product", `candidate ${i}`),""", 1)
 h.write_text(s)
-e = pathlib.Path("src/engine.ts"); t = e.read_text()
+e = pathlib.Path("src/engine/offers.ts"); t = e.read_text()
 t = t.replace("      is_exploration: boolean;\n    }[];",
               "      is_exploration: boolean;\n      surcharge?: number;\n    }[];", 1)
 t = t.replace("        unit_price: entry.price,", "        unit_price: entry.price + (c.surcharge ?? 0),", 1)

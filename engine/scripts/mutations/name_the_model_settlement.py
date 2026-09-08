@@ -1,7 +1,7 @@
 import pathlib
 # Clause 3, the settlement side: the settlement record is built in the engine,
 # not in the HTTP view, so a model named here does not show in the offer view.
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 old = '      receipt: createHash("sha256")'
 assert old in s
 s = s.replace(old,

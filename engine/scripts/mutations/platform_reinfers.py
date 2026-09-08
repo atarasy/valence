@@ -2,7 +2,7 @@ import pathlib
 # Clause 9: the platform infers nothing across nodes. Adjust each candidate's
 # predicted_conversion by the return rate of the same product across every
 # household this engine has seen, which is a model across nodes.
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 old = "    this.offers.set(offer.id, offer);\n    for (const c of candidates) this.candidateIndex.set(c.id, offer.id);\n    return offer;"
 assert old in s
 new = """    for (const c of candidates) {

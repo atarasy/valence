@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 s = s.replace("""      const entry = config.products[c.product];
       if (!entry) {
         throw notFound(`no product ${c.product} in config ${config.version}`);

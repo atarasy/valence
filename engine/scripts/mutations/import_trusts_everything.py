@@ -1,6 +1,6 @@
 import pathlib
 # Clauses 22, 52: an import verifies what it is handed. Trust it instead.
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 old = "    const publicKey = this.identities.get(edge.from);\n    if (!publicKey || !verifyEdge(edge, publicKey)) {"
 assert old in s
 s = s.replace(old, "    const publicKey = this.identities.get(edge.from);\n    if (false && (!publicKey || !verifyEdge(edge, publicKey))) {", 1)

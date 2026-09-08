@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from "node:crypto";
-import { badRequest, conflict, notFound, unprocessable } from "./errors.js";
+import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 
 /**
  * The endpoint registry. §17.

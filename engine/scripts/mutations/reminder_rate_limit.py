@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 s = s.replace("""    if (offer.reminders_sent >= this.config.reminderLimit) {
       // Clause 33. Not a rate limit that a caller waits out.
       throw conflict("reminder_limit", "this offer has had its reminder");

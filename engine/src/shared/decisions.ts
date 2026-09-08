@@ -1,5 +1,5 @@
 import { createPublicKey, verify } from "node:crypto";
-import type { KeptAs, Valence } from "./types.js";
+import type { KeptAs, Valence } from "../common/types.js";
 
 /**
  * Clause 35. A confirmation is the person's signature over the decided set,

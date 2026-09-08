@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/engine.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 # Settle against the presenter's newest catalogue rather than the stamped one.
 s = s.replace("""    const config = this.configs.get(offer.config_version);""",
 """    let config = this.configs.get(offer.config_version);

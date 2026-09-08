@@ -1,5 +1,5 @@
 import pathlib
-p = pathlib.Path("src/physical.ts"); s = p.read_text()
+p = pathlib.Path("src/engine/physical.ts"); s = p.read_text()
 old = "    if (row.collected_at !== null) {"
 assert old in s, "anchor drifted"
 s = s.replace(old, "    if (false) {", 1)

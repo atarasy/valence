@@ -1,5 +1,5 @@
-import { conflict, notFound, unprocessable } from "./errors.js";
-import type { Offer, PhysicalEligibility, Recovery } from "./types.js";
+import { conflict, notFound, unprocessable } from "../common/errors.js";
+import type { Offer, PhysicalEligibility, Recovery } from "../common/types.js";
 
 /**
  * The physical binding's operations, which the valences alone do not give you.

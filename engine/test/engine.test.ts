@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { ValenceEngine, explorationFloor } from "../src/engine.js";
-import { InMemoryLedger } from "../src/ledger.js";
-import { ValenceError } from "../src/errors.js";
+import { ValenceEngine, explorationFloor } from "../src/engine/offers.js";
+import { InMemoryLedger } from "../src/engine/ledger.js";
+import { ValenceError } from "../src/common/errors.js";
 import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned } from "./helpers.js";
 
 const baseOffer = (candidates: {
