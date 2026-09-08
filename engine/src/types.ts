@@ -136,9 +136,12 @@ export type Note = {
   candidate: string;
   author: string;
   text: string;
-  visibility: "self" | "self_and_recipient";
+  /** Clause 31. Whom the writer chose to show the line to, beyond themselves. */
+  shared_with: NoteParty[];
   created_at: number;
 };
+
+export type NoteParty = "recipient" | "merchant";
 
 export type Settlement = {
   offer: string;

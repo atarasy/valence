@@ -134,10 +134,10 @@ note
   candidate    reference
   author       the household
   text         string
-  visibility   self | self_and_recipient
+  shared_with  [] | subset of { recipient, merchant }. Whom the writer chose to show the line to (clause 31)
 ```
 
-There is no rating, no score, and no aggregation across households. A note written before giving becomes the message that accompanies the gift, which is the only reason the field exists.
+`GET /candidates/{id}/note?as=recipient|merchant` returns the lines the writer shared with that party, as text and date, and `404` when there are none. There is no rating, no score, no route that aggregates notes across candidates or households, and no party other than the writer, the recipient and the merchant that a line can be shared with. A note written before giving becomes the message that accompanies the gift; a note shared with the merchant is the one line of feedback a maker receives, and it arrives as a line.
 
 ----
 
@@ -153,12 +153,11 @@ floor(n) = max(1, ceil(n * rate))
 
 ### 5.1 What counts
 
-A candidate MAY be marked `is_exploration` when either holds:
+A candidate MAY be marked `is_exploration` only when this presenter has never offered the product to this household and the household has not been given it: no prior presentation, whatever its verdict, and no lineage edge to the household for the product. A product the household bought, was given, or declined is not exploration.
 
-- `predicted_conversion` is at or below the deployment's exploration threshold, or
-- the product is unknown to this household: absent from its purchase history and from its lineage.
+A candidate that fails this **MUST NOT** be counted toward the floor, and `POST /offers` **MUST** reject an offer that marks one.
 
-A candidate that satisfies neither **MUST NOT** be counted toward the floor, and `POST /offers` **MUST** reject an offer that marks one.
+The floor counts novelty and nothing else. Which never-offered products a presenter puts in the floor is its own best guess, and the specification does not judge the guess: a prediction is the presenter's own number, and a rule that asked for a low one would fill the floor with what the presenter expects to fail, which is waste, not exploration. A presenter that wants the floor to be worth carrying fills it with the never-offered products it thinks most likely to be kept. Earlier versions of this section admitted a candidate on a low prediction alone; that was withdrawn on 2026-09-09.
 
 Without this the floor is satisfiable by relabelling. A presenter marks the items it most expects to be kept, the count is met, and clause 30 becomes a formality while every reading of §5 still passes. The permission above is on the presenter and cannot be checked from outside; this obligation is on the implementation and can be.
 
@@ -168,7 +167,7 @@ An engine that maximises the kept ratio stops exploring, removes the household's
 
 ### 5.3 Disclosure
 
-Exploration candidates MUST NOT be concealed. The presentation surface SHOULD indicate that a candidate is one the model does not expect to be kept. A household MAY reduce `rate` for its own offers. It MUST NOT be able to reach zero.
+Exploration candidates MUST NOT be concealed. The presentation surface SHOULD indicate that a candidate is one this household has not been offered before. A household MAY reduce `rate` for its own offers. It MUST NOT be able to reach zero.
 
 ----
 
@@ -298,7 +297,8 @@ POST   /offers/{id}/remind          the one reminder (§10.4, clause 37)
 GET    /offers/{id}                 one offer, with its candidates
 GET    /offers/{id}/settlement      the settlement, once there is one
 GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
-POST   /candidates/{id}/note        one line
+POST   /candidates/{id}/note        one line, shared with whom the writer says
+GET    /candidates/{id}/note?as=    the lines shared with that party (clause 31)
 POST   /lineage                     accept an edge
 ```
 

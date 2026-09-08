@@ -37,7 +37,6 @@ const ledger = process.env.METER_BASE_URL
 
 const engine = new ValenceEngine(ledger, {
   explorationRate: rate,
-  explorationThreshold: Number(process.env.VALENCE_EXPLORATION_THRESHOLD ?? 0.2),
   reminderLimit: 1,
   recoveryGraceDays: Number(process.env.VALENCE_RECOVERY_GRACE_DAYS ?? 3),
 });

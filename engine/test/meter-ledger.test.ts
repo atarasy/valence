@@ -78,7 +78,6 @@ const makeLedger = () =>
 const makeEngine = (ledger: MeterLedger) => {
   const engine = new ValenceEngine(ledger, {
     explorationRate: 0.2,
-    explorationThreshold: 0.2,
     reminderLimit: 1,
     recoveryGraceDays: 3,
   });

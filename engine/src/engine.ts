@@ -21,6 +21,7 @@ import type {
   Valence,
   SettlementLine,
   PriceBand,
+  NoteParty,
 } from "./types.js";
 
 export type EngineConfig = {
@@ -33,7 +34,6 @@ export type EngineConfig = {
    */
   explorationRate: number;
   /** §5.1. A candidate at or below this is eligible to be marked exploration. */
-  explorationThreshold: number;
   /** §10.4. At most one reminder. Kept configurable downward, never upward. */
   reminderLimit: 0 | 1;
   /**
@@ -159,18 +159,11 @@ export class ValenceEngine {
         }
       }
       if (c.is_exploration) {
-        const unknownToHousehold = !this.householdHasSeen(
-          input.household,
-          c.product
-        );
-        const belowThreshold =
-          c.predicted_conversion !== null &&
-          c.predicted_conversion <= this.config.explorationThreshold;
-        if (!unknownToHousehold && !belowThreshold) {
-          // §5.1. Marking a well-predicted, already-known product as
-          // exploration would let a presenter satisfy the floor with
-          // candidates it fully expects to be kept, which is the floor's
-          // whole subject.
+        // §5.1. Exploration is what this household has never been offered by
+        // this presenter. A low prediction on a known product is a known
+        // dislike, not exploration, and marking a known product would let a
+        // presenter satisfy the floor with what it already expects.
+        if (this.householdHasSeen(input.household, config.presenter, c.product)) {
           throw unprocessable(
             "not_exploration",
             `candidate ${c.product} does not qualify as exploration`
@@ -494,7 +487,7 @@ export class ValenceEngine {
     candidate: string;
     author: string;
     text: string;
-    visibility: "self" | "self_and_recipient";
+    shared_with: NoteParty[];
     now?: number;
   }): Note {
     const offerId = this.candidateIndex.get(input.candidate);
@@ -503,7 +496,7 @@ export class ValenceEngine {
       candidate: input.candidate,
       author: input.author,
       text: input.text,
-      visibility: input.visibility,
+      shared_with: input.shared_with,
       created_at: input.now ?? Date.now(),
     };
     const list = this.notes.get(input.candidate) ?? [];
@@ -514,6 +507,15 @@ export class ValenceEngine {
 
   notesFor(candidateId: string): Note[] {
     return this.notes.get(candidateId) ?? [];
+  }
+
+  /**
+   * Clause 31. The notes a party other than the writer may read: only those
+   * the writer chose to share with that party. A line is one line; there is
+   * no count, no score and no aggregate here or anywhere.
+   */
+  notesSharedWith(candidateId: string, party: NoteParty): Note[] {
+    return this.notesFor(candidateId).filter((n) => n.shared_with.includes(party));
   }
 
   // ---- lineage -------------------------------------------------------------
@@ -709,11 +711,17 @@ export class ValenceEngine {
     );
   }
 
-  private householdHasSeen(household: string, product: string): boolean {
+  /**
+   * Whether this presenter has offered the product to this household, or the
+   * household was given it. Any prior presentation counts, whatever the
+   * verdict: a product declined before is not exploration either.
+   */
+  private householdHasSeen(household: string, presenter: string, product: string): boolean {
     for (const offer of this.offers.values()) {
-      if (offer.household !== household) continue;
+      if (offer.household !== household || offer.presenter !== presenter) continue;
+      if (offer.presented_at === null) continue;
       for (const c of offer.candidates) {
-        if (c.product === product && c.valence === "kept") return true;
+        if (c.product === product) return true;
       }
     }
     for (const edge of this.edges.values()) {

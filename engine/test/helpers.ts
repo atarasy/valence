@@ -9,13 +9,11 @@ export const PHYSICAL = { ambient: true, keeps_for_days: 365, fits_ten_per_conta
 
 export function makeEngine(overrides: Partial<{
   explorationRate: number;
-  explorationThreshold: number;
   reminderLimit: 0 | 1;
 }> = {}) {
   const ledger = new InMemoryLedger();
   const engine = new ValenceEngine(ledger, {
     explorationRate: 0.2,
-    explorationThreshold: 0.2,
     reminderLimit: 1,
     recoveryGraceDays: 3,
     ...overrides,

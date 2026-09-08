@@ -16,7 +16,14 @@ import {
   requireString,
   strict,
 } from "./validate.js";
-import type { Candidate, CatalogueEntry, KeptAs, Offer, Valence } from "./types.js";
+import type {
+  Candidate,
+  CatalogueEntry,
+  KeptAs,
+  Offer,
+  Valence,
+  NoteParty,
+} from "./types.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -36,7 +43,7 @@ const VALENCES = [
   "lost",
 ] as const;
 const KINDS = ["gift", "return", "regift", "thanks"] as const;
-const VISIBILITY = ["self", "self_and_recipient"] as const;
+const NOTE_PARTIES = ["recipient", "merchant"] as const;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), {
@@ -564,18 +571,48 @@ async function route(
     if (!candidate) throw notFound("no candidate");
     const raw = strict(
       await body(request),
-      ["author", "text", "visibility"],
+      ["author", "text", "shared_with"],
       "note"
     );
+    // Clause 31. The writer says who else sees the line, at the moment of
+    // writing it: the recipient, the merchant, both or neither.
+    const sharedRaw = raw.shared_with;
+    if (!Array.isArray(sharedRaw)) {
+      throw badRequest("malformed", "note: shared_with must be an array");
+    }
+    const shared_with = sharedRaw.map((p) => {
+      if (typeof p !== "string" || !(NOTE_PARTIES as readonly string[]).includes(p)) {
+        throw badRequest("malformed", `note: shared_with names ${NOTE_PARTIES.join(" or ")}`);
+      }
+      return p as NoteParty;
+    });
+    if (new Set(shared_with).size !== shared_with.length) {
+      throw badRequest("malformed", "note: shared_with repeats a party");
+    }
     return json(
       engine.addNote({
         candidate,
         author: requireString(raw, "author", "note"),
         text: requireString(raw, "text", "note"),
-        visibility: requireEnum(raw, "visibility", "note", VISIBILITY),
+        shared_with,
       }),
       201
     );
+  }
+
+  // Clause 31. What a party other than the writer may read of a candidate's
+  // notes: the lines the writer chose to share with that party, and nothing
+  // else. There is no route that aggregates notes across candidates.
+  if (parts[0] === "candidates" && parts[2] === "note" && method === "GET") {
+    const candidate = parts[1];
+    if (!candidate) throw notFound("no candidate");
+    const as = url.searchParams.get("as");
+    if (!as || !(NOTE_PARTIES as readonly string[]).includes(as)) {
+      throw badRequest("malformed", `as= names ${NOTE_PARTIES.join(" or ")}`);
+    }
+    const notes = engine.notesSharedWith(candidate, as as NoteParty);
+    if (notes.length === 0) throw notFound("no note shared with that party");
+    return json({ notes: notes.map((n) => ({ text: n.text, created_at: n.created_at })) });
   }
 
   if (parts[0] === "lineage") {

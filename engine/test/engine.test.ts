@@ -32,7 +32,6 @@ describe("construction", () => {
       () =>
         new ValenceEngine(new InMemoryLedger(), {
           explorationRate: 0,
-          explorationThreshold: 0.2,
           reminderLimit: 1,
           recoveryGraceDays: 3,
         })
@@ -81,18 +80,27 @@ describe("exploration floor", () => {
     expect(offer.state).toBe("drafted");
   });
 
-  test("a well-predicted, already-known product cannot pad the floor", () => {
+  test("a product already offered to the household cannot pad the floor", async () => {
     const { engine } = makeEngine();
+    const first = engine.createOffer(
+      baseOffer([
+        { product: "tea-a" },
+        { product: "tea-b", is_exploration: true, predicted_conversion: 0.9 },
+      ])
+    );
+    // A high prediction on a never-offered product is exploration: the
+    // household has not seen it, whatever the presenter expects.
+    await engine.present(first.id);
+    // Offered once, the same product is no longer exploration, whatever the
+    // prediction says, and whatever the household decided.
     expect(() =>
       engine.createOffer(
         baseOffer([
           { product: "tea-a" },
-          { product: "tea-b", is_exploration: true, predicted_conversion: 0.9 },
+          { product: "tea-b", is_exploration: true, predicted_conversion: 0.05 },
         ])
       )
-    ).not.toThrow();
-    // tea-b was never kept by this household, so it is unknown and qualifies.
-    // Once kept, the same candidate no longer qualifies.
+    ).toThrow();
   });
 });
 
