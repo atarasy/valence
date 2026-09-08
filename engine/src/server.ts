@@ -3,6 +3,8 @@ import { InMemoryLedger } from "./ledger.js";
 import { MeterLedger } from "./meter-ledger.js";
 import { createApp } from "./http.js";
 import { RecoveryRegister } from "./node.js";
+import { ApprovalDesk } from "./approval.js";
+import { PermissionLedger } from "./permissions.js";
 
 const rate = Number(process.env.VALENCE_EXPLORATION_RATE);
 if (!(rate > 0)) {
@@ -38,8 +40,12 @@ const engine = new ValenceEngine(ledger, {
   reminderLimit: 1,
 });
 
-const recovery = new RecoveryRegister();
+const hub = {
+  recovery: new RecoveryRegister(),
+  approvals: new ApprovalDesk(),
+  permissions: new PermissionLedger(),
+};
 
 const port = Number(process.env.PORT ?? 8787);
-Bun.serve({ port, fetch: createApp(engine, recovery) });
+Bun.serve({ port, fetch: createApp(engine, hub) });
 console.log(`valence-engine listening on http://localhost:${port}`);

@@ -1,0 +1,113 @@
+import type { ValenceEngine } from "./engine.js";
+import type { Offer } from "./types.js";
+
+/**
+ * The approval surface.
+ *
+ * Clauses 36, 37, 38, 39, 40, 63, 67 and 68, and §10 of the specification.
+ * What a household opens, drawn by the hub.
+ *
+ * It is a separate shape from the offer the presenter created, and the
+ * difference is the point. The offer is the merchant's record. This is what a
+ * person is asked to sign, and clause 63 says the party drawing it is a party
+ * to no transaction. So the contract carries data and never presentation: no
+ * markup, no styling, no ordering directive, no image with words burned into
+ * it. One such field and the merchant draws the screen after all.
+ */
+export type ApprovalCandidate = {
+  id: string;
+  product: string;
+  quantity: number;
+  unit_price: number;
+  /** §5.3. Not concealed: a household cannot decline what it cannot see is a guess. */
+  is_exploration: boolean;
+  /** Clause 68. What else the agent considered. */
+  alternatives: string[];
+  /** Clause 68. The argument against taking it. */
+  argument_against: string;
+};
+
+export type Approval = {
+  offer: string;
+  presenter: string;
+  expires_at: number;
+  /** Clause 37. A boolean, because a count invites a second. */
+  reminded: boolean;
+  mandate: {
+    kind: "standing" | "individual";
+    scope: string;
+    /** Clause 67. A standing mandate lapses unless renewed. */
+    lapses_at: number | null;
+  };
+  candidates: ApprovalCandidate[];
+  /** Clause 40. The reason an order was not executed, shown to the person. */
+  excluded: { product: string; reason: string }[];
+};
+
+/**
+ * What an agent proposes, beyond the offer itself.
+ *
+ * Clause 68 asks that a proposal carry alternatives and the argument against.
+ * Neither is derivable from the offer, so the presenter's agent supplies them
+ * and the hub refuses to render an approval without them.
+ */
+export type Deliberation = {
+  offer: string;
+  perCandidate: Record<string, { alternatives: string[]; argument_against: string }>;
+  excluded: { product: string; reason: string }[];
+  mandate: { kind: "standing" | "individual"; scope: string; lapses_at: number | null };
+};
+
+export class ApprovalDesk {
+  private readonly deliberations = new Map<string, Deliberation>();
+
+  record(deliberation: Deliberation): void {
+    this.deliberations.set(deliberation.offer, deliberation);
+  }
+
+  deliberationFor(offerId: string): Deliberation | undefined {
+    return this.deliberations.get(offerId);
+  }
+
+  /**
+   * Renders the approval, or refuses.
+   *
+   * Refusing is the interesting half. An agent that proposes without saying
+   * what else it considered and what argues against its proposal has made the
+   * household's tap a formality, and clause 68 exists so that it is not one.
+   * The hub will not draw a screen that cannot carry both.
+   */
+  render(engine: ValenceEngine, offer: Offer): Approval | { missing: string } {
+    const deliberation = this.deliberations.get(offer.id);
+    if (!deliberation) {
+      return { missing: "no deliberation recorded for this offer (clause 68)" };
+    }
+    const candidates: ApprovalCandidate[] = [];
+    for (const c of offer.candidates) {
+      const entry = deliberation.perCandidate[c.id];
+      if (!entry || entry.alternatives.length === 0 || entry.argument_against === "") {
+        return {
+          missing: `candidate ${c.id} carries no alternatives or no argument against (clause 68)`,
+        };
+      }
+      candidates.push({
+        id: c.id,
+        product: c.product,
+        quantity: c.quantity,
+        unit_price: c.unit_price,
+        is_exploration: c.is_exploration,
+        alternatives: entry.alternatives,
+        argument_against: entry.argument_against,
+      });
+    }
+    return {
+      offer: offer.id,
+      presenter: offer.presenter,
+      expires_at: offer.expires_at,
+      reminded: offer.reminders_sent > 0,
+      mandate: deliberation.mandate,
+      candidates,
+      excluded: deliberation.excluded,
+    };
+  }
+}

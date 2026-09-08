@@ -5,6 +5,8 @@ import {
   type NodeExport,
   type RecoveryRegister,
 } from "./node.js";
+import type { ApprovalDesk } from "./approval.js";
+import type { PermissionLedger } from "./permissions.js";
 import {
   optionalUnitInterval,
   requireBoolean,
@@ -73,10 +75,16 @@ function offerView(o: Offer) {
   };
 }
 
-export function createApp(engine: ValenceEngine, recovery: RecoveryRegister) {
+export type Hub = {
+  recovery: RecoveryRegister;
+  approvals: ApprovalDesk;
+  permissions: PermissionLedger;
+};
+
+export function createApp(engine: ValenceEngine, hub: Hub) {
   return async function handle(request: Request): Promise<Response> {
     try {
-      return await route(engine, recovery, request);
+      return await route(engine, hub, request);
     } catch (err) {
       if (err instanceof ValenceError) {
         return json({ error: err.code, message: err.message }, err.status);
@@ -101,9 +109,10 @@ async function body(request: Request): Promise<unknown> {
 
 async function route(
   engine: ValenceEngine,
-  recovery: RecoveryRegister,
+  hub: Hub,
   request: Request
 ): Promise<Response> {
+  const { recovery, approvals, permissions } = hub;
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
@@ -312,6 +321,87 @@ async function route(
         });
         return json(offerView(engine.decide(id, decisions)));
       }
+      if (method === "GET" && action === "approval") {
+        // Clause 63. Data, never presentation. The hub draws the screen.
+        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()));
+        if ("missing" in rendered) {
+          throw unprocessable("no_deliberation", rendered.missing);
+        }
+        return json(rendered);
+      }
+      if (method === "POST" && action === "deliberation") {
+        const raw = strict(
+          await body(request),
+          ["per_candidate", "excluded", "mandate"],
+          "deliberation"
+        );
+        const per = raw.per_candidate;
+        if (typeof per !== "object" || per === null) {
+          throw badRequest("malformed", "per_candidate must be an object");
+        }
+        const perCandidate: Record<
+          string,
+          { alternatives: string[]; argument_against: string }
+        > = {};
+        for (const [key, value] of Object.entries(per as Record<string, unknown>)) {
+          const entry = strict(
+            value,
+            ["alternatives", "argument_against"],
+            `candidate ${key}`
+          );
+          const alternatives = entry.alternatives;
+          if (
+            !Array.isArray(alternatives) ||
+            alternatives.some((a) => typeof a !== "string")
+          ) {
+            throw badRequest("malformed", `candidate ${key}: alternatives must be strings`);
+          }
+          perCandidate[key] = {
+            alternatives: alternatives as string[],
+            argument_against: requireString(entry, "argument_against", `candidate ${key}`),
+          };
+        }
+        const excludedRaw = raw.excluded;
+        if (!Array.isArray(excludedRaw)) {
+          throw badRequest("malformed", "excluded must be an array");
+        }
+        const excluded = excludedRaw.map((e, i) => {
+          const entry = strict(e, ["product", "reason"], `excluded ${i}`);
+          return {
+            product: requireString(entry, "product", `excluded ${i}`),
+            reason: requireString(entry, "reason", `excluded ${i}`),
+          };
+        });
+        const mandateRaw = strict(
+          raw.mandate,
+          ["kind", "scope", "lapses_at"],
+          "mandate"
+        );
+        const kind = requireEnum(mandateRaw, "kind", "mandate", [
+          "standing",
+          "individual",
+        ] as const);
+        const lapses = mandateRaw.lapses_at;
+        if (kind === "standing" && typeof lapses !== "number") {
+          // Clause 67. A standing mandate lapses unless renewed, so there is
+          // no way to record one that does not.
+          throw unprocessable(
+            "standing_must_lapse",
+            "a standing mandate carries lapses_at"
+          );
+        }
+        approvals.record({
+          offer: id,
+          perCandidate,
+          excluded,
+          mandate: {
+            kind,
+            scope: requireString(mandateRaw, "scope", "mandate"),
+            lapses_at: typeof lapses === "number" ? lapses : null,
+          },
+        });
+        return json({ ok: true }, 201);
+      }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can
         // lose by closing a tab.
@@ -394,6 +484,55 @@ async function route(
       // §7.2. Acts only. No row names the gift it answers, and there is no
       // count, so nothing here reports that a recipient did not respond.
       return json({ acts: engine.actsVisibleToGiver(giver) });
+    }
+  }
+
+  if (parts[0] === "households" && parts[1] && parts[2] === "actions") {
+    // Out of specification: opening an action a permission can be asked for.
+    if (method === "POST") {
+      const raw = strict(await body(request), ["describes", "expires_at"], "action");
+      return json(
+        permissions.openAction({
+          household: parts[1],
+          describes: requireString(raw, "describes", "action"),
+          expiresAt: requireInteger(raw, "expires_at", "action", 0),
+        }),
+        201
+      );
+    }
+  }
+
+  if (parts[0] === "households" && parts[1] && parts[2] === "permissions") {
+    const household = parts[1];
+    if (method === "GET" && parts.length === 3) {
+      // Clause 44. Always visible, revoked rows included.
+      return json({ permissions: permissions.forHousehold(household) });
+    }
+    if (method === "POST" && parts.length === 3) {
+      const raw = strict(
+        await body(request),
+        ["grantee", "scope", "purpose", "expires_at", "asked_from"],
+        "permission"
+      );
+      const scope = raw.scope;
+      if (!Array.isArray(scope) || scope.some((f) => typeof f !== "string")) {
+        throw badRequest("malformed", "scope must be an array of field names");
+      }
+      return json(
+        permissions.grant({
+          household,
+          grantee: requireString(raw, "grantee", "permission"),
+          scope: scope as string[],
+          purpose: requireString(raw, "purpose", "permission"),
+          expires_at: requireInteger(raw, "expires_at", "permission", 0),
+          asked_from: requireString(raw, "asked_from", "permission"),
+        }),
+        201
+      );
+    }
+    if (method === "POST" && parts.length === 5 && parts[4] === "revoke") {
+      // Clause 44. Each is revoked individually, and revoking appends.
+      return json(permissions.revoke(household, parts[3]!));
     }
   }
 
