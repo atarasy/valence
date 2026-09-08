@@ -98,6 +98,7 @@ const offerFor = (engine: ValenceEngine) =>
     config_version: CONFIG_VERSION,
     expires_at: Date.now() + HOUR,
     mandate: "mandate-1",
+    price_band: null,
     candidates: [
       { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: false },
       { product: "tea-b", quantity: 1, predicted_conversion: 0.05, is_exploration: true },
@@ -177,6 +178,7 @@ describe("MeterLedger", () => {
       config_version: CONFIG_VERSION,
       expires_at: now + 1000,
       mandate: "mandate-1",
+      price_band: null,
       candidates: [
         { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: false },
         { product: "tea-b", quantity: 1, predicted_conversion: 0.05, is_exploration: true },

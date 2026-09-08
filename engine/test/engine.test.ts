@@ -16,6 +16,7 @@ const baseOffer = (candidates: {
   config_version: CONFIG_VERSION,
   expires_at: Date.now() + HOUR,
   mandate: "mandate-1",
+  price_band: null,
   candidates: candidates.map((c) => ({
     product: c.product,
     quantity: c.quantity ?? 1,

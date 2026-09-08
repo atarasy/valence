@@ -5,6 +5,9 @@ export type Binding = "physical" | "digital";
 
 export type Purpose = "gift" | "replenish" | "trial" | "ceremonial" | "assortment";
 
+/** Clause 26. The band a giver chose for a ceremonial gift, in the merchant's currency unit. */
+export type PriceBand = { min: number; max: number };
+
 export type OfferState =
   | "drafted"
   | "presented"
@@ -116,6 +119,8 @@ export type Offer = {
   household: string;
   presenter: string;
   purpose: Purpose;
+  /** Clause 26. Present on a ceremonial offer, null otherwise. Shown to the recipient. */
+  price_band: PriceBand | null;
   config_version: string;
   presented_at: number | null;
   expires_at: number;

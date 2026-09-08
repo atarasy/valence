@@ -20,6 +20,7 @@ import type {
   Settlement,
   Valence,
   SettlementLine,
+  PriceBand,
 } from "./types.js";
 
 export type EngineConfig = {
@@ -121,6 +122,7 @@ export class ValenceEngine {
     config_version: string;
     expires_at: number;
     mandate: string;
+    price_band: PriceBand | null;
     candidates: {
       product: string;
       quantity: number;
@@ -205,12 +207,32 @@ export class ValenceEngine {
       );
     }
 
+    // Clause 26. A ceremonial offer carries the band the giver chose, and no
+    // candidate in it lies outside that band. A band on any other purpose is
+    // a field with no meaning, and is refused as such.
+    if (input.purpose === "ceremonial") {
+      if (!input.price_band) {
+        throw badRequest("malformed", "a ceremonial offer carries a price_band");
+      }
+      for (const c of candidates) {
+        if (c.unit_price < input.price_band.min || c.unit_price > input.price_band.max) {
+          throw unprocessable(
+            "outside_band",
+            `candidate ${c.product} at ${c.unit_price} lies outside the band ${input.price_band.min} to ${input.price_band.max}`
+          );
+        }
+      }
+    } else if (input.price_band) {
+      throw badRequest("malformed", "price_band belongs to a ceremonial offer only");
+    }
+
     const offer: Offer = {
       id: randomUUID(),
       binding: input.binding,
       household: input.household,
       presenter: config.presenter,
       purpose: input.purpose,
+      price_band: input.price_band,
       config_version: config.version,
       presented_at: null,
       expires_at: input.expires_at,

@@ -41,6 +41,7 @@ offer
   household              key identifier of the recipient
   presenter              identifier of the merchant or representative
   purpose                gift | replenish | trial | ceremonial | assortment
+  price_band             { min, max }. Present on a ceremonial offer, null otherwise (§12, clause 26).
   config_version         version of the presenter's pricing and rules, frozen at creation
   presented_at           timestamp, null until presented
   expires_at             timestamp
@@ -382,7 +383,7 @@ The purpose `ceremonial` covers the return gift: the offer sent to many recipien
 | requirement | clause |
 |---|---|
 | The recipient chooses; the giver does not see the candidates | 27 |
-| Price bands are preserved and legible | 26 |
+| The offer carries the band the giver chose, shown to the recipient, and no candidate lies outside it: a candidate outside the band is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 26 |
 | If nothing is chosen before expiry, one candidate is `defaulted` and shipped | 28 |
 | Nothing is earned from an unredeemed offer | 28 |
 | Cards, wrapping and denominational wording match local convention exactly | 29 |

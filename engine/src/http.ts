@@ -68,6 +68,7 @@ function offerView(o: Offer) {
     household: o.household,
     presenter: o.presenter,
     purpose: o.purpose,
+    price_band: o.price_band,
     config_version: o.config_version,
     presented_at: o.presented_at,
     expires_at: o.expires_at,
@@ -304,6 +305,7 @@ async function route(
           "config_version",
           "expires_at",
           "mandate",
+          "price_band",
           "candidates",
         ],
         "offer"
@@ -333,7 +335,19 @@ async function route(
           ),
         };
       });
+      let priceBand = null;
+      if (raw.price_band !== undefined && raw.price_band !== null) {
+        const band = strict(raw.price_band, ["min", "max"], "price_band");
+        priceBand = {
+          min: requireInteger(band, "min", "price_band", 0),
+          max: requireInteger(band, "max", "price_band", 0),
+        };
+        if (priceBand.max < priceBand.min) {
+          throw badRequest("malformed", "price_band: max is below min");
+        }
+      }
       const offer = engine.createOffer({
+        price_band: priceBand,
         binding: requireEnum(raw, "binding", "offer", BINDINGS),
         household: requireString(raw, "household", "offer"),
         purpose: requireEnum(raw, "purpose", "offer", PURPOSES),
