@@ -33,6 +33,17 @@ fi
 NAME="$1"; shift
 echo "=== mutation: $NAME"
 "$@"
+# A mutation that changed nothing is not a mutation, and the suite that stays
+# green under it is measuring an unmutated engine. This happened silently on
+# 2026-09-09: `list_total` anchored on a line that had moved, its replace did
+# nothing, and the run reported a clean pass for months of ledger entries.
+# Sixty of the scripts assert their own anchors and the rest do not, so the
+# check belongs here, where it covers every one of them.
+if git diff --quiet -- src; then
+  echo "INERT: $NAME changed nothing in src. Its anchor has drifted." >&2
+  echo "The ledger row for it is unsupported until the script is repaired." >&2
+  exit 2
+fi
 # Both suites, because they reach different code. The conformance probes talk
 # HTTP and never see the ledger adapters; the engine's own tests do. A harness
 # that ran only the first reported "0 fail" for a mutation that removed the
