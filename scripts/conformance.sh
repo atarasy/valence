@@ -58,4 +58,5 @@ VALENCE_MANDATE="mandate-conformance" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
 VALENCE_LINEAGE_EDGE="$EDGE" \
+VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
   bun test ${SUITES:-absence floor silence lineage}
