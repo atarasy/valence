@@ -4,7 +4,7 @@ import { InMemoryLedger } from "../src/ledger.js";
 import { canonical, type EdgeInput } from "../src/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/mandate.js";
 
-/** Clause 39. The key the unit tests confirm with, registered for "mandate-1". */
+/** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");
 
 export function decideSigned(engine: ValenceEngine, offerId: string, decisions: DecisionInput[]) {

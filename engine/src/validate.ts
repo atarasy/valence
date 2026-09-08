@@ -3,7 +3,7 @@ import { badRequest } from "./errors.js";
 /**
  * Rejects any field the specification does not define.
  *
- * This is the mechanism behind §3.3 and clauses 31 to 34. A discount, a
+ * This is the mechanism behind §3.3 and clauses 27 to 30. A discount, a
  * countdown, a scarcity indicator, a rating or a per-person tracking id cannot
  * be smuggled in as an extra property and stored, because an unknown property
  * is a 400 before anything is written. Silently dropping unknown fields would

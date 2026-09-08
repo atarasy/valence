@@ -1,5 +1,5 @@
 import pathlib
-# Clause 38: the endpoints answer alike whoever the caller is. Refuse an
+# Clause 34: the endpoints answer alike whoever the caller is. Refuse an
 # offer unless the user-agent is the reference hub's.
 p = pathlib.Path("src/http.ts"); s = p.read_text()
 old = '  if (parts[0] === "offers") {\n    if (method === "POST" && parts.length === 1) {'

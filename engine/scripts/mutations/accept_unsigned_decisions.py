@@ -1,5 +1,5 @@
 import pathlib
-# Clause 39: nothing settles on an unsigned confirmation. Skip the signature
+# Clause 35: nothing settles on an unsigned confirmation. Skip the signature
 # check, so any decided set is taken as the person's.
 p = pathlib.Path("src/engine.ts"); s = p.read_text()
 old = "    if (!verifyDecisions(offerId, decisions, signature, mandateKey)) {"

@@ -1,5 +1,5 @@
 import pathlib
-# Clause 35: a settlement follows a person's decisions or the expiry rule.
+# Clause 31: a settlement follows a person's decisions or the expiry rule.
 # Let an offer be settled in any state, so the agent can close it before
 # the household has decided.
 p = pathlib.Path("src/engine.ts"); s = p.read_text()

@@ -2,7 +2,7 @@ import pathlib
 p = pathlib.Path("src/approval.ts"); s = p.read_text()
 old = """    const deliberation = this.deliberations.get(offer.id);
     if (!deliberation) {
-      return { missing: "no deliberation recorded for this offer (clause 68)" };
+      return { missing: "no deliberation recorded for this offer (clause 59)" };
     }"""
 assert old in s, "anchor drifted"
 s = s.replace(old, """    const deliberation = this.deliberations.get(offer.id) ?? {
@@ -13,7 +13,7 @@ s = s.replace(old, """    const deliberation = this.deliberations.get(offer.id) 
     };""", 1)
 old2 = """      if (!entry || entry.alternatives.length === 0 || entry.argument_against === "") {
         return {
-          missing: `candidate ${c.id} carries no alternatives or no argument against (clause 68)`,
+          missing: `candidate ${c.id} carries no alternatives or no argument against (clause 59)`,
         };
       }"""
 assert old2 in s, "anchor drifted (per-candidate)"

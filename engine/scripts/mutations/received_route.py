@@ -1,5 +1,5 @@
 import pathlib
-# Clause 23: no route lists what a household has received. Register one,
+# Clause 20: no route lists what a household has received. Register one,
 # returning the products behind the household's receipts.
 p = pathlib.Path("src/http.ts"); s = p.read_text()
 old = '  if (parts[0] === "households" && parts[1] && parts[2] === "export") {'

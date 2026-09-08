@@ -5,7 +5,7 @@ export type Binding = "physical" | "digital";
 
 export type Purpose = "gift" | "replenish" | "trial" | "ceremonial" | "assortment";
 
-/** Clause 26. The band a giver chose for a ceremonial gift, in the merchant's currency unit. */
+/** Clause 23. The band a giver chose for a ceremonial gift, in the merchant's currency unit. */
 export type PriceBand = { min: number; max: number };
 
 export type OfferState =
@@ -127,10 +127,10 @@ export type Offer = {
   household: string;
   presenter: string;
   purpose: Purpose;
-  /** Clause 26. Present on a ceremonial offer, null otherwise. Shown to the recipient. */
+  /** Clause 23. Present on a ceremonial offer, null otherwise. Shown to the recipient. */
   price_band: PriceBand | null;
   /**
-   * Clause 28, §12. Who pays a ceremonial offer: the giver, who chose the
+   * Clause 25, §12. Who pays a ceremonial offer: the giver, who chose the
    * band. The recipient of a return gift is never the party charged. Present
    * on a ceremonial offer, null otherwise.
    */
@@ -150,7 +150,7 @@ export type Note = {
   candidate: string;
   author: string;
   text: string;
-  /** Clause 31. Whom the writer chose to show the line to, beyond themselves. */
+  /** Clause 27. Whom the writer chose to show the line to, beyond themselves. */
   shared_with: NoteParty[];
   created_at: number;
 };
@@ -180,7 +180,7 @@ export type Settlement = {
    * merchants' disclosed agent, which is what `signed_as` records.
    */
   lines: SettlementLine[];
-  /** Clause 28, §12. Who is billed: the giver of a ceremonial offer, the household otherwise. */
+  /** Clause 25, §12. Who is billed: the giver of a ceremonial offer, the household otherwise. */
   payer: string;
   signed_by: string;
   signed_as: "agent";

@@ -48,9 +48,9 @@ The state machine is identical. Implementations differ in fulfilment and in one 
 
 Valence conformance is a requirement of the [Ataraxia](https://github.com/atarasy/ataraxia) mark, and several clauses of that constitution are enforced here rather than in any user interface:
 
-- **The exploration floor** (clause 30). An offer must contain a minimum number of candidates the merchant's own model predicts will not convert. `POST /offers` rejects an offer that does not. This is why selling out is not an achievable state.
-- **No negative signal to the giver** (clause 19). Nothing in the gift-facing response surface can express a recipient's inaction.
-- **Absent capabilities** (clauses 32, 33, 34). There is no discount object, no per-person event store, no urgency field. Not disabled — absent.
+- **The exploration floor** (clause 26). An offer must contain a minimum number of candidates the merchant's own model predicts will not convert. `POST /offers` rejects an offer that does not. This is why selling out is not an achievable state.
+- **No negative signal to the giver** (clause 16). Nothing in the gift-facing response surface can express a recipient's inaction.
+- **Absent capabilities** (clauses 28, 29, 30). There is no discount object, no per-person event store, no urgency field. Not disabled — absent.
 
 Conformance tests live in the Ataraxia repository. Four of the six suites are written, and they run against any implementation over HTTP.
 
@@ -62,7 +62,7 @@ Conformance tests live in the Ataraxia repository. Four of the six suites are wr
 
 Writing it found three holes in this document, each corrected in the same pass:
 
-- The exploration floor could be satisfied by relabelling. §5.1 gave the merchant permission to mark a candidate and forbade nothing, so marking the items most expected to be kept met the count and clause 30 cost nothing to obey.
+- The exploration floor could be satisfied by relabelling. §5.1 gave the merchant permission to mark a candidate and forbade nothing, so marking the items most expected to be kept met the count and clause 26 cost nothing to obey.
 - §9 listed eight endpoints and the conformance suites needed two more, so an implementation built from that section alone failed the suite. The same section put the reserve at offer creation, which contradicts §6.4 and orphans a hold every time the floor refuses an offer.
 - §6.4's ceiling has no owner but the implementation. A reserve-and-commit ledger does not supply it: the ones this maps onto treat a commit above the hold as an adjustment and refuse it only when the balance cannot cover the difference, which makes a funded household the case that slips through.
 

@@ -5,8 +5,8 @@ import type { LineageEdge, Note, Offer, Settlement } from "./types.js";
 /**
  * A household's node, and what leaves with it.
  *
- * Clause 47 asks that data be held in a form the customer can export in full.
- * Clause 61 asks that a member be able to move an entire node to another host,
+ * Clause 43 asks that data be held in a form the customer can export in full.
+ * Clause 52 asks that a member be able to move an entire node to another host,
  * and that the host be replaceable and blind.
  *
  * **An export is correct when the second host answers the same questions the
@@ -36,7 +36,7 @@ export type NodeExport = {
    */
   lineage: LineageEdge[];
   receipts: { ref: string; at: number }[];
-  /** Clause 62. Recovery is logged, and the log leaves with the node. */
+  /** Clause 53. Recovery is logged, and the log leaves with the node. */
   recoveries: RecoveryRecord[];
 };
 
@@ -50,7 +50,7 @@ export type RecoveryRecord = {
 };
 
 /**
- * Recovery restores access and never returns content (clause 62).
+ * Recovery restores access and never returns content (clause 53).
  *
  * The two powers are separate here in the only way a schema can make them
  * separate: a recoverer is named in this register and nowhere else, and
@@ -74,7 +74,7 @@ export class RecoveryRegister {
   ): void {
     if (!channels.some((c) => !c.controlled_by_recoverer)) {
       // A recoverer who holds every channel can recover in silence, and
-      // clause 62's requirement to notify the person becomes decorative.
+      // clause 53's requirement to notify the person becomes decorative.
       throw new Error(
         "at least one notification channel must be outside the recoverer's control"
       );

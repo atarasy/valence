@@ -4,7 +4,7 @@ import { badRequest, conflict, notFound, unprocessable } from "./errors.js";
 /**
  * The permission ledger.
  *
- * Clauses 41 to 46. A list of exceptions to "nobody but me", not a list that
+ * Clauses 37 to 42. A list of exceptions to "nobody but me", not a list that
  * includes me: the default recipient of data is the person's own agent, and
  * that is not a permission (42). If the person appeared in this ledger their
  * own entry could be revoked, and the hub would stop working.
@@ -24,7 +24,7 @@ export type Permission = {
   /**
    * When it lapses. There is no value meaning "never".
    *
-   * Clause 41 requires permissions to be time-limited. If an empty field meant
+   * Clause 37 requires permissions to be time-limited. If an empty field meant
    * unlimited, blanket consent would return in the shape of a null, which is
    * the thing the clause exists to remove.
    */
@@ -36,7 +36,7 @@ export type Permission = {
    * screen has no action to point at, so there is no way to grant from one.
    */
   asked_from: string;
-  /** Revoking appends. A row that disappears makes clause 44 false about the past. */
+  /** Revoking appends. A row that disappears makes clause 40 false about the past. */
   revoked_at: number | null;
 };
 
@@ -83,7 +83,7 @@ export class PermissionLedger {
     const now = input.now ?? Date.now();
 
     if (input.grantee === input.household) {
-      // Clause 42. The person's own agent is the default recipient, not a
+      // Clause 38. The person's own agent is the default recipient, not a
       // grantee, and an entry for it would be revocable.
       throw unprocessable(
         "own_agent",
@@ -131,7 +131,7 @@ export class PermissionLedger {
     return permission;
   }
 
-  /** Clause 44. Revoking appends; nothing leaves the list. */
+  /** Clause 40. Revoking appends; nothing leaves the list. */
   revoke(household: string, id: string, now = Date.now()): Permission {
     const list = this.rows.get(household) ?? [];
     const permission = list.find((p) => p.id === id);
@@ -144,7 +144,7 @@ export class PermissionLedger {
   }
 
   /**
-   * The whole list, revoked rows included (clause 44).
+   * The whole list, revoked rows included (clause 40).
    *
    * `asked_from` is here because this is the household's own view. It is not
    * on any grantee's view, where it would report what the household was doing

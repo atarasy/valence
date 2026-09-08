@@ -1,5 +1,5 @@
 import pathlib
-# Clause 53: no field for a name, an address, a card or a contact reaches
+# Clause 49: no field for a name, an address, a card or a contact reaches
 # the merchant. Put a delivery address on the offer serialisation.
 p = pathlib.Path("src/http.ts"); s = p.read_text()
 old = "    price_band: o.price_band,\n"

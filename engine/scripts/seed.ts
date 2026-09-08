@@ -141,7 +141,7 @@ await post("/lineage", {
 // An act, so the giver's surface has something on it.
 //
 // Both edges above are gifts, and gifts are excluded from the acts stream by
-// clause 20. Without a thanks the giver's stream is empty, and every probe
+// clause 17. Without a thanks the giver's stream is empty, and every probe
 // about what it does or does not disclose compares two empty responses.
 const thanks = {
   from: "key-recipient-conformance",
@@ -178,7 +178,7 @@ for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-mark
   });
 }
 
-// Clause 39. The key that confirms offers under the conformance mandate. The
+// Clause 35. The key that confirms offers under the conformance mandate. The
 // public half is registered here; the private half goes to the suite on the
 // second output line, base64 of the PEM, so the probes can sign decisions.
 const mandatePair = pairFor("mandate");

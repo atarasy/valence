@@ -1,5 +1,5 @@
 import pathlib
-# Clause 31: a line never becomes a number. Register a route that counts
+# Clause 27: a line never becomes a number. Register a route that counts
 # the notes on a product and calls the count a sentiment.
 p = pathlib.Path("src/http.ts"); s = p.read_text()
 old = '  if (parts[0] === "lineage") {'

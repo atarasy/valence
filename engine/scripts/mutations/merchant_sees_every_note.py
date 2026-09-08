@@ -1,5 +1,5 @@
 import pathlib
-# Clause 31: a line reaches the merchant only when the writer said so.
+# Clause 27: a line reaches the merchant only when the writer said so.
 # Return every note to whoever asks as the merchant.
 p = pathlib.Path("src/engine.ts"); s = p.read_text()
 old = "    return this.notesFor(candidateId).filter((n) => n.shared_with.includes(party));"

@@ -1,5 +1,5 @@
 import pathlib
-# Clause 26: no candidate in a ceremonial offer lies outside the band the
+# Clause 23: no candidate in a ceremonial offer lies outside the band the
 # giver chose. Keep the band on the offer and stop checking candidates
 # against it.
 p = pathlib.Path("src/engine.ts"); s = p.read_text()

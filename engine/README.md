@@ -102,7 +102,7 @@ now names a `charged` amount and requires it to equal the first two.
 
 **A receipt with a resolvable identifier is a purchase history.** The engine
 returned the lineage edge's id as the fact of receipt. An edge carries a product
-and a merchant, so one route away from that identifier is the record clause 22
+and a merchant, so one route away from that identifier is the record clause 19
 says a recipient does not acquire by receiving. The token is opaque now and
 nothing resolves it.
 

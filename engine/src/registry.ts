@@ -22,7 +22,7 @@ export const PROTOCOLS: readonly Protocol[] = ["valence", "acp", "ucp", "ap2", "
 export type Entry = {
   merchant: string;
   endpoints: Partial<Record<Protocol, string>>;
-  /** Recorded, never required. Clause 64: the mark is not a gate. */
+  /** Recorded, never required. Clause 55: the mark is not a gate. */
   mark: boolean;
   signature: string;
   registered_at: number;
@@ -116,7 +116,7 @@ export class Registry {
    *
    * Key order is the only order because it is the only one that says nothing.
    * There is no parameter for another, and the mark is not a filter unless
-   * the caller asks for it by name (clause 64).
+   * the caller asks for it by name (clause 55).
    */
   list(input: { protocol?: Protocol; markOnly?: boolean } = {}): Entry[] {
     return [...this.entries.values()]

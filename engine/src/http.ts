@@ -449,7 +449,7 @@ async function route(
         return json(offerView(engine.decide(id, decisions, requireString(raw, "signature", "decisions"))));
       }
       if (method === "GET" && action === "approval") {
-        // Clause 63. Data, never presentation. The hub draws the screen.
+        // Clause 54. Data, never presentation. The hub draws the screen.
         const rendered = approvals.render(engine, engine.mustGet(id, Date.now()));
         if ("missing" in rendered) {
           throw unprocessable("no_deliberation", rendered.missing);
@@ -515,7 +515,7 @@ async function route(
         ] as const);
         const lapses = mandateRaw.lapses_at;
         if (kind === "standing" && typeof lapses !== "number") {
-          // Clause 67. A standing mandate lapses unless renewed, so there is
+          // Clause 58. A standing mandate lapses unless renewed, so there is
           // no way to record one that does not.
           throw unprocessable(
             "standing_must_lapse",
@@ -594,9 +594,9 @@ async function route(
       ["author", "text", "shared_with"],
       "note"
     );
-    // Clause 31. The writer says who else sees the line, at the moment of
+    // Clause 27. The writer says who else sees the line, at the moment of
     // writing it: the recipient, the merchant, both or neither.
-    // Clause 31. The recipient sees the line unless the writer says not to:
+    // Clause 27. The recipient sees the line unless the writer says not to:
     // a line written before giving is the message that accompanies the gift,
     // which is the only reason the field exists, and a default of nobody
     // would make the writer opt in to the thing they were writing for. The
@@ -626,7 +626,7 @@ async function route(
     );
   }
 
-  // Clause 31. What a party other than the writer may read of a candidate's
+  // Clause 27. What a party other than the writer may read of a candidate's
   // notes: the lines the writer chose to share with that party, and nothing
   // else. There is no route that aggregates notes across candidates.
   if (parts[0] === "candidates" && parts[2] === "note" && method === "GET") {
@@ -672,7 +672,7 @@ async function route(
     if (method === "GET" && parts[1] === "circle") {
       const viewer = url.searchParams.get("viewer");
       if (!viewer) throw badRequest("malformed", "viewer is required");
-      // §7.5 and clause 24. No count, no network size, no ranking.
+      // §7.5 and clause 21. No count, no network size, no ranking.
       return json({ edges: engine.circleFor(viewer) });
     }
     if (method === "GET" && parts[1] === "acts") {
@@ -702,7 +702,7 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "permissions") {
     const household = parts[1];
     if (method === "GET" && parts.length === 3) {
-      // Clause 44. Always visible, revoked rows included.
+      // Clause 40. Always visible, revoked rows included.
       return json({ permissions: permissions.forHousehold(household) });
     }
     if (method === "POST" && parts.length === 3) {
@@ -728,20 +728,20 @@ async function route(
       );
     }
     if (method === "POST" && parts.length === 5 && parts[4] === "revoke") {
-      // Clause 44. Each is revoked individually, and revoking appends.
+      // Clause 40. Each is revoked individually, and revoking appends.
       return json(permissions.revoke(household, parts[3]!));
     }
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "export") {
-    // Clause 47. Everything the household holds, whatever a surface shows.
+    // Clause 43. Everything the household holds, whatever a surface shows.
     if (method === "GET") {
       return json(exportNode(engine, recovery, parts[1]));
     }
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "import") {
-    // Clause 61. The receiving host of a move.
+    // Clause 52. The receiving host of a move.
     if (method === "POST") {
       const body_ = (await body(request)) as NodeExport;
       if (!body_ || body_.format !== "valence-node/1") {
@@ -758,7 +758,7 @@ async function route(
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "recoveries") {
-    // Clause 62. The log a person reads after being locked out.
+    // Clause 53. The log a person reads after being locked out.
     if (method === "GET") {
       return json({ recoveries: recovery.logFor(parts[1]) });
     }

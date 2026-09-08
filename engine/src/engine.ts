@@ -56,7 +56,7 @@ export class ValenceEngine {
   private readonly edges = new Map<string, LineageEdge>();
   private readonly identities = new Map<string, string>();
   /**
-   * §7.4 and clause 22. The value stored beside the time is an opaque token,
+   * §7.4 and clause 19. The value stored beside the time is an opaque token,
    * not the edge's identifier.
    *
    * Returning the edge id looked like the fact of receipt and was a purchase
@@ -111,7 +111,7 @@ export class ValenceEngine {
 
   registerIdentity(key: string, publicKeyPem: string): void {
     // A key, once attested, is not replaced by a later caller: whoever could
-    // overwrite it could sign as the person (clauses 25, 39).
+    // overwrite it could sign as the person (clauses 22, 35).
     const existing = this.identities.get(key);
     if (existing !== undefined && existing !== publicKeyPem) {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
@@ -240,7 +240,7 @@ export class ValenceEngine {
       );
     }
 
-    // Clause 26. A ceremonial offer carries the band the giver chose, and no
+    // Clause 23. A ceremonial offer carries the band the giver chose, and no
     // candidate in it lies outside that band. A band on any other purpose is
     // a field with no meaning, and is refused as such.
     if (input.purpose === "ceremonial") {
@@ -299,7 +299,7 @@ export class ValenceEngine {
     // at: every candidate kept, at the frozen price.
     await this.ledger.reserve({
       requestId: offer.id,
-      // Clause 28. A ceremonial offer is the giver's to pay; the recipient of
+      // Clause 25. A ceremonial offer is the giver's to pay; the recipient of
       // a return gift is never the party charged.
       household: offer.giver ?? offer.household,
       amount: this.upperBound(offer),
@@ -327,7 +327,7 @@ export class ValenceEngine {
     if (offer.state !== "presented") {
       throw conflict("bad_state", `cannot decide an offer in ${offer.state}`);
     }
-    // Clause 39. A confirmation is the person's signature over the decided
+    // Clause 35. A confirmation is the person's signature over the decided
     // set. The key is the one registered for the offer's mandate; a set with
     // no key, no signature, or a signature over some other set is refused
     // before anything is written.
@@ -397,7 +397,7 @@ export class ValenceEngine {
       throw conflict("bad_state", `cannot remind an offer in ${offer.state}`);
     }
     if (offer.reminders_sent >= this.config.reminderLimit) {
-      // Clause 37. Not a rate limit that a caller waits out.
+      // Clause 33. Not a rate limit that a caller waits out.
       throw conflict("reminder_limit", "this offer has had its reminder");
     }
     offer.reminders_sent += 1;
@@ -517,7 +517,7 @@ export class ValenceEngine {
       return;
     }
     const undecided = offer.candidates.filter((c) => c.valence === "offered");
-    // Clause 28: a default ships if nothing was chosen. A recipient who kept
+    // Clause 25: a default ships if nothing was chosen. A recipient who kept
     // one item and left the rest has chosen; nothing else ships.
     const nothingKept = offer.candidates.every((c) => c.valence !== "kept");
     if (offer.purpose === "ceremonial" && undecided.length > 0 && nothingKept) {
@@ -582,7 +582,7 @@ export class ValenceEngine {
       created_at: input.now ?? Date.now(),
     };
     const list = this.notes.get(input.candidate) ?? [];
-    // Clause 31: one line, written by oneself. A second line from the same
+    // Clause 27: one line, written by oneself. A second line from the same
     // author is refused rather than appended; a count is an aggregate.
     if (list.some((n) => n.author === input.author)) {
       throw conflict("note_exists", "one line per author on a candidate");
@@ -597,7 +597,7 @@ export class ValenceEngine {
   }
 
   /**
-   * Clause 31. The notes a party other than the writer may read: only those
+   * Clause 27. The notes a party other than the writer may read: only those
    * the writer chose to share with that party. A line is one line; there is
    * no count, no score and no aggregate here or anywhere.
    */
@@ -611,7 +611,7 @@ export class ValenceEngine {
    * §7.1. Recognition turns on the giver's key being attested and the receipt
    * carrying the merchant's signature. Nothing here reads the client, and no
    * request field names one, so an edge from a fork is accepted on the same
-   * terms as an edge from the reference hub (clause 25).
+   * terms as an edge from the reference hub (clause 22).
    */
   acceptEdge(input: {
     from: string;
@@ -678,7 +678,7 @@ export class ValenceEngine {
    * §5 of 04b. The viewer's circle: edges among the people they already know.
    *
    * Two rules shape it. It does not expand past direct edges, because a walk
-   * two hops out has begun measuring network size (clause 24). And the
+   * two hops out has begun measuring network size (clause 21). And the
    * viewer's own outgoing edges carry no date and no product, because those
    * are what frame a window in which a response was due; without them the most
    * that can be read is that someone is in the circle and has never acted.
@@ -720,7 +720,7 @@ export class ValenceEngine {
    * Every edge this household is an endpoint of, in both directions.
    *
    * Not a surface. §7.2 keeps the outgoing edges off the giver's screen, and
-   * clause 47 keeps them in the household's own record: what a surface
+   * clause 43 keeps them in the household's own record: what a surface
    * withholds, an export still carries, or a member changing hosts loses what
    * they gave.
    */
@@ -730,7 +730,7 @@ export class ValenceEngine {
     );
   }
 
-  /** Restores an exported node into an empty engine. Clause 61. */
+  /** Restores an exported node into an empty engine. Clause 52. */
   importOffer(offer: Offer, household: string): void {
     if (offer.household !== household) {
       throw unprocessable("wrong_household", `offer ${offer.id} belongs to ${offer.household}`);
@@ -754,7 +754,7 @@ export class ValenceEngine {
   }
 
   importEdge(edge: LineageEdge, household: string): void {
-    // Clause 25 holds on a move as it does on arrival: an edge is recognised
+    // Clause 22 holds on a move as it does on arrival: an edge is recognised
     // by the giver's attested key, and an edge that touches neither end of
     // the moving household is not this node's to carry.
     if (edge.from !== household && edge.to !== household) {

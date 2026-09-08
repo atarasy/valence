@@ -92,7 +92,7 @@ describe("exploration floor", () => {
     await engine.present(first.id);
     // Every product has now been offered, so nothing qualifies as
     // exploration. The floor does not fall to zero: the offer is refused
-    // until the presenter's range grows (§5, clause 30). A cap that let the
+    // until the presenter's range grows (§5, clause 26). A cap that let the
     // floor fall was written and withdrawn on 2026-09-09, because it made
     // selling out reachable for any small catalogue.
     expect(() =>

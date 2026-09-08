@@ -41,7 +41,7 @@ offer
   household              key identifier of the recipient
   presenter              identifier of the merchant or representative
   purpose                gift | replenish | trial | ceremonial | assortment
-  price_band             { min, max }. Present on a ceremonial offer, null otherwise (§12, clause 26).
+  price_band             { min, max }. Present on a ceremonial offer, null otherwise (§12, clause 23).
   config_version         version of the presenter's pricing and rules, frozen at creation
   presented_at           timestamp, null until presented
   expires_at             timestamp
@@ -78,8 +78,8 @@ This is the only place the two bindings diverge in the machine, and the divergen
 | binding | purpose | undecided candidates at expiry become | rationale |
 |---|---|---|---|
 | `physical` | any | `returned` | The goods are already there. Debt does not arise until use. |
-| `digital` | any except `ceremonial` | `returned` | **Silence is not consent.** An order is a debt (clause 36). |
-| either | `ceremonial` | exactly one becomes `defaulted`; the rest `returned` | The giver has already paid a price band. Nothing may be earned from a recipient who does not choose (clause 28). |
+| `digital` | any except `ceremonial` | `returned` | **Silence is not consent.** An order is a debt (clause 32). |
+| either | `ceremonial` | exactly one becomes `defaulted`; the rest `returned` | The giver has already paid a price band. Nothing may be earned from a recipient who does not choose (clause 25). |
 
 An implementation MUST NOT provide a configuration that makes an undecided digital candidate `kept`.
 
@@ -122,7 +122,7 @@ candidate
 
 ### 3.3 What a candidate does not carry
 
-There is no field for a discount, a countdown, a stock-scarcity indicator, a star rating, or a per-person tracking identifier. These are absent, not disabled (clauses 31, 32, 33, 34). An implementation that adds them is not conformant.
+There is no field for a discount, a countdown, a stock-scarcity indicator, a star rating, or a per-person tracking identifier. These are absent, not disabled (clauses 27, 28, 29, 30). An implementation that adds them is not conformant.
 
 ----
 
@@ -135,7 +135,7 @@ note
   candidate    reference
   author       the household
   text         string
-  shared_with  [] | subset of { recipient, merchant }. Whom the writer chose to show the line to (clause 31)
+  shared_with  [] | subset of { recipient, merchant }. Whom the writer chose to show the line to (clause 27)
 ```
 
 `shared_with` defaults to `["recipient"]` when the field is absent: a line written before giving is the message that accompanies the gift, which is the only reason the field exists, and a default of nobody would make a writer opt in to the thing they were writing for. A writer who wants the line kept to themselves sends `[]`. The merchant is the other way round and is never a default, because a merchant is a party to the trade and not to the gift.
@@ -152,7 +152,7 @@ note
 floor(n) = max(1, ceil(n * rate))
 ```
 
-**A presenter that has nothing new for this household cannot make an offer at all.** When no product across every catalogue version this presenter has registered is novel to the household (§5.1), `POST /offers` MUST refuse with `422 nothing_new`. The floor does not fall to what the presenter has left: a cap of that shape was written on 2026-09-09 and withdrawn the same day, because it made selling out reachable for any small catalogue, which §5.2 and clause 30 say it is not. What it costs is that a presenter with a narrow range cannot offer to a household it has already shown everything to, until its range grows. That is the pressure the clause is for.
+**A presenter that has nothing new for this household cannot make an offer at all.** When no product across every catalogue version this presenter has registered is novel to the household (§5.1), `POST /offers` MUST refuse with `422 nothing_new`. The floor does not fall to what the presenter has left: a cap of that shape was written on 2026-09-09 and withdrawn the same day, because it made selling out reachable for any small catalogue, which §5.2 and clause 26 say it is not. What it costs is that a presenter with a narrow range cannot offer to a household it has already shown everything to, until its range grows. That is the pressure the clause is for.
 
 Novelty is counted **across every catalogue version this presenter has registered**, not the version an offer names: counting over the named version would let a presenter register a narrower catalogue per offer and owe no exploration, which an adversarial pass measured.
 
@@ -166,11 +166,11 @@ A candidate that fails this **MUST NOT** be counted toward the floor, and `POST 
 
 The floor counts novelty and nothing else. Which never-offered products a presenter puts in the floor is its own best guess, and the specification does not judge the guess: a prediction is the presenter's own number, and a rule that asked for a low one would fill the floor with what the presenter expects to fail, which is waste, not exploration. A presenter that wants the floor to be worth carrying fills it with the never-offered products it thinks most likely to be kept. Earlier versions of this section admitted a candidate on a low prediction alone; that was withdrawn on 2026-09-09.
 
-Without this the floor is satisfiable by relabelling. A presenter marks the items it most expects to be kept, the count is met, and clause 30 becomes a formality while every reading of §5 still passes. The permission above is on the presenter and cannot be checked from outside; this obligation is on the implementation and can be.
+Without this the floor is satisfiable by relabelling. A presenter marks the items it most expects to be kept, the count is met, and clause 26 becomes a formality while every reading of §5 still passes. The permission above is on the presenter and cannot be checked from outside; this obligation is on the implementation and can be.
 
 ### 5.2 Why
 
-An engine that maximises the kept ratio stops exploring, removes the household's freedom to decline, and destroys the only output that cannot be obtained elsewhere: which declines predict the market. Selling out is therefore not an achievable state in a conforming implementation (clause 30).
+An engine that maximises the kept ratio stops exploring, removes the household's freedom to decline, and destroys the only output that cannot be obtained elsewhere: which declines predict the market. Selling out is therefore not an achievable state in a conforming implementation (clause 26).
 
 ### 5.3 Disclosure
 
@@ -208,7 +208,7 @@ Nothing carries from one settlement to the next. There is no balance, and since 
 
 Two bases exist and no third. A candidate the collection records as `consumed` settles at the merchant's price, the same price the household would have paid to keep it: using something is buying it, which is the rule of 先用後利 (use first, settle after). A candidate that carries `given_by` was given, by a maker, by a merchant or by a friend, and **a gift is never billed to the person who received it**: its line settles at zero and names the giver. What the giver owes the merchant is settled between them, in flow C, where the recipient never sees it.
 
-**No cost of goods is ever quoted to a person, and no field carries one.** An earlier version of this section charged `consumed` at the presenter's cost basis, so that trying was "neither free nor full price". Two things were wrong with it. A cost basis in a household's receipt tells a person what the maker paid and prices the same goods two ways. And the middle term reads as a discount, which is what clause 32 removes everywhere else; goods that are normally sold at a price are not quietly worth less because a household is trying them. A maker that wants a person to try something gives it, at the price it is worth, and the record says who gave it. The catalogue has no `cost` field.
+**No cost of goods is ever quoted to a person, and no field carries one.** An earlier version of this section charged `consumed` at the presenter's cost basis, so that trying was "neither free nor full price". Two things were wrong with it. A cost basis in a household's receipt tells a person what the maker paid and prices the same goods two ways. And the middle term reads as a discount, which is what clause 28 removes everywhere else; goods that are normally sold at a price are not quietly worth less because a household is trying them. A maker that wants a person to try something gives it, at the price it is worth, and the record says who gave it. The catalogue has no `cost` field.
 
 A gift arriving this way is the same event as a gift between people (§7): whether a lineage edge exists for it is the giver's business, since an edge carries the giver's signature and a presenter cannot make one on their behalf.
 
@@ -254,25 +254,25 @@ edge
 
 ### 7.1 Recognition
 
-An edge is recognised when the giver's key is attested by the identity root and `receipt` carries the merchant's signature. **It is not discriminated by which client software produced it** (clause 25). A conforming endpoint MUST accept a well-formed, correctly signed edge regardless of its origin.
+An edge is recognised when the giver's key is attested by the identity root and `receipt` carries the merchant's signature. **It is not discriminated by which client software produced it** (clause 22). A conforming endpoint MUST accept a well-formed, correctly signed edge regardless of its origin.
 
 ### 7.2 What the giver may see
 
-The giver's response surface MAY show acts of the recipient: a `regift`, a `return`, a `thanks`. It **MUST NOT** show, or allow to be inferred, that a recipient did not reorder, did not open, or did not respond (clause 19).
+The giver's response surface MAY show acts of the recipient: a `regift`, a `return`, a `thanks`. It **MUST NOT** show, or allow to be inferred, that a recipient did not reorder, did not open, or did not respond (clause 16).
 
 This is a constraint on the schema, not on the interface. A conforming API has no field whose absence or value discloses recipient inaction. Implementers should test for inference, not only for presence.
 
 ### 7.3 Reciprocation
 
-An implementation MAY make reciprocation easy. It MUST NOT notify, remind, or impose a deadline on it (clause 21).
+An implementation MAY make reciprocation easy. It MUST NOT notify, remind, or impose a deadline on it (clause 18).
 
 ### 7.4 The recipient's record
 
-A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 22). No preference, no profile, no score is derived from having received.
+A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 19). No preference, no profile, no score is derived from having received.
 
 ### 7.5 Display
 
-Lineage is displayed as density within the viewer's own circle. Totals, network size and popularity rankings MUST NOT be displayed (clause 24). The merchant is never hidden.
+Lineage is displayed as density within the viewer's own circle. Totals, network size and popularity rankings MUST NOT be displayed (clause 21). The merchant is never hidden.
 
 ----
 
@@ -288,7 +288,7 @@ A Valence-conformant merchant extends its ACP product feed. The two gift fields 
 | `valence.lineage_hook` | endpoint accepting lineage edges |
 | `valence.reciprocity` | whether purchase history is returned to the household in standard form |
 
-`valence.reciprocity` is the field a household's agent reads when deciding routing preference (clause 46). A merchant that does not return history is not excluded from anything; it is not preferred.
+`valence.reciprocity` is the field a household's agent reads when deciding routing preference (clause 42). A merchant that does not return history is not excluded from anything; it is not preferred.
 
 There is no sponsored-placement field, and a conforming feed schema has no room to add one (clause 14).
 
@@ -299,15 +299,15 @@ There is no sponsored-placement field, and a conforming feed schema has no room 
 ```
 POST   /offers                      create. Validates the exploration floor.
 POST   /offers/{id}/present         ship or render. Reserves.
-POST   /offers/{id}/decisions       assign valences to candidates (signed as the mandate, §10.5, clause 39)
+POST   /offers/{id}/decisions       assign valences to candidates (signed as the mandate, §10.5, clause 35)
 POST   /offers/{id}/settle          price, commit, return a signed receipt
 POST   /offers/{id}/withdraw        revoke, release
-POST   /offers/{id}/remind          the one reminder (§10.4, clause 37)
+POST   /offers/{id}/remind          the one reminder (§10.4, clause 33)
 GET    /offers/{id}                 one offer, with its candidates
 GET    /offers/{id}/settlement      the settlement, once there is one
 GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
 POST   /candidates/{id}/note        one line, shared with whom the writer says
-GET    /candidates/{id}/note?as=    the lines shared with that party (clause 31)
+GET    /candidates/{id}/note?as=    the lines shared with that party (clause 27)
 POST   /lineage                     accept an edge
 ```
 
@@ -316,9 +316,9 @@ The same operations SHOULD be exposed as MCP tools, so that a merchant's agent a
 Three of these lines were corrected on 2026-09-08, after the conformance suites were written and found to require a surface this section did not describe.
 
 - **The reserve moves from `POST /offers` to `POST /offers/{id}/present`.** The earlier text put it on creation, which contradicts §6.4's table and orphans a hold every time the exploration floor refuses an offer.
-- **`POST /offers/{id}/remind` and `GET /offers/{id}` are named.** Both were required by the specification's own prose, §10.4 and §2.1, and neither appeared here. An implementation built from this section alone had no route for the one reminder clause 37 permits, and no way to read back the state the state machine describes.
+- **`POST /offers/{id}/remind` and `GET /offers/{id}` are named.** Both were required by the specification's own prose, §10.4 and §2.1, and neither appeared here. An implementation built from this section alone had no route for the one reminder clause 33 permits, and no way to read back the state the state machine describes.
 
-A fourth line was added on 2026-09-09. **`GET /offers/{id}/settlement`** reads a settlement back. §6 delivers a signed receipt to the household in the response to `POST /offers/{id}/settle` and gave no way to ask for it again, so a household that lost that response had lost its receipt, and clause 47's export could omit settlements while every read still agreed. A conformance probe comparing two hosts found it: the export dropped the settlements and the hosts still answered alike, because nothing asked.
+A fourth line was added on 2026-09-09. **`GET /offers/{id}/settlement`** reads a settlement back. §6 delivers a signed receipt to the household in the response to `POST /offers/{id}/settle` and gave no way to ask for it again, so a household that lost that response had lost its receipt, and clause 43's export could omit settlements while every read still agreed. A conformance probe comparing two hosts found it: the export dropped the settlements and the hosts still answered alike, because nothing asked.
 
 An endpoint a conformance test depends on belongs in this list. Where the two disagree, this list is what an implementer reads.
 
@@ -334,20 +334,20 @@ A conforming implementation does not have these routes. Their absence is checkab
 
 1. **Input.** History from the presenter's vertical ledger, season, prior valences, the exploration floor.
 2. **Generate.** Either the merchant's agent or the household's agent composes candidates. Both enter through `POST /offers`. The specification does not care which, and the endpoint MUST NOT behave differently.
-3. **Present.** Rendered in the household's approval surface with alternatives, and with the reason any candidate was excluded. The reason is one of the published rules and nothing else (clause 6, clause 40):
+3. **Present.** Rendered in the household's approval surface with alternatives, and with the reason any candidate was excluded. The reason is one of the published rules and nothing else (clause 6, clause 36):
 
    | Rule | What it means |
    |---|---|
-   | `auto_renewal` | the candidate carries an auto-renewing subscription (clause 52) |
-   | `obstructed_cancellation` | cancelling it is harder than buying it (clause 52) |
-   | `manufactured_scarcity` | the offer manufactures urgency or scarcity (clause 52) |
-   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 52; inside the network clause 10 prevents it, outside it does not) |
+   | `auto_renewal` | the candidate carries an auto-renewing subscription (clause 48) |
+   | `obstructed_cancellation` | cancelling it is harder than buying it (clause 48) |
+   | `manufactured_scarcity` | the offer manufactures urgency or scarcity (clause 48) |
+   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 48; inside the network clause 10 prevents it, outside it does not) |
    | `outside_mandate` | the candidate falls outside the mandate the household gave |
    | `declined_before` | the household returned this product before, and the agent is not offering it again |
 
    An implementation MUST refuse a deliberation whose reason is not in this list, with `400`. Adding a rule is a change to this specification, which is what makes an agent's routing auditable: every exclusion a person sees names a rule they can read here.
-4. **Decide.** Per candidate. One tap to confirm. At most one reminder (clause 37).
-5. **Sign.** The decided set is signed as an AP2 mandate, and `POST /offers/{id}/decisions` carries the signature beside the decisions (clause 39). What is signed is the set in this canonical shape, so a signature made by one hub verifies at any conforming endpoint:
+4. **Decide.** Per candidate. One tap to confirm. At most one reminder (clause 33).
+5. **Sign.** The decided set is signed as an AP2 mandate, and `POST /offers/{id}/decisions` carries the signature beside the decisions (clause 35). What is signed is the set in this canonical shape, so a signature made by one hub verifies at any conforming endpoint:
 
    ```
    <offer id>
@@ -439,13 +439,13 @@ Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Pas
 
 ## 14. Moving a node
 
-A household moves its node by exporting it from one host and importing it at another (clauses 47, 61). The export carries the household's offers, settlements, notes, receipts and the lineage edges it is an endpoint of.
+A household moves its node by exporting it from one host and importing it at another (clauses 43, 52). The export carries the household's offers, settlements, notes, receipts and the lineage edges it is an endpoint of.
 
 ### 14.1 What an import verifies
 
 An import is an arrival from outside, not a restore of the host's own backup, so it verifies what it is handed:
 
-- **Every edge is verified as if it had arrived at `POST /lineage`** (§7.1): the giver's key is attested and the signature covers the edge. An import that trusts an edge is a route around clause 25, and an edge is what makes a product no longer novel to a household (§5.1), so an unverified edge is also a way to shrink somebody else's exploration floor.
+- **Every edge is verified as if it had arrived at `POST /lineage`** (§7.1): the giver's key is attested and the signature covers the edge. An import that trusts an edge is a route around clause 22, and an edge is what makes a product no longer novel to a household (§5.1), so an unverified edge is also a way to shrink somebody else's exploration floor.
 - **Every edge touches the household whose path it arrives on**, as `from` or as `to`. Another household's edges are not this node's to carry.
 - **Every offer belongs to that household.** An import scoped only by the path writes other households' offers under it.
 - **A settled offer is never overwritten.** §2.1 makes `settled` terminal, and an import that replaces one has moved an offer out of it.
@@ -487,7 +487,7 @@ The line between a directory and the intent layer is whether the answer depends 
 - **No order that means anything.** A list is returned in key order and in no other. There is no field for rank, score, popularity, relevance, featured, or recommended, and no parameter that sorts.
 - **No query by intent.** The registry is queried by key or by protocol. It is not queried by product, category, occasion, price or any word a person would type when they want something. `?q=` is not a parameter and returns `404`, not an empty list.
 - **No per-asker answer.** The same query returns the same list to every caller. There is no personalisation and no field that identifies who asked.
-- **The mark is not a gate** (clause 64). An entry is listed whether or not it carries the mark. The mark is a fact in the entry, and an agent MAY prefer it, and the registry MUST NOT filter on it unless asked to by the caller.
+- **The mark is not a gate** (clause 55). An entry is listed whether or not it carries the mark. The mark is a fact in the entry, and an agent MAY prefer it, and the registry MUST NOT filter on it unless asked to by the caller.
 - **No product data.** The entry names endpoints. What the merchant sells is behind those endpoints, in the merchant's own feed, and the registry does not copy it.
 
 ### 16.3 Why the line is here

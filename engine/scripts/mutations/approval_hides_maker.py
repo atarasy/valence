@@ -1,5 +1,5 @@
 import pathlib
-# Clauses 12, 26: the screen the person signs from names maker, carrier and band. Drop them.
+# Clauses 12, 23: the screen the person signs from names maker, carrier and band. Drop them.
 p = pathlib.Path("src/approval.ts"); s = p.read_text()
 old = "        merchant: c.merchant,\n        ships: c.ships,\n"
 assert old in s

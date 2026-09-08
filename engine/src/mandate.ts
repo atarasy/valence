@@ -2,7 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import type { KeptAs, Valence } from "./types.js";
 
 /**
- * Clause 39. A confirmation is the person's signature over the decided set,
+ * Clause 35. A confirmation is the person's signature over the decided set,
  * in the AP2 mandate form. The set is signed in this canonical shape, so a
  * signature made by one hub verifies at any conforming endpoint:
  *
