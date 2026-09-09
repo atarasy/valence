@@ -304,6 +304,27 @@ A grant with `kind: computation` MUST name `result_form: "aggregate"` and an imp
 
 The enum has one member on purpose. A person cannot grant raw data to a computation even if they wish to, because a model trained on it cannot un-train a revoked grant (clause 40), and whoever held the raw data would be holding per-person events (clause 29). The limit is on what a grant can express, which is the only place it can be enforced.
 
+### 7.5b Carriage and delivery, which the household sees and the merchant does not
+
+Added 2026-09-10. Two things belong on a household's surface and on no merchant's: **what carriage costs, and where the parcel is.**
+
+```
+delivery
+  offer
+  carriage      what carriage costs on this offer, in the smallest unit
+  code          the delivery code of clause 49
+  status        placed | in_transit | delivered | returned
+  updated_at
+```
+
+`GET /offers/{id}/delivery` returns it to the household. **It is not on the offer, not on the settlement, and not in `valence-merchant/1`.** An implementation MUST refuse `code` and `status` as request fields on any merchant-facing route, and MUST NOT carry them in the merchant export (§14.1).
+
+**Why the merchant is on the other side of this line.** Clause 49 keeps identity from the merchant, and a carrier's tracking number is a lookup key into the delivery address: a merchant holding one can read where the household lives from the carrier, without ever having a field for an address. The absence of the field is not the protection; the absence of anything that resolves to it is. This is the inference channel `04b` of the concept documents calls "an identifier that resolves elsewhere", and it is the one that made `leak_field_settlement` a mutation worth writing.
+
+**What the merchant needs instead, and already has.** A presenter learns what happened to the goods from the state machine and the recovery, not from a carrier: `present` ships, §11 records what came back, and settlement prices what was kept. Nothing in that path wants a tracking number.
+
+**Carriage is on this surface and not on the candidate.** Clause 10 keeps the price the merchant's and clause 4 keeps a person-side fee from being a function of what was bought, so carriage is neither a price nor a fee here: it is what the shop is charged and shows, quoted to the household on its own line before it decides. `17` §2b of the concept documents holds the shape.
+
 ### 7.6 The recipient's record
 
 A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 19). No preference, no profile, no score is derived from having received.
@@ -343,6 +364,7 @@ POST   /offers/{id}/withdraw        revoke, release
 POST   /offers/{id}/remind          the one reminder (§10.4, clause 33)
 GET    /offers/{id}                 one offer, with its candidates
 GET    /offers/{id}/settlement      the settlement, once there is one
+GET    /offers/{id}/delivery        carriage and where the parcel is (§7.5b). The household's surface, never a merchant's
 GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
 POST   /candidates/{id}/note        one line, shared with whom the writer says
 GET    /candidates/{id}/note?as=    the lines shared with that party (clause 27)

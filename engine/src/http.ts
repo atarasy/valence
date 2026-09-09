@@ -3,6 +3,7 @@ import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
+import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -102,6 +103,8 @@ export type Hub = {
   approvals: ApprovalDesk;
   permissions: PermissionLedger;
   registry: Registry;
+  /** §7.5b. Carriage and where the parcel is, on the person's side of clause 49. */
+  deliveries: DeliveryRegister;
 };
 
 /**
@@ -157,7 +160,7 @@ async function route(
   hub: Hub,
   request: Request
 ): Promise<Response> {
-  const { recovery, approvals, permissions, registry } = hub;
+  const { recovery, approvals, permissions, registry, deliveries } = hub;
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
@@ -589,6 +592,28 @@ async function route(
         engine.applyRecoveryTo(id);
         return json(collected);
       }
+      // §7.5b. The household's surface. A merchant never reaches this: a
+      // carrier's code resolves to an address, which clause 49 keeps away
+      // from them, and the state machine already tells them what they need.
+      if (method === "GET" && action === "delivery") {
+        return json(deliveries.mustGet(id));
+      }
+      if (method === "POST" && action === "delivery") {
+        const raw = strict(
+          await body(request),
+          ["carriage", "code", "status"],
+          "delivery"
+        ) as { carriage: number; code: string; status: string };
+        return json(
+          deliveries.record({
+            offer: id,
+            carriage: raw.carriage,
+            code: raw.code,
+            status: raw.status as DeliveryStatus,
+          }),
+          201
+        );
+      }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can
         // lose by closing a tab.
@@ -848,7 +873,7 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "export") {
     // Clause 43. Everything the household holds, whatever a surface shows.
     if (method === "GET") {
-      return json(exportNode(engine, recovery, permissions, engine.mandates, parts[1]));
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, parts[1]));
     }
   }
 
@@ -874,6 +899,7 @@ async function route(
       recovery.importLog(moving, body_.recoveries ?? []);
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
       for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
+      deliveries.importRows(body_.deliveries ?? []);
       return json({ imported: true }, 201);
     }
   }

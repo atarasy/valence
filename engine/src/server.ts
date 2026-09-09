@@ -5,6 +5,7 @@ import { createApp } from "./http.js";
 import { RecoveryRegister } from "./hub/node.js";
 import { ApprovalDesk } from "./hub/approval.js";
 import { PermissionLedger } from "./hub/permissions.js";
+import { DeliveryRegister } from "./hub/delivery.js";
 import { Registry } from "./shared/registry.js";
 
 const rate = Number(process.env.VALENCE_EXPLORATION_RATE);
@@ -58,6 +59,7 @@ const hub = {
   recovery: new RecoveryRegister(),
   approvals: new ApprovalDesk(),
   permissions: new PermissionLedger(),
+  deliveries: new DeliveryRegister(),
   registry,
 };
 

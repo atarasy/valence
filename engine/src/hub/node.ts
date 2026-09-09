@@ -3,6 +3,7 @@ import type { ValenceEngine } from "../engine/offers.js";
 import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "../common/types.js";
 import type { Permission, Query, PermissionLedger } from "./permissions.js";
 import type { Mandate, MandateRegister } from "./mandates.js";
+import type { Delivery, DeliveryRegister } from "./delivery.js";
 
 /**
  * A household's node, and what leaves with it.
@@ -54,6 +55,8 @@ export type NodeExport = {
   queries: Query[];
   /** Clauses 46, 47, 52, 58. The person's standing protections. */
   mandates: Mandate[];
+  /** §7.5b. Carriage and where each parcel is. The person's side of clause 49. */
+  deliveries: Delivery[];
 };
 
 export type RecoveryRecord = {
@@ -151,6 +154,7 @@ export function exportNode(
   recovery: RecoveryRegister,
   permissions: PermissionLedger,
   mandates: MandateRegister,
+  deliveries: DeliveryRegister,
   household: string,
   now = Date.now()
 ): NodeExport {
@@ -173,6 +177,7 @@ export function exportNode(
     recoveries: recovery.logFor(household),
     ...permissions.exportFor(household),
     mandates: mandates.forHousehold(household),
+    deliveries: deliveries.forHousehold(offers.map((o) => o.id)),
   };
 }
 
