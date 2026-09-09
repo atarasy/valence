@@ -173,7 +173,7 @@ export class ValenceEngine {
     if (attested) this.rootEndorsed.add(key);
   }
 
-  /** §7.1. Whether an identity root endorsed this key (clause 2, `02` §3.2). */
+  /** §7.1. Whether an identity root endorsed this key (clause 2). */
   isRootEndorsed(key: string): boolean {
     return this.rootEndorsed.has(key);
   }

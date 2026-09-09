@@ -210,7 +210,9 @@ The field is not redundant, and it was added on 2026-09-08 after a conformance p
 
 ### 6.1 Nothing accrues
 
-Nothing carries from one settlement to the next. There is no balance, and since 2026-09-09 there is nothing to deduct either: a trial is a sample, which is free, or it is goods, which are bought at the merchant's price. An implementation MUST NOT hold a household balance redeemable against future goods, which is a prepaid payment instrument in several jurisdictions and out of reach for most implementers.
+Nothing carries from one settlement to the next. There is no balance, and since 2026-09-09 there is nothing to deduct either: every line settles on one of the two bases in §6.2 and there is no third. An implementation MUST NOT hold a household balance redeemable against future goods, which is a prepaid payment instrument in several jurisdictions and out of reach for most implementers.
+
+An earlier wording of this paragraph said a trial "is a sample, which is free, or it is goods, which are bought at the merchant's price". That was a third basis, asserted three lines above the sentence in §6.2 denying that a third exists, and it used the word the model deliberately does not carry: goods received as a sample read as a promotion and as worth less than their price, which is why a candidate carries a giver (`given_by`) and never a sample flag.
 
 ### 6.2 What was used is bought; what was given is a gift
 

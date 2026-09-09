@@ -35,19 +35,19 @@ This specification is where several constitutional clauses become structural. We
 
 | Clause | Enforced as |
 |---|---|
-| 30 exploration floor | `POST /offers` returns `422`. No configuration bypasses it; the rate cannot reach zero (§5) |
+| 26 exploration floor | `POST /offers` returns `422`. No configuration bypasses it; the rate cannot reach zero (§5) |
 | 10 curator cannot price | No field, parameter or configuration raises a household's price above the merchant's own (§3.1) |
-| 19 no negative signal | No field in the giver's response surface can express or permit inference of recipient inaction (§7.2) |
-| 31–34 absent capabilities | No discount object, no rating, no urgency field, no per-person tracking id (§3.3); no `/segments`, `/broadcast`, `/discounts`, `/ratings`, `/events/track` (§9.1) |
-| 36 silence is not consent | An undecided digital candidate becomes `returned` at expiry, and no configuration makes it `kept` (§2.2) |
-| 25 lineage is not gated | A well-formed, correctly signed edge is accepted regardless of which client produced it (§7.1) |
-| 28 no unredeemed revenue | Ceremonial offers ship a default; nothing is earned from a recipient who does not choose (§12) |
+| 16 no negative signal | No field in the giver's response surface can express or permit inference of recipient inaction (§7.2) |
+| 27–30 absent capabilities | No discount object, no rating, no urgency field, no per-person tracking id (§3.3); no `/segments`, `/broadcast`, `/discounts`, `/ratings`, `/events/track` (§9.1) |
+| 32 silence is not consent | An undecided digital candidate becomes `returned` at expiry, and no configuration makes it `kept` (§2.2) |
+| 22 lineage is not gated | A well-formed, correctly signed edge is accepted regardless of which client produced it (§7.1) |
+| 25 no unredeemed revenue | Ceremonial offers ship a default; nothing is earned from a recipient who does not choose (§12) |
 
 §13 lists the eight conditions an implementation must meet. Anything added to the specification that cannot be checked from outside the implementation does not belong in §13.
 
 ## Things that will be tempting and are wrong
 
-**Adding a balance.** §6.1 settles by *deduction*, never by crediting. A household balance redeemable against goods is a third-party prepaid payment instrument; registration requires ¥100M in net assets and is closed to the implementers this was written for. If a design seems to need a balance, it needs a deduction.
+**Adding a balance.** A household balance redeemable against goods is a third-party prepaid payment instrument; registration requires ¥100M in net assets and is closed to the implementers this was written for. This entry used to end "if a design seems to need a balance, it needs a deduction", which was true while a trial settled against a cost basis. That basis left the model on 2026-09-09 (clause 10), so there is now nothing to deduct: a design that seems to need a balance needs one of the two bases in §6.2, which are the merchant's price for what was used and zero for what was given.
 
 **Charging the household for `lost`.** §3.2. Loss is borne by whoever holds stock risk. The trust model is the point; loss rate is an operating metric, not a receivable.
 

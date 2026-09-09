@@ -6,7 +6,7 @@ import { badRequest, conflict, notFound, unprocessable } from "../common/errors.
  *
  * Clauses 37 to 42. A list of exceptions to "nobody but me", not a list that
  * includes me: the default recipient of data is the person's own agent, and
- * that is not a permission (42). If the person appeared in this ledger their
+ * that is not a permission (38). If the person appeared in this ledger their
  * own entry could be revoked, and the hub would stop working.
  *
  * Six things are structural here rather than checked, because a rule that can

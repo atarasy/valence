@@ -108,8 +108,9 @@ export type Hub = {
  * The composition root, and the only place the three sides meet.
  *
  * `src/engine/` is the presenter's: offers, decisions, settlement, the
- * physical binding and the billing ledger. Anyone who presents runs it, and
- * Vox is one implementation of it as a Shopify app would be another.
+ * physical binding and the billing ledger. Anyone who presents runs it, so a
+ * merchant-side platform and a shop's own Shopify app are peers here, and this
+ * file names neither.
  *
  * `src/hub/` is the person's: the approval surface, the permission ledger,
  * mandates, recovery and the node's export. A member opens it, and Atarasy
