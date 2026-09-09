@@ -1,6 +1,6 @@
 import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
-import { exportNode, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
+import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
@@ -848,7 +848,7 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "export") {
     // Clause 43. Everything the household holds, whatever a surface shows.
     if (method === "GET") {
-      return json(exportNode(engine, recovery, parts[1]));
+      return json(exportNode(engine, recovery, permissions, engine.mandates, parts[1]));
     }
   }
 
@@ -856,7 +856,7 @@ async function route(
     // Clause 52. The receiving host of a move.
     if (method === "POST") {
       const body_ = (await body(request)) as NodeExport;
-      if (!body_ || body_.format !== "valence-node/1") {
+      if (!body_ || body_.format !== EXPORT_FORMAT_VERSION) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);
@@ -865,6 +865,15 @@ async function route(
       for (const n of body_.notes ?? []) engine.importNote(n);
       for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
       engine.importReceipts(parts[1], body_.receipts ?? []);
+      // Until 2026-09-09 the loop stopped above. The export already carried the
+      // recovery log, and this end dropped it; the ledger, the queries and the
+      // mandates were in neither end. A member who moved kept their offers and
+      // arrived with no ceiling, no co-signers, no lapse, no permissions and no
+      // record of who had recovered their node, while every probe stayed green
+      // because none of them asked.
+      recovery.importLog(moving, body_.recoveries ?? []);
+      permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
+      for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
       return json({ imported: true }, 201);
     }
   }

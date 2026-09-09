@@ -63,6 +63,20 @@ export class MandateRegister {
     return this.rows.get(id);
   }
 
+  /**
+   * Clause 52, and §14.2. A mandate is the person's standing protections, so a
+   * move that leaves it behind hands the receiving host a member with no
+   * ceiling, no co-signers and no lapse. It was outside the export until
+   * 2026-09-09, which is what `exit/` now asks about rather than trusting.
+   */
+  forHousehold(household: string): Mandate[] {
+    return [...this.rows.values()].filter((m) => m.household === household);
+  }
+
+  importMandate(m: Mandate): void {
+    this.rows.set(m.id, { ...m, co_signers: [...m.co_signers] });
+  }
+
   mustGet(id: string, now = Date.now()): Mandate {
     const m = this.rows.get(id);
     if (!m) throw notFound(`no mandate ${id}`);

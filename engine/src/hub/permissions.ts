@@ -89,6 +89,27 @@ export class PermissionLedger {
   private readonly queries = new Map<string, Query[]>();
 
   /**
+   * Clause 43, and §14.2. What leaves with the node, and what arrives with it.
+   *
+   * The ledger was outside the export until 2026-09-09, so a member who moved
+   * host kept their offers and lost every permission they had granted. The
+   * queries go too: clause 20 makes the duplicate check answerable only by
+   * writing the question into the recipient's record, and a record that does
+   * not move has not moved.
+   */
+  exportFor(household: string): { permissions: Permission[]; queries: Query[] } {
+    return {
+      permissions: [...(this.rows.get(household) ?? [])],
+      queries: [...(this.queries.get(household) ?? [])],
+    };
+  }
+
+  importFor(household: string, permissions: Permission[], queries: Query[]): void {
+    if (permissions.length) this.rows.set(household, [...permissions]);
+    if (queries.length) this.queries.set(household, [...queries]);
+  }
+
+  /**
    * Opens an action that a permission can be asked for. Deployment plumbing:
    * the specification describes the ledger, not how a hub decides it needs one.
    */
