@@ -379,7 +379,7 @@ A conforming implementation does not have these routes. Their absence is checkab
    | `auto_renewal` | the candidate carries an auto-renewing subscription (clause 48) |
    | `obstructed_cancellation` | cancelling it is harder than buying it (clause 48) |
    | `manufactured_scarcity` | the offer manufactures urgency or scarcity (clause 48) |
-   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 48; inside the network clause 10 prevents it, outside it does not) |
+   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 48). This bites inside the network as well as outside it. An earlier version of this row said clause 10 prevents it inside, which is a join of two true things into a false one: clause 10 forbids a curator, a representative or a platform raising the merchant's price, and says nothing about a merchant adding carriage at its own checkout. What would prevent it is the requirement that carriage appear as a line of its own beside the candidates, with the terms of consolidation, before the person decides. That was clause 54 until 2026-09-09, when it was withdrawn as a requirement on a surface rather than a prohibition, and it has not been written into this specification since |
    | `outside_mandate` | the candidate falls outside the mandate the household gave |
    | `declined_before` | the household returned this product before, and the agent is not offering it again |
 
@@ -441,11 +441,11 @@ A ceremonial offer names a `giver` beside its `price_band`, and the giver is the
 
 | requirement | clause |
 |---|---|
-| The recipient chooses; the giver does not see the candidates | 27 |
-| The offer carries the band the giver chose, shown to the recipient on the approval surface as well as the offer, and no candidate lies outside it. The band bounds the **line**, `unit_price × quantity`, not the unit: five units of something inside the band is five times the band. A candidate outside it is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 26 |
-| If nothing is chosen before expiry, one candidate is `defaulted` and shipped. "Nothing chosen" is the whole condition: a recipient who kept one item and left the rest has chosen, and no default ships beside a kept candidate | 28 |
-| Nothing is earned from an unredeemed offer | 28 |
-| Cards, wrapping and denominational wording match local convention exactly | 29 |
+| The recipient chooses; the giver does not see the candidates | 24 |
+| The offer carries the band the giver chose, shown to the recipient on the approval surface as well as the offer, and no candidate lies outside it. The band bounds the **line**, `unit_price × quantity`, not the unit: five units of something inside the band is five times the band. A candidate outside it is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 23 |
+| If nothing is chosen before expiry, one candidate is `defaulted` and shipped. "Nothing chosen" is the whole condition: a recipient who kept one item and left the rest has chosen, and no default ships beside a kept candidate | 25 |
+| Nothing is earned from an unredeemed offer | 25 |
+| Cards, wrapping and denominational wording match local convention exactly | none. This was clause 29 until 2026-09-09, when the review withdrew it as a requirement standing in a list of prohibitions. It is this specification's, and no clause backs it |
 
 The last is not decoration. An implementation that gets the wording of a funeral return wrong has failed regardless of the rest.
 
@@ -556,7 +556,7 @@ Added 2026-09-09. A merchant that speaks Valence has to be findable by a househo
 
 ### 17.1 What it is
 
-A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 2 calls shared and neutral, made concrete.
+A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 1 asks for, one that resolves and does not rank, made concrete. This sentence cited clause 2 until 2026-09-09; routing moved to clause 1 in the review and the citation did not follow, so it named the identity clause as authority for a directory.
 
 ```
 entry
