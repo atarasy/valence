@@ -108,14 +108,22 @@ nothing resolves it.
 
 ## Structure
 
-| File | What is in it |
-|---|---|
-| `src/common/types.ts` | the domain, with the clause each shape answers to |
-| `src/engine/offers.ts` | the state machine, the floor, expiry, settlement, lineage |
-| `src/engine/ledger.ts` | the reserve-and-commit port, and the ceiling |
-| `src/shared/lineage.ts` | the bytes a giver signs |
-| `src/common/validate.ts` | why an unknown field is refused rather than dropped |
-| `src/http.ts` | the §9 surface, and nothing else |
+Four directories, split on 2026-09-09 so that the code says whose each part
+is. The constitution binds them differently, and a flat directory made the
+neutral registry look like a field on the person's side.
+
+| Directory | Whose it is | What is in it |
+|---|---|---|
+| `src/engine/` | the presenter's, which anyone who presents runs | offers and the state machine, the exploration floor, expiry, settlement, the physical binding, the billing ledger |
+| `src/hub/` | the person's, which a member opens | the approval surface, the permission ledger, mandates, recovery, the node's export |
+| `src/shared/` | neither side's | the endpoint registry, and the canonical bytes for a lineage edge and a decided set |
+| `src/common/` | plumbing | the domain types with the clause each shape answers to, the errors, and why an unknown field is refused rather than dropped |
+| `src/http.ts` | the composition root | the §9 surface and the fixture routes, and the one place the three meet |
+
+They run in one process so the conformance suites reach both sides over one
+port. The boundary is real all the same: the engine asks the hub for a mandate
+and for whether a merchant is in the network, and holds nothing else of the
+hub's.
 
 ## Licence
 
