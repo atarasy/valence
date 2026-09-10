@@ -646,6 +646,12 @@ At settlement, an implementation that holds a mandate for the offer MUST refuse 
 
 A category travels from the catalogue onto the candidate with the price and the merchant (§3.1), and there is no request field that sets it.
 
+**What signing the category does and does not buy.** It is inside the catalogue's signed bytes, so **a party relaying a catalogue cannot strip one**. It does not stop the presenter itself from publishing a version that omits the category, because a catalogue is signed by the presenter's own key and the presenter chooses which version an offer names. **So this protection binds a presenter that is careless and not one that is set on avoiding it.**
+
+That limit is written here rather than left to be discovered, and it has a shape a person can act on: **a ceiling is the protection a presenter cannot relabel**, because it is arithmetic on a price rather than a judgement about a word. A person who wants the second signature to survive a presenter's own choices pairs the category with a ceiling; a person who wants a prompt when goods of a kind arrive is served by the category alone.
+
+An implementation MUST NOT treat an absent category as a category the mandate names. Making absence trigger the second signature would close the gap above, and it would ask for a co-signer on every uncategorised product from every shop, which is a different protection than the one the person asked for.
+
 When a decided set contains a candidate whose category is in `co_sign_categories`, `POST /offers/{id}/decisions` MUST refuse with `422` unless it carries a co-signer's signature over the same canonical set beside the household's. One co-signer is enough, and the mandate's `co_signers` are the eligible set.
 
 ### 16.5 Cooling
