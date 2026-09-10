@@ -520,21 +520,25 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 
 **A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
 
-### 13.2 What this section divides, and what it does not
+### 13.2 The state a hub holds, and how it gets it
 
-**It divides routes. It does not yet divide state**, and the difference is the honest limit of the reference as of 2026-09-11. Three places show it, and all three were found by an adversarial pass on the day the split was built rather than by reading the design:
+Dividing routes is not dividing state, and for a day the reference did the first without the second: a hub presenting its role alone answered for the person's surface with nothing behind it. **An implementation MUST NOT present the hub role while answering the person's surface out of a presenter's store.**
 
-| The route | The hub answers it | The state it needs |
+The person's side holds three things, and two of them arrive from the engine.
+
+| What the hub holds | How it gets it | Why it is the person's |
 |---|---|---|
-| `GET /households/{id}/export` | yes | the person's own copy of their offers, settlements and notes, which the reference keeps in the engine's store |
-| the daily ceiling of §16.3 | the mandate is the hub's | the sum of what settled today, which the engine computes from its own settlements |
-| `GET /offers/{id}/delivery` | yes, and it works | the delivery register, which the hub does hold |
+| the delivery register | written on the hub's own route (§7.5b) | a carrier's code resolves to an address, and no merchant may read one |
+| the person's copy of an offer, **including what they declined** | `POST /households/{id}/offers`, sent by the engine when the set is decided | clause 8. What was declined is recorded in the person's node, across every merchant, and no merchant holds that |
+| what settled for the person, as an amount and a date | `POST /households/{id}/settled`, sent by the engine as it settles | §16.3's sum is the household's union, and an engine computing it is a merchant computing a person's union (clause 38) |
 
-**So a hub presenting its role alone answers for the person's surface and, for two of those three, has nothing behind it.** An export would come back empty and a daily ceiling would bind one deployment rather than a household.
+**The copy of an offer is reported when the set is decided, not when it settles.** A copy that arrived only when something was bought would hold the purchases and lose the refusals, which is the half the person's record exists for.
 
-What closes it is not more routing. `02` of the concept documents has said from the start that a person's record is **two copies**, the person's own and the merchant's vertical ledger, and the reference has one store doing both jobs. The hub needs its own, written as offers settle, and the daily sum belongs beside the mandate rather than beside the settlements.
+**What settled carries an amount, a date and the offer it belongs to, and nothing about what was in it.** A copy that carried products and merchants would be a second vertical ledger on the person's side rather than the person's own.
 
-**An implementation MUST NOT present the hub role while answering the person's surface out of a presenter's store.** The reference does exactly that today when it runs both roles in one process, which is permitted because one party holds both; it is not permitted where the two are different parties, and that is the case the split exists for.
+**An engine MUST refuse rather than proceed when the hub cannot be reached**, whether it is asking for a mandate, asking for the day's total, or reporting either of the two above. Reading a transport failure as an absent mandate, an empty day, or a report that can be dropped would each fail open: the protections would disappear exactly when the network did.
+
+**Keys are neither role's.** `/_presenter/identities` registers the public key of a presenter, a household or a recipient, and both roles verify signatures, so both hold them. Clause 2 puts the root of identity outside this system, which is why this is not a copy one party lends the other. The endpoint registry (§17) is the same and for the same reason (clause 1).
 
 **A route this deployment does not present MUST be refused with `404` and the reason `not_this_role`.** The status is a 404 because from the caller's side the route is not on this party. The name is required because the status alone says two different things: an implementation answers 404 for a household it has never heard of, and the same 404 for a surface it does not present. **A caller that cannot tell them apart retries against the party that will never answer**, and a conformance probe cannot tell an empty implementation from an absent role. This is §16.6's discipline in another place: a refusal names itself.
 
