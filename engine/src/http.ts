@@ -68,6 +68,10 @@ function candidateView(c: Candidate) {
     unit_price: c.unit_price,
     merchant: c.merchant,
     ships: c.ships,
+    // §16.4. The merchant's own category, travelling with the price. It is the
+    // merchant's published data rather than anything about the household, and
+    // the person's agent needs it to say why a second signature was asked for.
+    category: c.category,
     predicted_conversion: c.predicted_conversion,
     is_exploration: c.is_exploration,
     given_by: c.given_by,
@@ -185,7 +189,7 @@ async function route(
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["merchant", "ships", "price", "physical"], `product ${ref}`);
+        const entry = strict(value, ["merchant", "ships", "price", "category", "physical"], `product ${ref}`);
         const physicalRaw = entry.physical;
         let physical;
         if (physicalRaw !== undefined) {
@@ -208,6 +212,13 @@ async function route(
           merchant: requireString(entry, "merchant", `product ${ref}`),
           ships: requireString(entry, "ships", `product ${ref}`),
           price: requireInteger(entry, "price", `product ${ref}`, 0),
+          // §8, §16.4. The merchant's own category. Optional, because a
+          // catalogue that names none is a catalogue nothing needs a second
+          // signature for, not a malformed one.
+          category:
+            entry.category === undefined
+              ? undefined
+              : requireString(entry, "category", `product ${ref}`),
           physical,
         };
       }
@@ -441,7 +452,11 @@ async function route(
         return json(offerView(await engine.present(id)));
       }
       if (method === "POST" && action === "decisions") {
-        const raw = strict(await body(request), ["decisions", "signature"], "decisions");
+        const raw = strict(
+          await body(request),
+          ["decisions", "signature", "co_signature"],
+          "decisions"
+        );
         const list = raw.decisions;
         if (!Array.isArray(list)) {
           throw badRequest("malformed", "decisions must be an array");
@@ -475,7 +490,26 @@ async function route(
                 : requireString(entry, "lineage", `decision ${i}`),
           };
         });
-        return json(offerView(engine.decide(id, decisions, requireString(raw, "signature", "decisions"))));
+        // §16.4. A co-signature is present only when a category the person
+        // named is in the set; the engine decides whether it was needed.
+        const coSignature =
+          raw.co_signature === undefined
+            ? undefined
+            : requireString(raw, "co_signature", "decisions");
+        return json(
+          offerView(
+            engine.decide(
+              id,
+              decisions,
+              requireString(raw, "signature", "decisions"),
+              coSignature
+            )
+          )
+        );
+      }
+      // §16.5. The person takes back a signed set inside its cooling window.
+      if (method === "DELETE" && action === "decisions") {
+        return json(offerView(engine.withdrawDecisions(id)));
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
@@ -767,13 +801,35 @@ async function route(
   if (parts[0] === "_node" && parts[1] === "mandates" && method === "POST") {
     const raw = strict(
       await body(request),
-      ["id", "household", "ceiling_out_of_network", "co_signers", "lapses_at", "version", "signatures"],
+      [
+        "id",
+        "household",
+        "ceiling_out_of_network",
+        "ceiling_daily",
+        "co_sign_categories",
+        "cooling_seconds",
+        "co_signers",
+        "lapses_at",
+        "version",
+        "signatures",
+      ],
       "mandate"
     );
     const coRaw = raw.co_signers;
     if (!Array.isArray(coRaw) || coRaw.some((k) => typeof k !== "string")) {
       throw badRequest("malformed", "co_signers must be an array of keys");
     }
+    // §16. Absent is not zero. A missing ceiling_daily is no daily ceiling,
+    // where 0 would refuse everything; a missing cooling_seconds is no
+    // cooling, where 0 is the same behaviour by a different route.
+    const catRaw = raw.co_sign_categories ?? [];
+    if (!Array.isArray(catRaw) || catRaw.some((c) => typeof c !== "string")) {
+      throw badRequest("malformed", "co_sign_categories must be an array of categories");
+    }
+    const optionalInteger = (field: string): number | null =>
+      raw[field] === undefined || raw[field] === null
+        ? null
+        : requireInteger(raw, field, "mandate", 0);
     const sigRaw = raw.signatures;
     if (typeof sigRaw !== "object" || sigRaw === null || Array.isArray(sigRaw)) {
       throw badRequest("malformed", "signatures is an object of key to signature");
@@ -789,6 +845,9 @@ async function route(
           id: requireString(raw, "id", "mandate"),
           household: requireString(raw, "household", "mandate"),
           ceiling_out_of_network: requireInteger(raw, "ceiling_out_of_network", "mandate", 0),
+          ceiling_daily: optionalInteger("ceiling_daily"),
+          co_sign_categories: catRaw as string[],
+          cooling_seconds: optionalInteger("cooling_seconds"),
           co_signers: coRaw as string[],
           lapses_at: requireInteger(raw, "lapses_at", "mandate", 0),
           version: requireInteger(raw, "version", "mandate", 1),

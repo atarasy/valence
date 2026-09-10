@@ -22,6 +22,12 @@ export type Mandate = {
   /** Clause 47. Named while the person has capacity; a loosening needs them all. */
   co_signers: string[];
   /** Clause 58. A standing mandate lapses unless renewed. */
+  /** §16.3. What may settle for this household in one day. Null is no ceiling, which 0 is not. */
+  ceiling_daily: number | null;
+  /** §16.4. Feed categories whose candidates need a co-signer on the decided set. */
+  co_sign_categories: string[];
+  /** §16.5. How long a decided set waits before it settles. Null is no cooling. */
+  cooling_seconds: number | null;
   lapses_at: number;
   version: number;
 };
@@ -36,6 +42,13 @@ export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number
       m.id,
       m.household,
       String(m.ceiling_out_of_network),
+      // §16. The three added on 2026-09-10 sit here and not at the end, so the
+      // record's order is its own rather than an accident of history. Nothing
+      // stored breaks: a signature is checked when its version is submitted
+      // and is never retained.
+      m.ceiling_daily === null ? "" : String(m.ceiling_daily),
+      [...m.co_sign_categories].sort().join(","),
+      m.cooling_seconds === null ? "" : String(m.cooling_seconds),
       [...m.co_signers].sort().join(","),
       String(m.lapses_at),
       String(m.version),
@@ -53,7 +66,27 @@ export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number
 export function loosens(before: Mandate, after: Mandate): boolean {
   if (after.ceiling_out_of_network > before.ceiling_out_of_network) return true;
   if (after.lapses_at > before.lapses_at) return true;
-  return before.co_signers.some((k) => !after.co_signers.includes(k));
+  if (before.co_signers.some((k) => !after.co_signers.includes(k))) return true;
+  // §16.1. Removing a category and shortening cooling loosen for the same
+  // reason raising a ceiling does: each takes away a protection the person
+  // put there, so each needs every co-signer the previous version named.
+  if (before.co_sign_categories.some((c) => !after.co_sign_categories.includes(c))) return true;
+  if (widens(before.ceiling_daily, after.ceiling_daily)) return true;
+  return shortens(before.cooling_seconds, after.cooling_seconds);
+}
+
+/** Null is no ceiling, so moving to null widens and moving off it does not. */
+function widens(before: number | null, after: number | null): boolean {
+  if (after === null) return before !== null;
+  if (before === null) return false;
+  return after > before;
+}
+
+/** Null is no cooling, so moving to null shortens and moving off it does not. */
+function shortens(before: number | null, after: number | null): boolean {
+  if (after === null) return before !== null;
+  if (before === null) return false;
+  return after < before;
 }
 
 export class MandateRegister {

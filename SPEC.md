@@ -95,6 +95,7 @@ candidate
   unit_price             the merchant's own price. Immutable within the offer.
   merchant               who made it: the merchant of record (clauses 11, 12). From the catalogue, never the request.
   ships                  who carries it to the household (clause 12). From the catalogue.
+  category               the merchant's own category, or null. From the catalogue, never the request. A mandate names values of it (§16.4).
   predicted_conversion   0..1, or null. The presenter's own model output.
   is_exploration         boolean. Counts toward the floor (§5).
   given_by               the key of whoever gave this candidate, or null. A gift is never billed to its recipient (§6.2, clause 10).
@@ -171,6 +172,8 @@ Without this the floor is satisfiable by relabelling. A presenter marks the item
 ### 5.2 A presenter is a key, not a name
 
 The floor counts what **this presenter** has offered this household, so what a presenter is decides what the floor is worth. A presenter is the holder of a key: a catalogue is accepted only when it is signed by the key registered for the presenter it names, so nobody publishes catalogues under another presenter's name, and a presenter cannot disown one it published.
+
+**The category is inside the signed bytes of a catalogue**, beside the price. Left outside them, whoever relays a catalogue could strip a category, and a candidate that needed a second signature under §16.4 would quietly stop needing one. A protection that a relay can remove is not a protection.
 
 An offer says whether an identity root endorsed that key (`presenter_attested`, §7.1). Where it did, changing name means presenting a second identity to that root, which is a thing the root can see and a household can weigh. Where it did not, the name is the presenter's own word.
 

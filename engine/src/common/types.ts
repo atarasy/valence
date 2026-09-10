@@ -41,6 +41,14 @@ export type CatalogueEntry = {
   /** Clause 12. Who carries it to the household. */
   ships: string;
   price: number;
+  /**
+   * §8, §16.4. The merchant's own category for the product. A mandate names
+   * values of it to say what needs a second signature. This implementation
+   * matches strings and interprets nothing: a hub that decided which goods
+   * were medicines or investments would be judging merchandise, which
+   * clauses 1 and 44 remove.
+   */
+  category?: string;
   /** §11.1. Absent for a product that is never placed in a home. */
   physical?: PhysicalEligibility;
 };
@@ -105,6 +113,8 @@ export type Candidate = {
   /** Clauses 11 and 12. Copied from the catalogue with the price; never from the request. */
   merchant: string;
   ships: string;
+  /** §16.4. Copied from the catalogue with the price. No request field sets it. */
+  category: string | null;
   predicted_conversion: number | null;
   is_exploration: boolean;
   /**
@@ -146,6 +156,11 @@ export type Offer = {
   candidates: Candidate[];
   /** §10.4: at most one reminder. Not a rate limit; a hard count. */
   reminders_sent: number;
+  /**
+   * §16.5. When the set was signed, which is when a cooling window starts.
+   * Null until the offer is decided, and null again if the set is withdrawn.
+   */
+  decided_at: number | null;
 };
 
 export type Note = {
