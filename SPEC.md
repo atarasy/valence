@@ -426,6 +426,19 @@ A conforming implementation does not have these routes. Their absence is checkab
    ```
 
    one line per decision in ascending candidate id, UTF-8, `\n` between lines; the signature is ed25519 over those bytes, base64, by the key registered for the offer's `mandate`. An implementation MUST refuse, with `422`, a decided set with no signature, a signature by another key, or a signature over a set other than the one sent; nothing is written on refusal.
+
+   **A passkey cannot sign those bytes, and the concept documents assume it does.** Found on 2026-09-11, while building the member's side. An authenticator signs the concatenation of its own `authenticatorData` and the SHA-256 of `clientDataJSON`, never bytes a caller hands it, so a signature made by a password manager over this canonical form does not exist. `04` §2.1 of the concept documents says the hub asks a manager for a WebAuthn signature and nothing else, and `12` calls the mandate "signed with a passkey (the SPC pattern)". As written, an implementation that follows them cannot conform.
+
+   **So a decided set carries one of two shapes**, and an implementation MUST accept both.
+
+   | shape | what is sent | how it is verified |
+   |---|---|---|
+   | `signature` | ed25519 over the canonical bytes, base64 | against the key registered for the mandate |
+   | `assertion` | `authenticator_data`, `client_data_json`, `signature`, base64 each | the `challenge` inside the client data equals the base64url SHA-256 of the canonical bytes, and the signature covers `authenticator_data` concatenated with the SHA-256 of `client_data_json`, by the key registered for the mandate |
+
+   **The canonical form is what is signed in both**, once directly and once as the challenge. That is the whole reason the challenge is not random here: a random challenge proves a person was present and says nothing about what they agreed to, and clause 35 is about what they agreed to.
+
+   The reference and the conformance suites use the first, because a suite that needed an authenticator could not run anywhere. A member's device uses the second.
 6. **Order.** Kept candidates proceed to an ACP checkout session.
 
 Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
