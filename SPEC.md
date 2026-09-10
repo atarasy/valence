@@ -498,7 +498,23 @@ An implementation is Valence-conformant when it:
 11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.2), and exports a shop's ledgers in full (§14.1)
 12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
 
-Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine.
+Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16.
+
+### 13.1 Two roles, and what each is judged on
+
+Added 2026-09-10. **An implementation may present the engine's surface, the hub's surface, or both**, and it is judged on the surface it presents.
+
+| Role | Surface (§9) | Whose |
+|---|---|---|
+| **engine** | `/offers` and its actions except `decisions` and `delivery`, `/candidates/{id}/note`, `/presenters/{id}/export`, the presenter's own registration routes | the presenter's |
+| **hub** | `/households/{id}` and its actions, `/_node/mandates`, `/_node/recoverers`, `/lineage/*`, and the two actions on an offer that carry the person's authority: `decisions` and `delivery` | the person's |
+| both | the registry (§17) is answered by whichever role a deployment puts it behind | neither's |
+
+**Two actions live under an offer's path and belong to the hub.** `POST` and `DELETE /offers/{id}/decisions` carry the person's signature and the person's withdrawal; `GET` and `POST /offers/{id}/delivery` are the household's surface by §7.5b. The path is the offer's because the offer is what they concern. The authority is the person's, and **the role that answers them is the hub**.
+
+**An engine that does not hold the mandate asks the hub for it over these endpoints and not by reading its store.** What it asks for is a protection rather than data about a person: the ceiling, the categories that need a second signature, the length of the cooling window. Clause 52 makes the host replaceable and blind, and a boundary that a conformance probe cannot see is a boundary the specification cannot hold anyone to, which is the reason this is stated here rather than left to an implementation.
+
+**A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
 
 Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Passing them is what entitles an implementation to the mark.
 
