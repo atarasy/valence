@@ -111,6 +111,11 @@ MANDATE_STATE="$(printf '%s\n' "$SEED_OUT" | sed -n 5p)"
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
 SEED_KEYS="$SEED_KEYS" BASE="$SECOND" bun scripts/seed.ts > /dev/null
+# §13.1. The role-split pair is seeded as one implementation across two
+# parties: the presenter's writes go to the engine, the person's to the hub.
+# Without this the roles suite can only ask who answers, never whether the
+# answer has anything behind it.
+SEED_KEYS="$SEED_KEYS" BASE="$ENGINE_ONLY" HUB_BASE="$HUB_ONLY" bun scripts/seed.ts > /dev/null
 
 cd "$TESTS"
 VALENCE_BASE_URL="$BASE" \

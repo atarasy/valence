@@ -39,15 +39,22 @@ export function ownerOf(parts: string[]): Owner {
       return parts.length >= 3 && HUB_OFFER_ACTIONS.has(parts[2]!) ? "hub" : "engine";
     case "candidates":
     case "presenters":
-    case "_presenter":
       return "engine";
+    case "_presenter":
+      // The catalogue is the presenter's. The keys are nobody's: clause 2 puts
+      // the root of identity outside this system, and both roles need to
+      // verify a signature. Found on 2026-09-11, when a role-split pair could
+      // not be seeded because the hub verifies a lineage edge against keys the
+      // engine had been given.
+      return parts[1] === "identities" ? "either" : "engine";
     case "households":
     case "_node":
     case "lineage":
       return "hub";
     case "registry":
-      // Clause 1's neutral infrastructure. Neither role's subject, and a
-      // deployment may put it behind either.
+      // Clause 1's neutral infrastructure, and clause 2's root of identity
+      // beside it: `/registry/attest` says a root endorsed a key. Neither is
+      // a role's subject, and a deployment may put them behind either.
       return "either";
     default:
       return "either";

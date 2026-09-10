@@ -26,8 +26,25 @@ function pairFor(name: string): { publicKey: KeyObject; privateKey: KeyObject } 
 
 import { canonical } from "../src/shared/lineage.js";
 import { canonicalEntry } from "../src/shared/registry.js";
+import { ownerOf } from "../src/common/roles.js";
 
 const base = process.env.BASE ?? "http://localhost:8788";
+// §13.1. When the pair being seeded presents one role each, every write has to
+// reach the party that answers for it. Unset means one party answers for
+// everything, which is what the reference runs.
+const hubBase = process.env.HUB_BASE ?? base;
+/**
+ * Where a write belongs. A route one role owns goes to that party. A route
+ * neither owns goes to **both**, because neutral state is not a copy one party
+ * lends the other: both roles verify signatures, so both need the keys, and
+ * both may answer for the registry.
+ */
+const basesFor = (path: string): string[] => {
+  const owner = ownerOf(path.split("/").filter(Boolean));
+  if (owner === "hub") return [hubBase];
+  if (owner === "engine") return [base];
+  return base === hubBase ? [base] : [base, hubBase];
+};
 
 // §11.1. Every seeded product is ambient, long-keeping, small and unregulated,
 // so the physical binding can carry all of them and the probes can choose.
@@ -39,7 +56,8 @@ const PHYSICAL = {
 };
 
 const post = async (path: string, body: unknown) => {
-  const response = await fetch(`${base}${path}`, {
+  const targets = basesFor(path);
+  const response = await fetch(`${targets[0]!}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -53,6 +71,19 @@ const post = async (path: string, body: unknown) => {
   });
   if (!response.ok) {
     throw new Error(`${path} -> ${response.status} ${await response.text()}`);
+  }
+  // The same write to the other party, where the route is neither role's. The
+  // answer returned is the first party's: they are the same write and the
+  // caller has no use for two copies of it.
+  for (const other of targets.slice(1)) {
+    const second = await fetch(`${other}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "valence-seed" },
+      body: JSON.stringify(body),
+    });
+    if (!second.ok) {
+      throw new Error(`${path} (second party) -> ${second.status} ${await second.text()}`);
+    }
   }
   return response.json();
 };
