@@ -1,5 +1,5 @@
 import { inMemoryStore, type Store } from "../common/store.js";
-import { createPublicKey, verify } from "node:crypto";
+import { verifyBy } from "../shared/decisions.js";
 import { conflict, notFound, unprocessable } from "../common/errors.js";
 
 /**
@@ -174,7 +174,7 @@ export class MandateRegister {
       }
       let ok = false;
       try {
-        ok = verify(null, bytes, createPublicKey(pem), Buffer.from(signature, "base64"));
+        ok = verifyBy(pem, bytes, Buffer.from(signature, "base64"));
       } catch {
         ok = false;
       }

@@ -426,7 +426,7 @@ A conforming implementation does not have these routes. Their absence is checkab
    <candidate>:<valence>:<kept_as or empty>:<lineage or empty>
    ```
 
-   one line per decision in ascending candidate id, UTF-8, `\n` between lines; the signature is ed25519 over those bytes, base64, by the key registered for the offer's `mandate`. An implementation MUST refuse, with `422`, a decided set with no signature, a signature by another key, or a signature over a set other than the one sent; nothing is written on refusal.
+   one line per decision in ascending candidate id, UTF-8, `\n` between lines; the signature is over those bytes, base64, by the key registered for the offer's `mandate`. **A signature is verified by the type of the key it is checked against**: ed25519 over the bytes as they are, ECDSA on P-256 (ES256) or RSA (RS256) over their SHA-256. This said ed25519 alone until 2026-09-11, and it refused the key most devices carry: a member who joined through a hub holds a passkey, which is P-256 on almost every phone and laptop, and that member could register a key and then confirm nothing with it, co-sign nothing (§16.4) and sign no change to their own mandate (§16.1). The same rule reads every signature this specification names. An implementation MUST refuse, with `422`, a decided set with no signature, a signature by another key, or a signature over a set other than the one sent; nothing is written on refusal.
 
    **A passkey cannot sign those bytes, and the concept documents assume it does.** Found on 2026-09-11, while building the member's side. An authenticator signs the concatenation of its own `authenticatorData` and the SHA-256 of `clientDataJSON`, never bytes a caller hands it, so a signature made by a password manager over this canonical form does not exist. `04` §2.1 of the concept documents says the hub asks a manager for a WebAuthn signature and nothing else, and `12` calls the mandate "signed with a passkey (the SPC pattern)". As written, an implementation that follows them cannot conform.
 
@@ -434,14 +434,21 @@ A conforming implementation does not have these routes. Their absence is checkab
 
    | shape | what is sent | how it is verified |
    |---|---|---|
-   | `signature` | ed25519 over the canonical bytes, base64 | against the key registered for the mandate |
+   | `signature` | a signature over the canonical bytes, base64 | against the key registered for the mandate, by that key's type |
    | `assertion` | `authenticator_data`, `client_data_json`, `signature`, base64 each | the `challenge` inside the client data equals the base64url SHA-256 of the canonical bytes, and the signature covers `authenticator_data` concatenated with the SHA-256 of `client_data_json`, by the key registered for the mandate |
 
    **The canonical form is what is signed in both**, once directly and once as the challenge. That is the whole reason the challenge is not random here: a random challenge proves a person was present and says nothing about what they agreed to, and clause 35 is about what they agreed to.
 
    The conformance suites exercise both, and build the second themselves rather than asking for an authenticator, because a suite that needed one could not run anywhere. A member's device produces it for real.
 
-   **What the second shape does not yet check, and an implementation should.** The reference verifies the challenge, the ceremony and the signature, and stops there. It does not read the flags in `authenticator_data`, so an assertion made without the person verifying themselves is taken for one made with; it does not compare the relying party hash in those flags against the hub the assertion was made for, because nothing tells an engine which hub it is; and it verifies with the one signature algorithm ed25519 uses, so an authenticator that signs on the P-256 curve, which is what most phones and laptops do today, is refused rather than accepted. The first is a probe away and the third is a branch away. The second needs a deployment to declare its own name (§14b), which is why it is written here as a limit rather than as a requirement.
+   **What the second shape is checked for.** Written on 2026-09-11, replacing a paragraph that listed three things the reference did not check; two of them it now does.
+
+   - **The flags.** An implementation MUST refuse, with `422`, an assertion whose `authenticator_data` does not say the person was both present and verified. A device that signed with nobody at it, or without checking who was, proves that a key was used, and clause 35 asks that a person agreed. The flags are the byte at offset 32, `0x01` for present and `0x04` for verified; every other bit is the authenticator's business.
+   - **The relying party.** The first 32 bytes of `authenticator_data` are the SHA-256 of the name the device signed for. An implementation MUST compare them against the name its deployment declares for itself (§14b) and MUST refuse an assertion made for another, however good its challenge and its signature. The name is the hub's, so on a split deployment the engine is told it, which is one more thing on §13.1's interface. It has no default and an engine without one MUST refuse to start: a shape this specification requires an implementation to accept is not a shape it may switch off.
+   - **What is still not compared** is the `origin` inside the client data. The relying party hash is the authenticator's own statement of where it signed and the origin is the client's, so the hash is the one that is checked. What that gives up: an assertion made at any origin under the same relying party id verifies, which for a deployment that declares a parent domain means a sibling host's page can confirm a set. A deployment declares the host it serves the hub on, and not a parent, unless it means exactly that.
+
+   **A confirmation is used once.** An implementation MUST refuse, with `422`, a confirmation of either shape that it has already accepted for that offer. Found by an adversarial pass on 2026-09-11 and measured: the canonical form binds a decided set to an offer and to nothing else, so after a person took a set back inside its cooling window (§16.5), sending the same bytes again put it back. Anything that saw the confirmation once, the hub that carried it included, could undo the withdrawal. The cost is named rather than hidden: ed25519 signatures are deterministic, so a person who withdraws and then confirms the byte-identical set with a bare signature is refused and has to change a line or sign again with a device whose signature differs. **What this does not do is bind a confirmation to a moment.** A nonce or a version inside the canonical bytes would, and that is a change to what every implementation signs, so it is in §15 as an open question rather than settled here.
+
 6. **Order.** Kept candidates proceed to an ACP checkout session.
 
 Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
@@ -537,6 +544,8 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 
 **`decisions` was here too until 2026-09-11, and the reason it left is worth keeping.** It was assigned to the hub because a decided set is the person's. It is, and clause 35 makes it so **by the signature**, which whoever answers the route cannot forge. What answering the route needs is the offer, and a hub does not have one: a hub presenting its role alone answered `decisions` and could only ever reply that it had never heard of the offer. **Authority travels in the signature, not in the route.** The correction came from running the two roles apart rather than from reading the design, which is the argument for §13.1 being something a probe can reach.
 
+**An engine is told the name a member's device signs for**, which is the hub's own and not the engine's, because an engine verifies a decided set (§10.5) and cannot check an assertion without it. On a deployment presenting both roles it is the one name the process has. On a split one it is a value the operator gives the engine, and it is the third thing on this interface beside the mandate and the day's total. §14b lists it.
+
 **An engine that does not hold the mandate asks the hub for it over these endpoints and not by reading its store.** What it asks for is a protection rather than data about a person: the ceiling, the categories that need a second signature, the length of the cooling window. Clause 52 makes the host replaceable and blind, and a boundary that a conformance probe cannot see is a boundary the specification cannot hold anyone to, which is the reason this is stated here rather than left to an implementation.
 
 **A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
@@ -608,7 +617,7 @@ An implementation MUST refuse the whole import with `422` when any of these fail
 
 ## 14b. Deployment parameters
 
-Added 2026-09-10, because there was no list. Six values are the deployment's rather than this specification's, and until they were gathered a reader could not count them or tell which had a default. **A parameter with no recommended figure is a deliberate absence**: a number written here once becomes a standard by being quoted, and the ones below are properties of an operation rather than of the protocol.
+Added 2026-09-10, because there was no list. Seven values are the deployment's rather than this specification's, and until they were gathered a reader could not count them or tell which had a default. **A parameter with no recommended figure is a deliberate absence**: a number written here once becomes a standard by being quoted, and the ones below are properties of an operation rather than of the protocol.
 
 | Parameter | Where | Default | Why the specification names no figure |
 |---|---|---|---|
@@ -618,8 +627,9 @@ Added 2026-09-10, because there was no list. Six values are the deployment's rat
 | the registry's reach | §16.2 | every merchant is in the network | Which merchants the registry lists is what "in the network" means. A deployment without a registry binds the ceiling to nothing, which is the honest reading rather than a silent one |
 | the day boundary | §16.3 | **UTC midnight, declared rather than assumed** | A household's day needs a time zone. Choosing one here would make when a person's day starts this specification's business. A deployment MUST apply the same boundary to every household it holds |
 | the bindings run | §2 | both | A deployment may run the digital binding alone, and §11's probes then have nothing to reach |
+| the relying party | §10.5 | **none. An implementation without one MUST refuse to start** | The name a member's device signs for is the hub's own hostname, a fact about where a deployment is served rather than a figure this specification could supply. Without it an engine cannot tell whom an assertion was made for, and §10.5 requires it to accept assertions, so there is no conforming deployment that does not need one. Added 2026-09-11 |
 
-**Three of the six have no default at all**, and that is the pattern worth seeing: where the value is a judgement about a person's experience, the specification refuses to supply one and an implementation that starts without it is not conformant. Where the value is a limit the constitution already fixes, or a fact about what a deployment has, a default is safe.
+**Three of the seven have no default at all**, and that is the pattern worth seeing: where the value is a judgement about a person's experience, or a fact only the deployment knows, the specification refuses to supply one and an implementation that starts without it is not conformant. Where the value is a limit the constitution already fixes, or something a deployment can be assumed to do, a default is safe. **The count is of the rows that say none**, and it read "three of the six" until 2026-09-11 while the table held two such rows and a third that has a default and stops no start. Count the rows before quoting the sentence.
 
 ----
 
@@ -629,6 +639,8 @@ Added 2026-09-10, because there was no list. Six values are the deployment's rat
 - Multi-hop lineage attribution, where a product passes through several households before a purchase. The settlement side is out of scope here.
 - Whether the feed extension should be proposed to the ACP community or remain a private extension.
 - Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure, and §14b now lists every parameter of that kind in one place, with which of them have a default and why.
+- **Whether a confirmation should be bound to a moment.** The canonical form of §10.5 names an offer and a set and nothing else, which is what let a withdrawn set be put back by resending the bytes. That is closed by refusing a confirmation twice, and the closure is narrower than the problem: it is the implementation remembering rather than the signature saying. A nonce issued with the offer, or the offer's own version, inside the signed bytes would say it. Both change what every implementation signs, so neither is decided here. Opened 2026-09-11.
+- **How a hub learns that an offer was presented.** §13.2 sends the person's side a copy when a set is decided, and nothing at all when it is presented, so a hub has no way to know that its member has something waiting except to ask each presenter it knows for that household's offers (§9). That is what the reference hub does. It works because the registry names the presenters; it does not work for a presenter the person has never dealt with. Opened 2026-09-11.
 
 ----
 

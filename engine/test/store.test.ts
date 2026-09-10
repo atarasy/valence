@@ -64,13 +64,13 @@ describe("a store is a map that writes through", () => {
       version: "cfg-restart",
       presenter: "merchant-restart",
       products: {
-        "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, physical: null },
-        "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, physical: null },
+        "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200 },
+        "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 },
       },
     };
 
     const before = openStore(path);
-    const first = new ValenceEngine(new InMemoryLedger(), { explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3 }, before);
+    const first = new ValenceEngine(new InMemoryLedger(), { explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3, relyingPartyId: "unit.example" }, before);
     first.registerIdentity(
       "merchant-restart",
       pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -96,7 +96,7 @@ describe("a store is a map that writes through", () => {
     before.close();
 
     const after = openStore(path);
-    const second = new ValenceEngine(new InMemoryLedger(), { explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3 }, after);
+    const second = new ValenceEngine(new InMemoryLedger(), { explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3, relyingPartyId: "unit.example" }, after);
     expect(second.mustGet(offer.id).state).toBe("presented");
     after.close();
   });

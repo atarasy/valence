@@ -1,4 +1,5 @@
-import { createPublicKey, verify } from "node:crypto";
+import { verifyBy } from "./decisions.js";
+import { inMemoryStore, type Store } from "../common/store.js";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 
 /**
@@ -43,8 +44,14 @@ export function canonicalEntry(entry: {
 }
 
 export class Registry {
-  private readonly entries = new Map<string, Entry>();
-  private readonly keys = new Map<string, string>();
+  private readonly entries: Map<string, Entry>;
+  private readonly keys: Map<string, string>;
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.entries = store.map("registry_entries");
+    this.keys = store.map("registry_keys");
+  }
 
   attest(merchant: string, publicKeyPem: string): void {
     // A key, once attested, is not replaced by a later caller: whoever could
@@ -68,12 +75,7 @@ export class Registry {
 
     let ok = false;
     try {
-      ok = verify(
-        null,
-        canonicalEntry(input),
-        createPublicKey(pem),
-        Buffer.from(input.signature, "base64")
-      );
+      ok = verifyBy(pem, canonicalEntry(input), Buffer.from(input.signature, "base64"));
     } catch {
       ok = false;
     }

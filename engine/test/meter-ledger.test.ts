@@ -80,6 +80,7 @@ const makeEngine = (ledger: MeterLedger) => {
     explorationRate: 0.2,
     reminderLimit: 1,
     recoveryGraceDays: 3,
+    relyingPartyId: "unit.example",
   });
   engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
   // §5.4. A catalogue is signed by the presenter it names.

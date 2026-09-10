@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from "node:crypto";
+import { verifyBy } from "./decisions.js";
 import type { LineageKind } from "../common/types.js";
 
 export type EdgeInput = {
@@ -35,15 +35,5 @@ export function verifyEdge(
   edge: EdgeInput & { signature: string },
   publicKeyPem: string
 ): boolean {
-  try {
-    const key = createPublicKey(publicKeyPem);
-    return verify(
-      null,
-      canonical(edge),
-      key,
-      Buffer.from(edge.signature, "base64")
-    );
-  } catch {
-    return false;
-  }
+  return verifyBy(publicKeyPem, canonical(edge), Buffer.from(edge.signature, "base64"));
 }

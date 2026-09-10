@@ -32,7 +32,7 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * member arrives at the new host apparently intact and without their
  * protections.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/2";
+export const EXPORT_FORMAT_VERSION = "valence-node/3";
 
 export type NodeExport = {
   format: string;
@@ -40,6 +40,14 @@ export type NodeExport = {
   exported_at: number;
   /** Every offer placed with this household, whatever its state. */
   offers: Offer[];
+  /**
+   * §10.5. What has already confirmed each of those offers. Without it a move
+   * resets the one-use rule: measured 2026-09-11, an offer withdrawn on one
+   * host was put back on a second with the assertion captured on the first.
+   * The format's version says so, because a receiving host that does not know
+   * this field would drop it.
+   */
+  confirmations: Record<string, string[]>;
   settlements: Settlement[];
   notes: Note[];
   /**
@@ -189,6 +197,7 @@ export function exportNode(
     lineage: engine.edgesTouching(household),
     receipts: engine.receiptsFor(household),
     recoveries: recovery.logFor(household),
+    confirmations: engine.confirmationsFor(offers.map((o) => o.id)),
     ...permissions.exportFor(household),
     mandates: mandates.forHousehold(household),
     deliveries: deliveries.forHousehold(offers.map((o) => o.id)),

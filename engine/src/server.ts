@@ -22,6 +22,38 @@ if (!(rate > 0)) {
   process.exit(1);
 }
 
+// §14b. The same absence as the rate above, and for the same reason: the days
+// before uncollected goods are lost depend on the route and the goods, and a
+// figure here would become the recommended one by being run. It defaulted to
+// three until 2026-09-11, which made §14b's own sentence false.
+// Read as a string first. `Number("")` is 0 and so is `Number(undefined ?? "")`,
+// so a check that converts before it looks accepts both an unset variable and
+// an empty one, and starts with a three-day grace turned silently into none.
+// Measured 2026-09-11: the first version of this refusal did exactly that.
+const graceRaw = process.env.VALENCE_RECOVERY_GRACE_DAYS;
+const grace = Number(graceRaw);
+if (graceRaw === undefined || graceRaw.trim() === "" || !Number.isInteger(grace) || grace < 0) {
+  console.error(
+    "VALENCE_RECOVERY_GRACE_DAYS must be an integer of at least zero.\n" +
+      "The specification publishes no recommended figure (SPEC §14b); a default here\n" +
+      "would become one by accident."
+  );
+  process.exit(1);
+}
+
+// §10.5, §14b. The name a member's device signs for. An engine that cannot
+// place an assertion cannot check one, and the specification requires every
+// implementation to accept assertions, so this has no default either.
+const relyingPartyId = process.env.VALENCE_RP_ID ?? "";
+if (relyingPartyId.trim() === "") {
+  console.error(
+    "VALENCE_RP_ID must be the hostname a member's device signs for, which is the\n" +
+      "hub's own (SPEC §10.5, §14b). Without it this engine cannot tell whom an\n" +
+      "assertion was made for."
+  );
+  process.exit(1);
+}
+
 /**
  * The ledger. In memory unless Meter is configured, because the conformance
  * suites need a subject that runs anywhere and a real ledger needs a database.
@@ -53,12 +85,13 @@ const store = process.env.VALENCE_DB ? openStore(process.env.VALENCE_DB) : inMem
 // Clause 46. The registry is what "in the network" means, so it is built
 // before the engine and handed in: a person's ceiling on the rest is theirs,
 // and the engine needs to know which merchants the rest are.
-const registry = new Registry();
+const registry = new Registry(store);
 
 const engine = new ValenceEngine(ledger, {
   explorationRate: rate,
   reminderLimit: 1,
-  recoveryGraceDays: Number(process.env.VALENCE_RECOVERY_GRACE_DAYS ?? 3),
+  recoveryGraceDays: grace,
+  relyingPartyId,
   isInNetwork: (merchant) => {
     try {
       registry.resolve(merchant);

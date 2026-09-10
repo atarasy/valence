@@ -37,8 +37,24 @@ describe("construction", () => {
           explorationRate: 0,
           reminderLimit: 1,
           recoveryGraceDays: 3,
+          relyingPartyId: "unit.example",
         })
     ).toThrow(/greater than zero/);
+  });
+
+  test("refuses a deployment that has not said what a device signs for", () => {
+    // §14b. An engine that cannot tell whom an assertion was made for cannot
+    // check one, and §10.5 requires every implementation to accept the
+    // assertion shape, so there is no conforming deployment without a name.
+    expect(
+      () =>
+        new ValenceEngine(new InMemoryLedger(), {
+          explorationRate: 0.2,
+          reminderLimit: 1,
+          recoveryGraceDays: 3,
+          relyingPartyId: "  ",
+        })
+    ).toThrow(/relyingPartyId/);
   });
 
   test("the config is frozen, so nothing at runtime reaches zero", () => {

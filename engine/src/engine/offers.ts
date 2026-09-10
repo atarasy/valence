@@ -1,8 +1,8 @@
-import { randomUUID, createHash, createPublicKey, verify } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
-import { verifyDecisions, verifyDecisionAssertion, type DecisionAssertion } from "../shared/decisions.js";
+import { confirmationToken, verifyBy, verifyDecisions, verifyDecisionAssertion, type DecisionAssertion } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import { LocalDay, type DaySource } from "./day-source.js";
@@ -55,6 +55,15 @@ export type EngineConfig = {
    */
   isInNetwork?: (merchant: string) => boolean;
   /**
+   * §10.5, §14b. The name a member's device signs for when it confirms with a
+   * passkey, which is the hub's own hostname. It has no default: an engine
+   * that cannot tell whom an assertion was made for cannot check one, and
+   * §10.5 requires every implementation to accept the assertion shape, so
+   * there is no conforming deployment that does not need this. On a split
+   * deployment the name is the hub's and the engine is told it.
+   */
+  relyingPartyId: string;
+  /**
    * §16.3. Where the deployment puts the start of a household's day, for the
    * daily ceiling. The specification does not name one: a household's day
    * needs a time zone, and choosing it here would make when a person's day
@@ -100,8 +109,16 @@ export class ValenceEngine {
   private readonly configs: Map<string, PresenterConfig>;
   private readonly edges: Map<string, LineageEdge>;
   private readonly identities: Map<string, string>;
+  /**
+   * §10.5. What has already confirmed each offer. A confirmation is used
+   * once: the canonical form binds a decided set to an offer and to nothing
+   * else, so without this the bytes that confirmed a set stay good after the
+   * person takes it back, and anything that saw them once can undo the
+   * withdrawal. Measured on 2026-09-11 before it was closed.
+   */
+  private readonly confirmations: Map<string, string[]>;
   /** §7.1. Keys an identity root endorsed, as against keys merely registered here. */
-  private readonly rootEndorsed = new Set<string>();
+  private readonly rootEndorsed: Map<string, true>;
   /**
    * §7.6 and clause 19. The value stored beside the time is an opaque token,
    * not the edge's identifier.
@@ -160,6 +177,8 @@ export class ValenceEngine {
     this.configs = store.map("configs");
     this.edges = store.map("edges");
     this.identities = store.map("identities");
+    this.confirmations = store.map("confirmations");
+    this.rootEndorsed = store.map("root_endorsed");
     this.recoveries = new RecoveryLedger(store);
     this.mandates = new MandateRegister(store);
     this.householdLedger = new HouseholdLedger(store);
@@ -176,6 +195,12 @@ export class ValenceEngine {
     }
     if (config.explorationRate > 1) {
       throw new Error("explorationRate must not exceed 1");
+    }
+    if (typeof config.relyingPartyId !== "string" || config.relyingPartyId.trim() === "") {
+      throw new Error(
+        "relyingPartyId must be the name a member's device signs for (SPEC §14b). " +
+          "There is no default: an engine that cannot place an assertion cannot check one."
+      );
     }
     if (!Number.isInteger(config.recoveryGraceDays) || config.recoveryGraceDays < 0) {
       throw new Error("recoveryGraceDays must be an integer of at least zero");
@@ -207,7 +232,7 @@ export class ValenceEngine {
     try {
       ok =
         signature !== undefined &&
-        verify(null, canonicalConfig(config), createPublicKey(pem), Buffer.from(signature, "base64"));
+        verifyBy(pem, canonicalConfig(config), Buffer.from(signature, "base64"));
     } catch {
       ok = false;
     }
@@ -229,7 +254,7 @@ export class ValenceEngine {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
     }
     this.identities.set(key, publicKeyPem);
-    if (attested) this.rootEndorsed.add(key);
+    if (attested) this.rootEndorsed.set(key, true);
   }
 
   /** §7.1. Whether an identity root endorsed this key (clause 2). */
@@ -490,10 +515,29 @@ export class ValenceEngine {
     const covered =
       typeof signature === "string"
         ? verifyDecisions(offerId, decisions, signature, mandateKey)
-        : verifyDecisionAssertion(offerId, decisions, signature, mandateKey);
+        : verifyDecisionAssertion(offerId, decisions, signature, mandateKey, this.config.relyingPartyId);
     if (!covered) {
       throw unprocessable("bad_signature", "the signature does not cover this decided set");
     }
+    // §10.5. A confirmation is used once. The cost is named in the
+    // specification rather than hidden: an ed25519 signature over the same
+    // set is the same bytes, so a person who withdraws and confirms the
+    // identical set again with a bare signature is refused and signs a
+    // changed set or signs again with a device whose signature differs.
+    const used = this.confirmations.get(offerId) ?? [];
+    const confirmation = confirmationToken(
+      mandateKey,
+      typeof signature === "string" ? signature : signature.signature
+    );
+    if (used.includes(confirmation)) {
+      throw unprocessable(
+        "confirmation_reused",
+        "this confirmation has already been used for this offer"
+      );
+    }
+    // What this decision spends. Written only if every check below passes,
+    // because §10.5 says nothing is written on refusal.
+    const spent = [confirmation];
     // §10.5: nothing is written on refusal. Every line is checked before any
     // line is applied, so a set that is refused leaves the offer as it was
     // and the written set is always the signed set.
@@ -548,7 +592,21 @@ export class ValenceEngine {
           coSignature !== undefined &&
           mandateForSet.co_signers.some((key) => {
             const pem = this.identities.get(key);
-            return pem ? verifyDecisions(offerId, decisions, coSignature, pem) : false;
+            if (!pem || !verifyDecisions(offerId, decisions, coSignature, pem)) return false;
+            // §10.5. A co-signature is used once, like the confirmation it
+            // sits beside. Otherwise a person who withdrew could decide the
+            // same set again with a fresh signature of their own and the
+            // co-signer's old bytes, and the co-signer would have consented
+            // to a decision nobody asked them about.
+            const token = confirmationToken(pem, coSignature);
+            if (used.includes(token)) {
+              throw unprocessable(
+                "confirmation_reused",
+                "this co-signature has already been used for this offer"
+              );
+            }
+            spent.push(token);
+            return true;
           });
         if (!signed) {
           throw unprocessable(
@@ -584,6 +642,7 @@ export class ValenceEngine {
         offer: structuredClone(offer),
       });
     }
+    this.confirmations.set(offerId, [...used, ...spent]);
     return this.commit(offer);
   }
 
@@ -1002,6 +1061,34 @@ export class ValenceEngine {
       });
     }
     return rows;
+  }
+
+  /**
+   * §10.5, §14.1. What has already confirmed each of these offers, so that a
+   * move carries the one-use rule with it. The values are opaque: they name
+   * signatures rather than being them, and a receiving host compares them
+   * without reading them.
+   */
+  confirmationsFor(offerIds: string[]): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const id of offerIds) {
+      const spent = this.confirmations.get(id);
+      if (spent && spent.length > 0) out[id] = [...spent];
+    }
+    return out;
+  }
+
+  /** The receiving host of a move keeps what the sending host had spent. */
+  importConfirmations(rows: Record<string, string[]>): void {
+    for (const [id, spent] of Object.entries(rows)) {
+      if (!Array.isArray(spent)) continue;
+      const here = this.confirmations.get(id) ?? [];
+      const merged = [...here];
+      for (const token of spent) {
+        if (typeof token === "string" && !merged.includes(token)) merged.push(token);
+      }
+      this.confirmations.set(id, merged);
+    }
   }
 
   /** The registered public key for a name, if there is one. */

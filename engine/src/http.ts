@@ -1062,6 +1062,10 @@ async function route(
       // record of who had recovered their node, while every probe stayed green
       // because none of them asked.
       recovery.importLog(moving, body_.recoveries ?? []);
+      // §10.5. Without this a move resets the one-use rule, and a confirmation
+      // captured on the sending host decides the moved offer on this one.
+      // Measured 2026-09-11 before the field existed.
+      engine.importConfirmations(body_.confirmations ?? {});
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
       for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
       deliveries.importRows(body_.deliveries ?? []);

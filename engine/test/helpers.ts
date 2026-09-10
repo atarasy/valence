@@ -26,12 +26,14 @@ export function signConfig(config: Parameters<typeof canonicalConfig>[0]): strin
 export function makeEngine(overrides: Partial<{
   explorationRate: number;
   reminderLimit: 0 | 1;
+  relyingPartyId: string;
 }> = {}) {
   const ledger = new InMemoryLedger();
   const engine = new ValenceEngine(ledger, {
     explorationRate: 0.2,
     reminderLimit: 1,
     recoveryGraceDays: 3,
+    relyingPartyId: "unit.example",
     ...overrides,
   });
   // §5.4. A catalogue is signed by the presenter it names.

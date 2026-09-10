@@ -25,7 +25,7 @@ if [ ! -d "$TESTS" ]; then
 fi
 
 cd "$HERE"
-PORT="$PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+PORT="$PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 SERVER_PID=$!
 
@@ -34,7 +34,7 @@ SERVER_PID=$!
 # a file was produced.
 SECOND_PORT=$((PORT + 100))
 SECOND="http://localhost:${SECOND_PORT}"
-PORT="$SECOND_PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+PORT="$SECOND_PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 SECOND_PID=$!
 
@@ -52,11 +52,11 @@ HUB_ONLY="http://localhost:${HUB_ONLY_PORT}"
 # it does not own. The URL is known before either starts, and the engine only
 # calls it when an offer needs a protection, so the order of these two lines
 # does not matter.
-PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_HUB_URL="$HUB_ONLY" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_HUB_URL="$HUB_ONLY" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 ENGINE_ONLY_PID=$!
 
-PORT="$HUB_ONLY_PORT" VALENCE_ROLES=hub VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+PORT="$HUB_ONLY_PORT" VALENCE_ROLES=hub VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 HUB_ONLY_PID=$!
 # PIPE matters: piping this script into `tail` kills it before an EXIT-only
@@ -115,7 +115,8 @@ SEED_KEYS="$SEED_KEYS" BASE="$SECOND" bun scripts/seed.ts > /dev/null
 # parties: the presenter's writes go to the engine, the person's to the hub.
 # Without this the roles suite can only ask who answers, never whether the
 # answer has anything behind it.
-SEED_KEYS="$SEED_KEYS" BASE="$ENGINE_ONLY" HUB_BASE="$HUB_ONLY" bun scripts/seed.ts > /dev/null
+SEED_KEYS="$SEED_KEYS" BASE="$ENGINE_ONLY" HUB_BASE="$HUB_ONLY" bun scripts/seed.ts > /dev/null \
+  || echo "the role-split pair could not be seeded; roles/ will say so" >&2
 
 cd "$TESTS"
 VALENCE_BASE_URL="$BASE" \
@@ -131,6 +132,7 @@ VALENCE_MANDATE_STATE="$MANDATE_STATE" \
 VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
 VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \
+VALENCE_RP_ID="conformance.example" \
 VALENCE_SECOND_HOST_URL="$SECOND" \
 VALENCE_ENGINE_ONLY_URL="$ENGINE_ONLY" \
 VALENCE_HUB_ONLY_URL="$HUB_ONLY" \

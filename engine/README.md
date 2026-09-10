@@ -47,7 +47,7 @@ against Meter itself.
 ```
 cd engine
 bun install
-VALENCE_EXPLORATION_RATE=0.2 bun run src/server.ts
+VALENCE_EXPLORATION_RATE=0.2 VALENCE_RECOVERY_GRACE_DAYS=3 VALENCE_RP_ID=localhost bun run src/server.ts
 ```
 
 The rate has no default. §5 of the specification publishes no recommended
