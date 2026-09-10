@@ -134,4 +134,4 @@ VALENCE_CONFIG_VERSION_NARROW="cfg-conformance-narrow" \
 VALENCE_CONFIG_VERSION_UNROOTED="cfg-other-merchant" \
 VALENCE_PRODUCTS_UNROOTED="salt-a,salt-b" \
 VALENCE_PRICES_LATER='{"tea-a":9900,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
-  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry roles}
+  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry roles merchant-exit}
