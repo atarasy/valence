@@ -497,8 +497,10 @@ An implementation is Valence-conformant when it:
 10. bills the giver of a ceremonial offer, not the recipient, and ships a default only when nothing was chosen (§12)
 11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.2), and exports a shop's ledgers in full (§14.1)
 12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
+13. enforces the person's thresholds where each is enforced, and names the one that refused (§16.3 to §16.6)
+14. answers only for the surface it presents, and refuses the other with `not_this_role` (§13.1)
 
-Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16.
+Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent.
 
 ### 13.1 Two roles, and what each is judged on
 
