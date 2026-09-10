@@ -204,6 +204,8 @@ settlement
 
 Every line names its merchant of record. A receipt that totals without saying who sold each item has hidden the merchant behind the curator, which clause 12 forbids and clause 11 makes a question of who is liable.
 
+**A settlement is a record and not an instruction to move money.** §1 says this specification does not define payment, and that has a consequence worth stating where the record is defined: `charged` is what the household owes on this offer, and how it is paid is the merchant's own arrangement with its processor. So a settlement whose `lines[]` name more than one merchant of record is well formed, and how many payments it corresponds to is not a question this specification answers.
+
 `charged` **MUST** equal `kept_amount + consumed_amount`, and it is what the ledger commits.
 
 The field is not redundant, and it was added on 2026-09-08 after a conformance probe failed to catch an implementation that billed for `lost`. Without it the settlement reports a breakdown and the ledger takes a number, and nothing in the record connects the two: a household reading a receipt that says nothing was kept has no way to see that it was charged anyway. An implementation whose `charged` disagrees with the sum above is not conformant even when every other amount is right.
