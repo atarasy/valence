@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { ValenceEngine } from "../engine/offers.js";
 import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "../common/types.js";
@@ -76,12 +77,19 @@ export type RecoveryRecord = {
  * nothing consults this register when deciding what may be read.
  */
 export class RecoveryRegister {
-  private readonly recoverers = new Map<string, string[]>();
-  private readonly channels = new Map<
+  private readonly recoverers: Map<string, string[]>;
+  private readonly channels: Map<
     string,
     { channel: string; controlled_by_recoverer: boolean }[]
-  >();
-  private readonly log = new Map<string, RecoveryRecord[]>();
+  >;
+  private readonly log: Map<string, RecoveryRecord[]>;
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.recoverers = store.map("recoverers");
+    this.channels = store.map("recovery_channels");
+    this.log = store.map("recovery_log");
+  }
 
   nameRecoverers(household: string, keys: string[]): void {
     this.recoverers.set(household, [...keys]);

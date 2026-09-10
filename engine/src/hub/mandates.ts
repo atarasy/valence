@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import { createPublicKey, verify } from "node:crypto";
 import { conflict, notFound, unprocessable } from "../common/errors.js";
 
@@ -90,7 +91,13 @@ function shortens(before: number | null, after: number | null): boolean {
 }
 
 export class MandateRegister {
-  private readonly rows = new Map<string, Mandate>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.rows = store.map("mandates");
+  }
+
+  private readonly rows: Map<string, Mandate>;
 
   get(id: string): Mandate | undefined {
     return this.rows.get(id);

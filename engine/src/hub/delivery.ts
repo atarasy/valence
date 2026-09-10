@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import { notFound, unprocessable } from "../common/errors.js";
 
 /**
@@ -27,7 +28,13 @@ export type Delivery = {
 const ORDER: DeliveryStatus[] = ["placed", "in_transit", "delivered", "returned"];
 
 export class DeliveryRegister {
-  private readonly rows = new Map<string, Delivery>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.rows = store.map("delivery");
+  }
+
+  private readonly rows: Map<string, Delivery>;
 
   record(input: {
     offer: string;

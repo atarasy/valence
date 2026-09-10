@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import type { ValenceEngine } from "../engine/offers.js";
 import type { Offer } from "../common/types.js";
 
@@ -80,7 +81,13 @@ export type Deliberation = {
 };
 
 export class ApprovalDesk {
-  private readonly deliberations = new Map<string, Deliberation>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.deliberations = store.map("deliberations");
+  }
+
+  private readonly deliberations: Map<string, Deliberation>;
 
   record(deliberation: Deliberation): void {
     this.deliberations.set(deliberation.offer, deliberation);

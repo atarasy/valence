@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import { conflict, unprocessable } from "../common/errors.js";
 
 /**
@@ -57,7 +58,13 @@ export interface Ledger {
 }
 
 export class InMemoryLedger implements Ledger {
-  private readonly rows = new Map<string, Reservation>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.rows = store.map("reservations");
+  }
+
+  private readonly rows: Map<string, Reservation>;
 
   async reserve(input: {
     requestId: string;

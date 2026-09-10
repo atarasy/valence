@@ -3,6 +3,7 @@ import { InMemoryLedger } from "./engine/ledger.js";
 import { MeterLedger } from "./engine/meter-ledger.js";
 import { createApp } from "./http.js";
 import { rolesFrom } from "./common/roles.js";
+import { inMemoryStore, openStore } from "./common/store.js";
 import { RemoteMandates } from "./engine/mandate-source.js";
 import { RemoteDay } from "./engine/day-source.js";
 import { RecoveryRegister } from "./hub/node.js";
@@ -39,6 +40,16 @@ const ledger = process.env.METER_BASE_URL
     })
   : new InMemoryLedger();
 
+/**
+ * §13.2. Where this process keeps what it holds. Unset is in memory, which is
+ * what the conformance suites run against and what the reference has always
+ * done; a deployment that wants a restart not to be a loss says where.
+ *
+ * A role-split pair keeps two databases, one each, which is the point: the
+ * person's side holds what is the person's.
+ */
+const store = process.env.VALENCE_DB ? openStore(process.env.VALENCE_DB) : inMemoryStore();
+
 // Clause 46. The registry is what "in the network" means, so it is built
 // before the engine and handed in: a person's ceiling on the rest is theirs,
 // and the engine needs to know which merchants the rest are.
@@ -56,13 +67,13 @@ const engine = new ValenceEngine(ledger, {
       return false;
     }
   },
-});
+}, store);
 
 const hub = {
-  recovery: new RecoveryRegister(),
-  approvals: new ApprovalDesk(),
-  permissions: new PermissionLedger(),
-  deliveries: new DeliveryRegister(),
+  recovery: new RecoveryRegister(store),
+  approvals: new ApprovalDesk(store),
+  permissions: new PermissionLedger(store),
+  deliveries: new DeliveryRegister(store),
   registry,
 };
 

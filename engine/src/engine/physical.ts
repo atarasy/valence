@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import { conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Offer, PhysicalEligibility, Recovery } from "../common/types.js";
 
@@ -65,7 +66,13 @@ export function redistributable(input: {
 }
 
 export class RecoveryLedger {
-  private readonly rows = new Map<string, Recovery>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.rows = store.map("recoveries");
+  }
+
+  private readonly rows: Map<string, Recovery>;
 
   /** Opened at presentation, because the deadline runs from the placement. */
   open(input: { offer: string; dueAt: number; graceDays: number }): Recovery {

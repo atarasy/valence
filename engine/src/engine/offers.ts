@@ -6,6 +6,7 @@ import { verifyDecisions } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import { LocalDay, type DaySource } from "./day-source.js";
+import { inMemoryStore, type Store } from "../common/store.js";
 import { HouseholdLedger } from "../hub/household-ledger.js";
 import {
   applyRecovery,
@@ -93,12 +94,12 @@ export function explorationFloor(candidateCount: number, rate: number): number {
 }
 
 export class ValenceEngine {
-  private readonly offers = new Map<string, Offer>();
-  private readonly notes = new Map<string, Note[]>();
-  private readonly settlements = new Map<string, Settlement>();
-  private readonly configs = new Map<string, PresenterConfig>();
-  private readonly edges = new Map<string, LineageEdge>();
-  private readonly identities = new Map<string, string>();
+  private readonly offers: Map<string, Offer>;
+  private readonly notes: Map<string, Note[]>;
+  private readonly settlements: Map<string, Settlement>;
+  private readonly configs: Map<string, PresenterConfig>;
+  private readonly edges: Map<string, LineageEdge>;
+  private readonly identities: Map<string, string>;
   /** §7.1. Keys an identity root endorsed, as against keys merely registered here. */
   private readonly rootEndorsed = new Set<string>();
   /**
@@ -118,21 +119,21 @@ export class ValenceEngine {
    * deployment, which is why it is a member rather than a constructor
    * argument: an implementation that never places goods never touches it.
    */
-  readonly recoveries = new RecoveryLedger();
-  readonly mandates = new MandateRegister();
+  readonly recoveries: RecoveryLedger;
+  readonly mandates: MandateRegister;
   /**
    * §13.1. Where protections are read from. A deployment presenting both roles
    * reads its own register; one presenting the engine alone is given a source
    * that asks the hub.
    */
-  private mandateSource: MandateSource = new LocalMandates(this.mandates);
+  private mandateSource: MandateSource;
   /**
    * §16.3. The person's own copy of what settled for them. A deployment
    * presenting both roles keeps it here; one presenting the engine alone
    * reports to the hub and asks the hub for the day's total.
    */
-  readonly householdLedger = new HouseholdLedger();
-  private daySource: DaySource = new LocalDay(this.householdLedger);
+  readonly householdLedger: HouseholdLedger;
+  private daySource: DaySource;
 
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
@@ -148,8 +149,22 @@ export class ValenceEngine {
 
   constructor(
     private readonly ledger: Ledger,
-    config: EngineConfig
+    config: EngineConfig,
+    // §13.2. Where this engine keeps what it holds. Unset is in memory, which
+    // is what the conformance suites run against.
+    store: Store = inMemoryStore()
   ) {
+    this.offers = store.map("offers");
+    this.notes = store.map("notes");
+    this.settlements = store.map("settlements");
+    this.configs = store.map("configs");
+    this.edges = store.map("edges");
+    this.identities = store.map("identities");
+    this.recoveries = new RecoveryLedger(store);
+    this.mandates = new MandateRegister(store);
+    this.householdLedger = new HouseholdLedger(store);
+    this.mandateSource = new LocalMandates(this.mandates);
+    this.daySource = new LocalDay(this.householdLedger);
     if (
       typeof config.explorationRate !== "number" ||
       !(config.explorationRate > 0)

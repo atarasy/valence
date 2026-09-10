@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 import { randomUUID } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 
@@ -84,9 +85,17 @@ export type PendingAction = {
 };
 
 export class PermissionLedger {
-  private readonly rows = new Map<string, Permission[]>();
-  private readonly actions = new Map<string, PendingAction>();
-  private readonly queries = new Map<string, Query[]>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.rows = store.map("permissions");
+    this.actions = store.map("permission_actions");
+    this.queries = store.map("permission_queries");
+  }
+
+  private readonly rows: Map<string, Permission[]>;
+  private readonly actions: Map<string, PendingAction>;
+  private readonly queries: Map<string, Query[]>;
 
   /**
    * Clause 43, and §14.2. What leaves with the node, and what arrives with it.

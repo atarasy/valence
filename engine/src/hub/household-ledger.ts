@@ -1,3 +1,4 @@
+import { inMemoryStore, type Store } from "../common/store.js";
 /**
  * §16.3, and clause 38. The person's own copy of what settled for them.
  *
@@ -40,8 +41,15 @@ export type RecordedOffer = {
 };
 
 export class HouseholdLedger {
-  private readonly rows = new Map<string, SettledAmount>();
-  private readonly offers = new Map<string, RecordedOffer>();
+
+  /** §13.2. Where this register keeps what it holds. Unset is in memory. */
+  constructor(store: Store = inMemoryStore()) {
+    this.rows = store.map("household_settled");
+    this.offers = store.map("household_offers");
+  }
+
+  private readonly rows: Map<string, SettledAmount>;
+  private readonly offers: Map<string, RecordedOffer>;
 
   /** Idempotent by offer: the same offer recorded twice is one record. */
   recordOffer(row: RecordedOffer): RecordedOffer {
