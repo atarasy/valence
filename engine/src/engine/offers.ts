@@ -549,6 +549,18 @@ export class ValenceEngine {
       // §16.5. The cooling window starts when the set is signed, not when the
       // offer was presented.
       offer.decided_at = now;
+      // Clause 8. The person's own copy of what they were shown and what they
+      // said to each of it. Reported here rather than at settlement, because a
+      // copy that arrived only when something was bought would hold the
+      // purchases and lose the refusals, which are the half no merchant holds
+      // across merchants.
+      await this.daySource.reportOffer({
+        id: offer.id,
+        household: offer.household,
+        presenter: offer.presenter,
+        recorded_at: now,
+        offer: structuredClone(offer),
+      });
     }
     return offer;
   }

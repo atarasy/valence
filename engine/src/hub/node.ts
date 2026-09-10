@@ -158,7 +158,13 @@ export function exportNode(
   household: string,
   now = Date.now()
 ): NodeExport {
-  const offers = engine.unionForHousehold(household, now);
+  // Clause 43, §13.2. The person's own copy first: on a deployment presenting
+  // the hub alone there is no engine store to read, and an export built from
+  // one would come back empty. Where both roles run in one process the two
+  // agree, and the engine's is used because it is the live state.
+  const recorded = engine.householdLedger.offersFor(household);
+  const live = engine.unionForHousehold(household, now);
+  const offers = live.length > 0 ? live : (recorded.map((r) => r.offer) as typeof live);
   const settlements = offers
     .map((o) => engine.settlement(o.id))
     .filter((s): s is Settlement => s !== undefined);

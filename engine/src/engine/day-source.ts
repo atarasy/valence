@@ -21,6 +21,19 @@ export type DaySource = {
     amount: number;
     settled_at: number;
   }): Promise<void>;
+  /**
+   * Clause 8. Report the decided offer to the person's own copy, including
+   * what they declined. A copy that held only settlements would hold what a
+   * person bought and nothing about what they were shown and refused, which is
+   * the half the person's record exists for.
+   */
+  reportOffer(row: {
+    id: string;
+    household: string;
+    presenter: string;
+    recorded_at: number;
+    offer: unknown;
+  }): Promise<void>;
 };
 
 /** The ledger in this process. What the reference runs when it presents both roles. */
@@ -34,6 +47,13 @@ export class LocalDay implements DaySource {
         amount: number;
         settled_at: number;
       }): unknown;
+      recordOffer(row: {
+        id: string;
+        household: string;
+        presenter: string;
+        recorded_at: number;
+        offer: unknown;
+      }): unknown;
     }
   ) {}
   async totalSince(household: string, since: number): Promise<number> {
@@ -46,6 +66,15 @@ export class LocalDay implements DaySource {
     settled_at: number;
   }): Promise<void> {
     this.ledger.record(row);
+  }
+  async reportOffer(row: {
+    id: string;
+    household: string;
+    presenter: string;
+    recorded_at: number;
+    offer: unknown;
+  }): Promise<void> {
+    this.ledger.recordOffer(row);
   }
 }
 
@@ -91,6 +120,36 @@ export class RemoteDay implements DaySource {
       throw unprocessable("hub_refused", "the hub's answer carried no total");
     }
     return body.total;
+  }
+
+  async reportOffer(row: {
+    id: string;
+    household: string;
+    presenter: string;
+    recorded_at: number;
+    offer: unknown;
+  }): Promise<void> {
+    await this.send(
+      `/households/${encodeURIComponent(row.household)}/offers`,
+      row,
+      "the decided offer could not be reported to the hub"
+    );
+  }
+
+  private async send(path: string, row: unknown, failure: string): Promise<void> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(this.url(path), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(row),
+      });
+    } catch (err) {
+      throw unprocessable("hub_unreachable", `${failure}: ${(err as Error).message}`);
+    }
+    if (!response.ok) {
+      throw unprocessable("hub_refused", `the hub answered ${response.status}`);
+    }
   }
 
   async report(row: {

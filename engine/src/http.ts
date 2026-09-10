@@ -820,6 +820,29 @@ async function route(
   // §16.3. The person's own copy of what settled for them. The engine reports
   // to it and asks it for the day's total; a deployment presenting both roles
   // reaches it in process and never over this route.
+  // Clause 8, clause 43. The person's own copy of an offer made to them.
+  if (parts[0] === "households" && parts[2] === "offers" && method === "POST") {
+    const household = decodeURIComponent(parts[1]!);
+    const raw = strict(
+      await body(request),
+      ["id", "household", "presenter", "recorded_at", "offer"],
+      "recorded offer"
+    );
+    if (requireString(raw, "household", "recorded offer") !== household) {
+      throw badRequest("malformed", "the body names another household");
+    }
+    return json(
+      engine.householdLedger.recordOffer({
+        id: requireString(raw, "id", "recorded offer"),
+        household,
+        presenter: requireString(raw, "presenter", "recorded offer"),
+        recorded_at: requireInteger(raw, "recorded_at", "recorded offer", 0),
+        offer: raw.offer,
+      }),
+      201
+    );
+  }
+
   if (parts[0] === "households" && parts[2] === "settled") {
     const household = decodeURIComponent(parts[1]!);
     if (method === "GET") {

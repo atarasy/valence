@@ -22,8 +22,40 @@ export type SettledAmount = {
   settled_at: number;
 };
 
+/**
+ * Clause 8, and clause 43. The person's own copy of an offer made to them,
+ * including what they declined, which is the half no merchant holds across
+ * merchants and the half the person's record exists for.
+ *
+ * It is the offer as it was decided, not a summary: a copy that dropped the
+ * candidates would leave the person holding a receipt for what they kept and
+ * nothing about what they were shown and refused.
+ */
+export type RecordedOffer = {
+  id: string;
+  household: string;
+  presenter: string;
+  recorded_at: number;
+  offer: unknown;
+};
+
 export class HouseholdLedger {
   private readonly rows = new Map<string, SettledAmount>();
+  private readonly offers = new Map<string, RecordedOffer>();
+
+  /** Idempotent by offer: the same offer recorded twice is one record. */
+  recordOffer(row: RecordedOffer): RecordedOffer {
+    this.offers.set(row.id, { ...row });
+    return this.offers.get(row.id)!;
+  }
+
+  offersFor(household: string): RecordedOffer[] {
+    return [...this.offers.values()].filter((r) => r.household === household);
+  }
+
+  importOffers(rows: RecordedOffer[]): void {
+    for (const r of rows) this.offers.set(r.id, { ...r });
+  }
 
   /** Idempotent by offer: a settlement reported twice is one settlement. */
   record(row: SettledAmount): SettledAmount {
