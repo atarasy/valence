@@ -66,5 +66,10 @@ for f in scripts/mutations/*.py; do
   [ -f "/tmp/mutation-${m}.log" ] || continue
   spread=$(grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" 2>/dev/null \
     | sed -E 's/^\(fail\) //; s/:.*//' | sort -u | wc -l | tr -d ' ')
-  [ "${spread:-0}" -ge 4 ] && printf '  %-36s %s suites\n' "$m" "$spread"
+  if [ "${spread:-0}" -ge 4 ]; then printf '  %-36s %s suites\n' "$m" "$spread"; fi
 done
+# The loop's last test decides the script's status otherwise, so a run whose
+# final mutation spans fewer than four suites exits 1 while reporting a clean
+# measurement. That is the defect this script was corrected for on 2026-09-09,
+# reintroduced on 2026-09-10 by the check added to report it.
+exit 0
