@@ -509,10 +509,12 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 | Role | Surface (§9) | Whose |
 |---|---|---|
 | **engine** | `/offers` and its actions except `decisions` and `delivery`, `/candidates/{id}/note`, `/presenters/{id}/export`, the presenter's own registration routes | the presenter's |
-| **hub** | `/households/{id}` and its actions, `/_node/mandates`, `/_node/recoverers`, `/lineage/*`, and the two actions on an offer that carry the person's authority: `decisions` and `delivery` | the person's |
+| **hub** | `/households/{id}` and its actions, `/_node/mandates`, `/_node/recoverers`, `/lineage/*`, and `delivery` on an offer | the person's |
 | both | the registry (§17) is answered by whichever role a deployment puts it behind | neither's |
 
-**Two actions live under an offer's path and belong to the hub.** `POST` and `DELETE /offers/{id}/decisions` carry the person's signature and the person's withdrawal; `GET` and `POST /offers/{id}/delivery` are the household's surface by §7.5b. The path is the offer's because the offer is what they concern. The authority is the person's, and **the role that answers them is the hub**.
+**One action lives under an offer's path and belongs to the hub.** `GET` and `POST /offers/{id}/delivery` are the household's surface by §7.5b: a carrier's code resolves to an address, so a merchant must not read one, and a hub holds deliveries without holding offers.
+
+**`decisions` was here too until 2026-09-11, and the reason it left is worth keeping.** It was assigned to the hub because a decided set is the person's. It is, and clause 35 makes it so **by the signature**, which whoever answers the route cannot forge. What answering the route needs is the offer, and a hub does not have one: a hub presenting its role alone answered `decisions` and could only ever reply that it had never heard of the offer. **Authority travels in the signature, not in the route.** The correction came from running the two roles apart rather than from reading the design, which is the argument for §13.1 being something a probe can reach.
 
 **An engine that does not hold the mandate asks the hub for it over these endpoints and not by reading its store.** What it asks for is a protection rather than data about a person: the ceiling, the categories that need a second signature, the length of the cooling window. Clause 52 makes the host replaceable and blind, and a boundary that a conformance probe cannot see is a boundary the specification cannot hold anyone to, which is the reason this is stated here rather than left to an implementation.
 
