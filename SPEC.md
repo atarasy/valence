@@ -439,7 +439,9 @@ A conforming implementation does not have these routes. Their absence is checkab
 
    **The canonical form is what is signed in both**, once directly and once as the challenge. That is the whole reason the challenge is not random here: a random challenge proves a person was present and says nothing about what they agreed to, and clause 35 is about what they agreed to.
 
-   The reference and the conformance suites use the first, because a suite that needed an authenticator could not run anywhere. A member's device uses the second.
+   The conformance suites exercise both, and build the second themselves rather than asking for an authenticator, because a suite that needed one could not run anywhere. A member's device produces it for real.
+
+   **What the second shape does not yet check, and an implementation should.** The reference verifies the challenge, the ceremony and the signature, and stops there. It does not read the flags in `authenticator_data`, so an assertion made without the person verifying themselves is taken for one made with; it does not compare the relying party hash in those flags against the hub the assertion was made for, because nothing tells an engine which hub it is; and it verifies with the one signature algorithm ed25519 uses, so an authenticator that signs on the P-256 curve, which is what most phones and laptops do today, is refused rather than accepted. The first is a probe away and the third is a branch away. The second needs a deployment to declare its own name (§14b), which is why it is written here as a limit rather than as a requirement.
 6. **Order.** Kept candidates proceed to an ACP checkout session.
 
 Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
