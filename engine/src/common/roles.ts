@@ -41,12 +41,16 @@ export function ownerOf(parts: string[]): Owner {
     case "presenters":
       return "engine";
     case "_presenter":
-      // The catalogue is the presenter's. The keys are nobody's: clause 2 puts
-      // the root of identity outside this system, and both roles need to
-      // verify a signature. Found on 2026-09-11, when a role-split pair could
-      // not be seeded because the hub verifies a lineage edge against keys the
-      // engine had been given.
-      return parts[1] === "identities" ? "either" : "engine";
+      // The catalogue is the presenter's.
+      return "engine";
+    case "_identities":
+      // A key is nobody's: clause 2 puts the root of identity outside this
+      // system, and both roles verify signatures. Found on 2026-09-11, when a
+      // role-split pair could not be seeded because the hub verifies a lineage
+      // edge against keys the engine had been given. It lived under
+      // `_presenter` until the same day, where the name said a presenter's key
+      // and the contents were everyone's.
+      return "either";
     case "households":
     case "_node":
     case "lineage":

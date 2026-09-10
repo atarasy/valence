@@ -254,18 +254,6 @@ async function route(
         201
       );
     }
-    if (method === "POST" && parts[1] === "identities") {
-      const raw = strict(await body(request), ["key", "public_key", "attested"], "identity");
-      // §7.1. `attested` says an identity root endorsed this key. It is a
-      // fixture flag here: who endorses a key is clause 2's root and not the
-      // engine's business, and a conforming host reads it from that root.
-      engine.registerIdentity(
-        requireString(raw, "key", "identity"),
-        requireString(raw, "public_key", "identity"),
-        raw.attested === true
-      );
-      return json({ ok: true }, 201);
-    }
   }
 
   // Out of specification: naming recoverers and their notification channels.
@@ -841,6 +829,23 @@ async function route(
   // to it and asks it for the day's total; a deployment presenting both roles
   // reaches it in process and never over this route.
   // Clause 8, clause 43. The person's own copy of an offer made to them.
+  // Clause 2. A key is neither role's: the root of identity is outside this
+  // system and both roles verify signatures. It sat under `_presenter` until
+  // 2026-09-11, where the name said a presenter's key and the contents were
+  // everyone's, a person's included.
+  if (parts[0] === "_identities" && method === "POST") {
+    const raw = strict(await body(request), ["key", "public_key", "attested"], "identity");
+    // §7.1. `attested` says an identity root endorsed this key. It is a
+    // fixture flag here: who endorses a key is clause 2's root and not the
+    // engine's business, and a conforming host reads it from that root.
+    engine.registerIdentity(
+      requireString(raw, "key", "identity"),
+      requireString(raw, "public_key", "identity"),
+      raw.attested === true
+    );
+    return json({ ok: true }, 201);
+  }
+
   if (parts[0] === "households" && parts[2] === "offers" && method === "POST") {
     const household = decodeURIComponent(parts[1]!);
     const raw = strict(

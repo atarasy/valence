@@ -375,6 +375,7 @@ GET    /offers?household={id}&presenter={id}   the presenter's vertical view, an
 POST   /candidates/{id}/note        one line, shared with whom the writer says
 GET    /candidates/{id}/note?as=    the lines shared with that party (clause 27)
 POST   /lineage                     accept an edge
+POST   /_identities                 a public key: a presenter's, a household's or a recipient's (clause 2, §13.2)
 POST   /households/{id}/offers      the person's copy of a decided offer, sent by the engine (§13.2)
 POST   /households/{id}/settled     the person's copy of what settled, an amount and a date (§13.2, §16.3)
 GET    /households/{id}/settled?since=  what has settled for this household since a moment, as a total
@@ -558,7 +559,7 @@ The person's side holds three things, and two of them arrive from the engine.
 
 **What a party keeps is its own.** Nothing in this specification says how, and it says one thing about whether: **an implementation that loses what it holds when it restarts is not conformant for the routes that promise a record.** Clause 43 asks that a person's data be held in a form they can export at any time, and "at any time" is a claim about the day after the process stopped. The reference keeps its rows on disk when a deployment says where and in memory when it does not, and the second is a thing to run tests against rather than a thing to run.
 
-**Keys are neither role's.** `/_presenter/identities` registers the public key of a presenter, a household or a recipient, and both roles verify signatures, so both hold them. Clause 2 puts the root of identity outside this system, which is why this is not a copy one party lends the other. The endpoint registry (§17) is the same and for the same reason (clause 1).
+**Keys are neither role's.** `/_identities` registers the public key of a presenter, a household or a recipient, and both roles verify signatures, so both hold them. **It was `/_presenter/identities` until 2026-09-11**, where the name said a presenter's key and the contents were everyone's, a person's included; the route moved rather than gaining an alias, because a name that lies is a thing to fix and not to keep working. Clause 2 puts the root of identity outside this system, which is why this is not a copy one party lends the other. The endpoint registry (§17) is the same and for the same reason (clause 1).
 
 **A route this deployment does not present MUST be refused with `404` and the reason `not_this_role`.** The status is a 404 because from the caller's side the route is not on this party. The name is required because the status alone says two different things: an implementation answers 404 for a household it has never heard of, and the same 404 for a surface it does not present. **A caller that cannot tell them apart retries against the party that will never answer**, and a conformance probe cannot tell an empty implementation from an absent role. This is §16.6's discipline in another place: a refusal names itself.
 

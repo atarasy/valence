@@ -109,7 +109,7 @@ const presenterKeys: Record<string, ReturnType<typeof pairFor>> = {
   "other-merchant": pairFor("presenter:other-merchant"),
 };
 for (const [name, pair] of Object.entries(presenterKeys)) {
-  await post("/_presenter/identities", {
+  await post("/_identities", {
     key: name,
     public_key: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
     attested: name === "reference-merchant",
@@ -192,7 +192,7 @@ await postConfig({
 
 const { publicKey, privateKey } = pairFor("giver");
 const giver = "key-giver-conformance";
-await post("/_presenter/identities", {
+await post("/_identities", {
   key: giver,
   public_key: publicKey.export({ type: "spki", format: "pem" }).toString(),
   attested: true,
@@ -203,7 +203,7 @@ await post("/_presenter/identities", {
 // household it names: anyone can register a key, so an unattested edge that
 // counted would let a stranger empty somebody's exploration floor.
 const stranger = pairFor("stranger");
-await post("/_presenter/identities", {
+await post("/_identities", {
   key: "key-stranger-conformance",
   public_key: stranger.publicKey.export({ type: "spki", format: "pem" }).toString(),
 });
@@ -225,7 +225,7 @@ const edge = {
 // edges passes against an implementation that would. The chain is deployment
 // plumbing, so the seed posts it rather than the suite building it.
 const onward = pairFor("onward");
-await post("/_presenter/identities", {
+await post("/_identities", {
   key: "key-recipient-conformance",
   public_key: onward.publicKey.export({ type: "spki", format: "pem" }).toString(),
   attested: true,
@@ -288,7 +288,7 @@ for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-mark
 // public half is registered here; the private half goes to the suite on the
 // second output line, base64 of the PEM, so the probes can sign decisions.
 const mandatePair = pairFor("mandate");
-await post("/_presenter/identities", {
+await post("/_identities", {
   key: "mandate-conformance",
   public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
   attested: true,
@@ -308,7 +308,7 @@ console.log(
 // signature. The household's own key doubles as the mandate key, which is
 // what the engine already resolves for a signed decided set (§10.5).
 const coSigner = pairFor("co-signer");
-await post("/_presenter/identities", {
+await post("/_identities", {
   key: "key-cosigner-conformance",
   public_key: coSigner.publicKey.export({ type: "spki", format: "pem" }).toString(),
   attested: true,
@@ -316,7 +316,7 @@ await post("/_presenter/identities", {
 // The household's own key, under its own name: §16 has a mandate signed by
 // the household, and §10.5 has a decided set signed by the key registered
 // for the offer's mandate reference. The same key answers to both names here.
-await post("/_presenter/identities", {
+await post("/_identities", {
   key: "household-conformance",
   public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
   attested: true,
