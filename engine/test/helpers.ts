@@ -7,9 +7,9 @@ import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.
 /** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");
 
-export function decideSigned(engine: ValenceEngine, offerId: string, decisions: DecisionInput[]) {
+export async function decideSigned(engine: ValenceEngine, offerId: string, decisions: DecisionInput[]) {
   const signature = sign(null, canonicalDecisions(offerId, decisions), MANDATE_PAIR.privateKey).toString("base64");
-  return engine.decide(offerId, decisions, signature);
+  return await engine.decide(offerId, decisions, signature);
 }
 
 export const CONFIG_VERSION = "cfg-1";

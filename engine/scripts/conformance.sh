@@ -44,12 +44,18 @@ SECOND_PID=$!
 # leave behind.
 ENGINE_ONLY_PORT=$((PORT + 200))
 ENGINE_ONLY="http://localhost:${ENGINE_ONLY_PORT}"
-PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+HUB_ONLY_PORT=$((PORT + 300))
+HUB_ONLY="http://localhost:${HUB_ONLY_PORT}"
+
+# The engine-only process holds no mandates and is told where the hub is, which
+# is §13.1's interface: it asks over the endpoints rather than reading a store
+# it does not own. The URL is known before either starts, and the engine only
+# calls it when an offer needs a protection, so the order of these two lines
+# does not matter.
+PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_HUB_URL="$HUB_ONLY" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 ENGINE_ONLY_PID=$!
 
-HUB_ONLY_PORT=$((PORT + 300))
-HUB_ONLY="http://localhost:${HUB_ONLY_PORT}"
 PORT="$HUB_ONLY_PORT" VALENCE_ROLES=hub VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 HUB_ONLY_PID=$!

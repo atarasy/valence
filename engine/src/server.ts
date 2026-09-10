@@ -3,6 +3,7 @@ import { InMemoryLedger } from "./engine/ledger.js";
 import { MeterLedger } from "./engine/meter-ledger.js";
 import { createApp } from "./http.js";
 import { rolesFrom } from "./common/roles.js";
+import { RemoteMandates } from "./engine/mandate-source.js";
 import { RecoveryRegister } from "./hub/node.js";
 import { ApprovalDesk } from "./hub/approval.js";
 import { PermissionLedger } from "./hub/permissions.js";
@@ -69,5 +70,20 @@ const port = Number(process.env.PORT ?? 8787);
 // both, which is what the reference runs and what the conformance suites reach
 // unless they are pointed at a single role on purpose.
 const roles = rolesFrom(process.env.VALENCE_ROLES);
+
+// §13.1. An engine that does not present the hub has no register to read, and
+// asks the hub over the endpoints the specification already defines. Pointing
+// a deployment that runs both roles at a remote hub is allowed and pointless;
+// leaving it unset when the hub is absent is the mistake worth catching, and
+// it is caught here rather than at the first offer.
+if (process.env.VALENCE_HUB_URL) {
+  engine.readMandatesFrom(new RemoteMandates(process.env.VALENCE_HUB_URL));
+} else if (!roles.has("hub")) {
+  console.error(
+    "VALENCE_ROLES presents the engine without the hub, so this process holds no\n" +
+      "mandates. Set VALENCE_HUB_URL to the hub that does (SPEC §13.1)."
+  );
+  process.exit(1);
+}
 Bun.serve({ port, fetch: createApp(engine, hub, roles) });
 console.log(`valence-engine listening on http://localhost:${port}`);

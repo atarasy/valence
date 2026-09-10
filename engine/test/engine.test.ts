@@ -151,7 +151,7 @@ describe("price", () => {
       products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
     };
     engine.registerConfig(later, signConfig(later));
-    decideSigned(engine, offer.id, [
+    await decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);
@@ -296,11 +296,13 @@ describe("settlement", () => {
       ])
     );
     await engine.present(offer.id);
-    expect(() =>
+    // decide reads the mandate through §13.1's source, so it is async and the
+    // refusal is a rejected promise rather than a thrown value.
+    expect(
       decideSigned(engine, offer.id, [
         { candidate: offer.candidates[0]!.id, valence: "consumed" },
       ])
-    ).toThrow(/collection/);
+    ).rejects.toThrow(/collection/);
   });
 
   test("settled is terminal", async () => {
@@ -312,7 +314,7 @@ describe("settlement", () => {
       ])
     );
     await engine.present(offer.id);
-    decideSigned(engine, offer.id, [
+    await decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);

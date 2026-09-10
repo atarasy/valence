@@ -147,7 +147,7 @@ describe("MeterLedger", () => {
     const engine = makeEngine(ledger);
     const offer = offerFor(engine);
     await engine.present(offer.id);
-    decideSigned(engine, offer.id, [
+    await decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
       { candidate: offer.candidates[1]!.id, valence: "returned" },
     ]);

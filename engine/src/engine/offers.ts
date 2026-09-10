@@ -4,6 +4,7 @@ import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
 import { verifyDecisions } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
+import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import {
   applyRecovery,
   ineligibleReason,
@@ -117,6 +118,17 @@ export class ValenceEngine {
    */
   readonly recoveries = new RecoveryLedger();
   readonly mandates = new MandateRegister();
+  /**
+   * §13.1. Where protections are read from. A deployment presenting both roles
+   * reads its own register; one presenting the engine alone is given a source
+   * that asks the hub.
+   */
+  private mandateSource: MandateSource = new LocalMandates(this.mandates);
+
+  /** §13.1. Point the engine at a hub it does not share a process with. */
+  readMandatesFrom(source: MandateSource): void {
+    this.mandateSource = source;
+  }
 
   readonly config: EngineConfig;
 
@@ -388,9 +400,11 @@ export class ValenceEngine {
     // record is left alone, because a deployment may carry mandates outside
     // this engine, and refusing every offer would be a gate rather than a
     // protection.
-    const mandate = this.mandates.get(offer.mandate);
+    const mandate = await this.mandateSource.get(offer.mandate);
     if (mandate) {
-      this.mandates.mustGet(offer.mandate, now);
+      if (mandate.lapses_at <= now) {
+        throw unprocessable("mandate_lapsed", `mandate ${offer.mandate} lapsed and was not renewed`);
+      }
       const outside = offer.candidates
         .filter((c) => !(this.config.isInNetwork ?? (() => true))(c.merchant))
         .reduce((sum, c) => sum + c.unit_price * c.quantity, 0);
@@ -422,13 +436,13 @@ export class ValenceEngine {
     return offer;
   }
 
-  decide(
+  async decide(
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
     signature: string,
     coSignature?: string,
     now = Date.now()
-  ): Offer {
+  ): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "presented") {
       throw conflict("bad_state", `cannot decide an offer in ${offer.state}`);
@@ -486,7 +500,7 @@ export class ValenceEngine {
     // §16.4. A category the person named needs a second signature over the
     // same bytes. The check runs after the plan is built and before anything
     // is written, so a set that is refused leaves the offer as it was.
-    const mandateForSet = this.mandates.get(offer.mandate);
+    const mandateForSet = await this.mandateSource.get(offer.mandate);
     if (mandateForSet && mandateForSet.co_sign_categories.length > 0) {
       const needs = plan.filter(
         ({ candidate }) =>
@@ -530,7 +544,7 @@ export class ValenceEngine {
    * theirs alone and needs no co-signer: withdrawing removes a commitment, and
    * every rule about second signatures is about adding one.
    */
-  withdrawDecisions(offerId: string, now = Date.now()): Offer {
+  async withdrawDecisions(offerId: string, now = Date.now()): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "decided") {
       throw conflict("bad_state", `cannot withdraw decisions on an offer in ${offer.state}`);
@@ -538,7 +552,7 @@ export class ValenceEngine {
     if (this.settlements.get(offer.id)) {
       throw conflict("bad_state", "this offer has settled");
     }
-    const mandate = this.mandates.get(offer.mandate);
+    const mandate = await this.mandateSource.get(offer.mandate);
     const cooling = mandate?.cooling_seconds ?? null;
     if (cooling === null) {
       throw unprocessable(
@@ -606,7 +620,7 @@ export class ValenceEngine {
     // §16.5 and §16.3. Both refusals name themselves: four refusals in this
     // section share a status code, and a `422` that says only "unprocessable"
     // is one a person cannot act on and a probe cannot tell from another.
-    const mandate = this.mandates.get(offer.mandate);
+    const mandate = await this.mandateSource.get(offer.mandate);
     if (mandate?.cooling_seconds != null && offer.decided_at !== null) {
       const opens = offer.decided_at + mandate.cooling_seconds * 1000;
       if (now < opens) {

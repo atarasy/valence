@@ -517,7 +517,7 @@ async function route(
             : requireString(raw, "co_signature", "decisions");
         return json(
           offerView(
-            engine.decide(
+            await engine.decide(
               id,
               decisions,
               requireString(raw, "signature", "decisions"),
@@ -528,7 +528,7 @@ async function route(
       }
       // §16.5. The person takes back a signed set inside its cooling window.
       if (method === "DELETE" && action === "decisions") {
-        return json(offerView(engine.withdrawDecisions(id)));
+        return json(offerView(await engine.withdrawDecisions(id)));
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
