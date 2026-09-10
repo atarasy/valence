@@ -4,6 +4,7 @@ import { MeterLedger } from "./engine/meter-ledger.js";
 import { createApp } from "./http.js";
 import { rolesFrom } from "./common/roles.js";
 import { RemoteMandates } from "./engine/mandate-source.js";
+import { RemoteDay } from "./engine/day-source.js";
 import { RecoveryRegister } from "./hub/node.js";
 import { ApprovalDesk } from "./hub/approval.js";
 import { PermissionLedger } from "./hub/permissions.js";
@@ -78,6 +79,7 @@ const roles = rolesFrom(process.env.VALENCE_ROLES);
 // it is caught here rather than at the first offer.
 if (process.env.VALENCE_HUB_URL) {
   engine.readMandatesFrom(new RemoteMandates(process.env.VALENCE_HUB_URL));
+  engine.readTheDayFrom(new RemoteDay(process.env.VALENCE_HUB_URL));
 } else if (!roles.has("hub")) {
   console.error(
     "VALENCE_ROLES presents the engine without the hub, so this process holds no\n" +

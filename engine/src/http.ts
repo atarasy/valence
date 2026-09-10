@@ -817,6 +817,45 @@ async function route(
   // same reasoning as the identity routes: who issues a mandate is the hub's
   // business and the root's, not this engine's. What is in the specification
   // is which changes need whose signature, and that is what runs here.
+  // §16.3. The person's own copy of what settled for them. The engine reports
+  // to it and asks it for the day's total; a deployment presenting both roles
+  // reaches it in process and never over this route.
+  if (parts[0] === "households" && parts[2] === "settled") {
+    const household = decodeURIComponent(parts[1]!);
+    if (method === "GET") {
+      const since = Number(url.searchParams.get("since") ?? "0");
+      if (!Number.isFinite(since)) {
+        throw badRequest("malformed", "since is a timestamp in milliseconds");
+      }
+      return json({
+        household,
+        since,
+        total: engine.householdLedger.totalSince(household, since),
+      });
+    }
+    if (method === "POST") {
+      const raw = strict(
+        await body(request),
+        ["offer", "household", "amount", "settled_at"],
+        "settled"
+      );
+      if (requireString(raw, "household", "settled") !== household) {
+        // The path names whose copy this is. A body that named another
+        // household would write one person's settlement into another's day.
+        throw badRequest("malformed", "the body names another household");
+      }
+      return json(
+        engine.householdLedger.record({
+          offer: requireString(raw, "offer", "settled"),
+          household,
+          amount: requireInteger(raw, "amount", "settled", 0),
+          settled_at: requireInteger(raw, "settled_at", "settled", 0),
+        }),
+        201
+      );
+    }
+  }
+
   if (parts[0] === "_node" && parts[1] === "mandates" && method === "POST") {
     const raw = strict(
       await body(request),

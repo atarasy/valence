@@ -5,6 +5,8 @@ import { verifyEdge } from "../shared/lineage.js";
 import { verifyDecisions } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
+import { LocalDay, type DaySource } from "./day-source.js";
+import { HouseholdLedger } from "../hub/household-ledger.js";
 import {
   applyRecovery,
   ineligibleReason,
@@ -124,10 +126,22 @@ export class ValenceEngine {
    * that asks the hub.
    */
   private mandateSource: MandateSource = new LocalMandates(this.mandates);
+  /**
+   * §16.3. The person's own copy of what settled for them. A deployment
+   * presenting both roles keeps it here; one presenting the engine alone
+   * reports to the hub and asks the hub for the day's total.
+   */
+  readonly householdLedger = new HouseholdLedger();
+  private daySource: DaySource = new LocalDay(this.householdLedger);
 
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
     this.mandateSource = source;
+  }
+
+  /** §16.3. Point the day's total at the hub that holds the person's copy. */
+  readTheDayFrom(source: DaySource): void {
+    this.daySource = source;
   }
 
   readonly config: EngineConfig;
@@ -675,12 +689,11 @@ export class ValenceEngine {
     // household declines (clause 38).
     if (mandate?.ceiling_daily != null) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
-      let already = 0;
-      for (const s of this.settlements.values()) {
-        if (s.settled_at < dayStart) continue;
-        const other = this.offers.get(s.offer);
-        if (other && other.household === offer.household) already += s.charged;
-      }
+      // §16.3. The sum comes from the person's own copy, not from this
+      // engine's settlements: an engine summing its own is a merchant
+      // computing a household's union (clause 38), and two engines would give
+      // one household two ceilings.
+      const already = await this.daySource.totalSince(offer.household, dayStart);
       if (already + charged > mandate.ceiling_daily) {
         throw unprocessable(
           "mandate_ceiling_daily",
@@ -707,6 +720,16 @@ export class ValenceEngine {
         .digest("hex"),
     };
     this.settlements.set(offer.id, settlement);
+    // §16.3. The person's own copy, written as the settlement is made. It
+    // carries an amount and a date and nothing about what was in the offer: a
+    // copy that carried products would be a second vertical ledger on the
+    // person's side rather than the person's own.
+    await this.daySource.report({
+      offer: offer.id,
+      household: offer.household,
+      amount: charged,
+      settled_at: now,
+    });
     offer.state = "settled";
     return settlement;
   }
