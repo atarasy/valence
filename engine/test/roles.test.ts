@@ -19,15 +19,22 @@ describe("§13.1: which role owns a route", () => {
     }
   });
 
-  test("the two actions under an offer that carry the person's authority are the hub's", () => {
-    // The path is the offer's because the offer is what they concern. The
-    // authority is the person's: a signature, a withdrawal, and the
-    // household's own delivery surface (§7.5b).
-    expect(ownerOf(parts("/offers/x/decisions"))).toBe("hub");
+  test("delivery is the hub's, under an offer's path", () => {
+    // §7.5b. A merchant must not read a carrier's code, because the code
+    // resolves to an address. A hub holds deliveries without holding offers.
     expect(ownerOf(parts("/offers/x/delivery"))).toBe("hub");
-    // and their neighbours under the same path are not
+    // and its neighbours under the same path are not
     expect(ownerOf(parts("/offers/x/settle"))).toBe("engine");
     expect(ownerOf(parts("/offers/x/withdraw"))).toBe("engine");
+  });
+
+  test("deciding is the engine's, because authority travels in the signature", () => {
+    // It was the hub's until 2026-09-11, on the reasoning that a decided set
+    // is the person's. It is, and clause 35 makes it so by the signature,
+    // which whoever answers the route cannot forge. What answering the route
+    // needs is the offer, and a hub does not have one: a hub alone could only
+    // ever reply that it had never heard of it.
+    expect(ownerOf(parts("/offers/x/decisions"))).toBe("engine");
   });
 
   test("the registry is neither role's", () => {
@@ -46,14 +53,16 @@ describe("§13.1: what a deployment answers for", () => {
   test("an engine alone does not answer for the hub's surface", () => {
     expect(answersFor(engineOnly, parts("/offers/x/settle"))).toBe(true);
     expect(answersFor(engineOnly, parts("/households/h/export"))).toBe(false);
-    expect(answersFor(engineOnly, parts("/offers/x/decisions"))).toBe(false);
+    expect(answersFor(engineOnly, parts("/offers/x/delivery"))).toBe(false);
+    expect(answersFor(engineOnly, parts("/offers/x/decisions"))).toBe(true);
     // and still answers the registry, which is neither role's
     expect(answersFor(engineOnly, parts("/registry"))).toBe(true);
   });
 
   test("a hub alone does not answer for the engine's surface", () => {
     expect(answersFor(hubOnly, parts("/households/h/export"))).toBe(true);
-    expect(answersFor(hubOnly, parts("/offers/x/decisions"))).toBe(true);
+    expect(answersFor(hubOnly, parts("/offers/x/delivery"))).toBe(true);
+    expect(answersFor(hubOnly, parts("/offers/x/decisions"))).toBe(false);
     expect(answersFor(hubOnly, parts("/offers"))).toBe(false);
     expect(answersFor(hubOnly, parts("/_presenter/configs"))).toBe(false);
   });

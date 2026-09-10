@@ -6,18 +6,26 @@
  * that says which role owns which route, so that the answer is a table rather
  * than a property of where an `if` happens to sit in the router.
  *
- * The hard cases are the two actions that live under an offer's path and carry
- * the person's authority. `decisions` is the person's signature and their
- * withdrawal; `delivery` is the household's surface by §7.5b. The path is the
- * offer's because the offer is what they concern; the role is the hub's.
+ * The hard case is `delivery`. It lives under an offer's path and is the
+ * household's surface by §7.5b: a merchant must not read a carrier's code,
+ * because the code resolves to an address. So the path is the offer's and the
+ * role is the hub's, and a hub holds deliveries without holding offers.
+ *
+ * `decisions` was here too until 2026-09-11, on the reasoning that it carries
+ * the person's authority. **Authority travels in the signature, not in the
+ * route.** Clause 35 makes a decided set the person's because they signed it,
+ * and whoever answers the route cannot forge that. What answering the route
+ * does need is the offer, which a hub does not have: a hub alone answered
+ * `decisions` and could only ever reply that it had never heard of the offer.
+ * Tested rather than reasoned, on the day the split was built.
  */
 export type Role = "engine" | "hub";
 
 /** A route either belongs to one role, or is answered by whichever runs. */
 export type Owner = Role | "either";
 
-/** §16.4, §7.5b. The actions on an offer that the hub answers, not the engine. */
-const HUB_OFFER_ACTIONS = new Set(["decisions", "delivery"]);
+/** §7.5b. The action on an offer that the hub answers, not the engine. */
+const HUB_OFFER_ACTIONS = new Set(["delivery"]);
 
 /**
  * Which role owns a path. `parts` is the path split on "/" with empties
