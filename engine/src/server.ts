@@ -2,6 +2,7 @@ import { ValenceEngine } from "./engine/offers.js";
 import { InMemoryLedger } from "./engine/ledger.js";
 import { MeterLedger } from "./engine/meter-ledger.js";
 import { createApp } from "./http.js";
+import { rolesFrom } from "./common/roles.js";
 import { RecoveryRegister } from "./hub/node.js";
 import { ApprovalDesk } from "./hub/approval.js";
 import { PermissionLedger } from "./hub/permissions.js";
@@ -64,5 +65,9 @@ const hub = {
 };
 
 const port = Number(process.env.PORT ?? 8787);
-Bun.serve({ port, fetch: createApp(engine, hub) });
+// §13.1. VALENCE_ROLES names the surfaces this process presents. Unset is
+// both, which is what the reference runs and what the conformance suites reach
+// unless they are pointed at a single role on purpose.
+const roles = rolesFrom(process.env.VALENCE_ROLES);
+Bun.serve({ port, fetch: createApp(engine, hub, roles) });
 console.log(`valence-engine listening on http://localhost:${port}`);

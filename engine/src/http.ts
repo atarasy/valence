@@ -4,6 +4,7 @@ import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegist
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
 import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
+import { answersFor, ownerOf, type Role } from "./common/roles.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -133,10 +134,16 @@ export type Hub = {
  * and for whether a merchant is in the network, and holds no reference to
  * anything else of the hub's.
  */
-export function createApp(engine: ValenceEngine, hub: Hub) {
+export function createApp(
+  engine: ValenceEngine,
+  hub: Hub,
+  // §13.1. The roles this deployment presents. Both is the reference, and a
+  // deployment that runs one answers for that surface and not the other.
+  roles: ReadonlySet<Role> = new Set<Role>(["engine", "hub"])
+) {
   return async function handle(request: Request): Promise<Response> {
     try {
-      return await route(engine, hub, request);
+      return await route(engine, hub, roles, request);
     } catch (err) {
       if (err instanceof ValenceError) {
         return json({ error: err.code, message: err.message }, err.status);
@@ -162,6 +169,7 @@ async function body(request: Request): Promise<unknown> {
 async function route(
   engine: ValenceEngine,
   hub: Hub,
+  roles: ReadonlySet<Role>,
   request: Request
 ): Promise<Response> {
   const { recovery, approvals, permissions, registry, deliveries } = hub;
@@ -169,6 +177,17 @@ async function route(
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
   const method = request.method.toUpperCase();
+
+  // §13.1. A deployment answers for the surface it presents. A route this
+  // deployment does not run is not here, which is what a caller learns from a
+  // 404: not that the route is forbidden, but that this party is not the one
+  // that answers it. The registry is neither role's and is answered by
+  // whichever roles run.
+  if (parts.length > 0 && !answersFor(roles, parts)) {
+    throw notFound(
+      `this deployment presents ${[...roles].sort().join(" and ")}; /${parts[0]} is answered by the ${ownerOf(parts)}`
+    );
+  }
 
   // ---- out of specification: the presenter's own catalogue ----------------
   // Registering a catalogue version and an attested key is deployment
