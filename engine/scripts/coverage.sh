@@ -30,10 +30,15 @@ EXCLUDE="require_registered_merchant reject_foreign_offer_client"
 # said "HEAD" would hand back results measured against different code.
 tree_key() {
   find "$1" -type f \( -name '*.ts' -o -name '*.py' -o -name '*.sh' -o -name '*.json' \) \
-    -not -path '*/node_modules/*' -print0 \
+    -not -path '*/node_modules/*' -not -name coverage.sh -print0 \
     | sort -z | xargs -0 shasum 2>/dev/null | shasum | cut -c1-12
 }
-KEY="$(tree_key src)-$(tree_key scripts/mutations)-$(tree_key "$TESTS")"
+# `scripts` whole, not `scripts/mutations`: `seed.ts` builds the catalogue, the
+# mandate and the keys, and `conformance.sh` starts the servers and passes the
+# environment, so either one changes what a probe sees. Only this file is left
+# out, because editing the harness that reads the results should not discard
+# them. Widened 2026-09-11, having been the narrower path for one run.
+KEY="$(tree_key src)-$(tree_key scripts)-$(tree_key "$TESTS")"
 RESULTS="/tmp/valence-sweep-${KEY}"
 [ -n "$FRESH" ] && rm -rf "$RESULTS"
 mkdir -p "$RESULTS"
@@ -64,6 +69,11 @@ for f in scripts/mutations/*.py; do
   esac
   grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" "/tmp/mutation-${m}-unit.log" 2>/dev/null \
     | sed -E 's/^\(fail\) //; s/ \[[0-9.]+m?s\]$//' | sort -u > "$RESULTS/$m.fails"
+  # The spread is a count of conformance suites, so it reads the conformance
+  # log alone. A unit test's name yields a prefix of its own, and counting
+  # those inflates the number against a threshold calibrated on suites.
+  grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" 2>/dev/null \
+    | sed -E 's/^\(fail\) //; s/:.*//' | sort -u > "$RESULTS/$m.suites"
 done
 
 : > "$OUT"
@@ -104,8 +114,8 @@ echo ""
 echo "mutations whose failures span four or more suites (check whether they break the fixture):"
 for f in scripts/mutations/*.py; do
   m=$(basename "$f" .py)
-  [ -f "$RESULTS/$m.fails" ] || continue
-  spread=$(sed -E 's/:.*//' "$RESULTS/$m.fails" | sort -u | wc -l | tr -d ' ')
+  [ -f "$RESULTS/$m.suites" ] || continue
+  spread=$(wc -l < "$RESULTS/$m.suites" | tr -d ' ')
   if [ "${spread:-0}" -ge 4 ]; then printf '  %-36s %s suites\n' "$m" "$spread"; fi
 done
 # The loop's last test decides the script's status otherwise, so a run whose
