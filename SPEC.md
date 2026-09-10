@@ -516,6 +516,10 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 
 **A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
 
+**A route this deployment does not present MUST be refused with `404` and the reason `not_this_role`.** The status is a 404 because from the caller's side the route is not on this party. The name is required because the status alone says two different things: an implementation answers 404 for a household it has never heard of, and the same 404 for a surface it does not present. **A caller that cannot tell them apart retries against the party that will never answer**, and a conformance probe cannot tell an empty implementation from an absent role. This is §16.6's discipline in another place: a refusal names itself.
+
+**An engine that does not hold the mandate asks the hub for it over `GET /_node/mandates/{id}`**, and MUST NOT treat a hub it could not reach as a hub that holds no mandate. An unknown mandate is left alone (§16.2), and reading a transport failure as an unknown mandate would drop every protection the moment the network did.
+
 Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Passing them is what entitles an implementation to the mark.
 
 ----
