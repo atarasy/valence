@@ -555,12 +555,29 @@ An implementation MUST refuse the whole import with `422` when any of these fail
 
 ----
 
+## 14b. Deployment parameters
+
+Added 2026-09-10, because there was no list. Six values are the deployment's rather than this specification's, and until they were gathered a reader could not count them or tell which had a default. **A parameter with no recommended figure is a deliberate absence**: a number written here once becomes a standard by being quoted, and the ones below are properties of an operation rather than of the protocol.
+
+| Parameter | Where | Default | Why the specification names no figure |
+|---|---|---|---|
+| exploration rate | §5 | **none. An implementation without one MUST refuse to start** | A rate is a judgement about how much of an offer is given to what the household has not seen. Written here, it stops being the deployment's judgement |
+| recovery grace | §11 | **none, as above** | The days after a recovery deadline before goods are `lost` depend on the route and the goods |
+| reminder limit | §10.4 | 1, and configurable **downward only** | Clause 33 caps it at one. A deployment may send none |
+| the registry's reach | §16.2 | every merchant is in the network | Which merchants the registry lists is what "in the network" means. A deployment without a registry binds the ceiling to nothing, which is the honest reading rather than a silent one |
+| the day boundary | §16.3 | **UTC midnight, declared rather than assumed** | A household's day needs a time zone. Choosing one here would make when a person's day starts this specification's business. A deployment MUST apply the same boundary to every household it holds |
+| the bindings run | §2 | both | A deployment may run the digital binding alone, and §11's probes then have nothing to reach |
+
+**Three of the six have no default at all**, and that is the pattern worth seeing: where the value is a judgement about a person's experience, the specification refuses to supply one and an implementation that starts without it is not conformant. Where the value is a limit the constitution already fixes, or a fact about what a deployment has, a default is safe.
+
+----
+
 ## 15. Open
 
 - Binding an AP2 mandate to direct-debit rails. The specification is written for card authorisation; no equivalent exists for account transfer, and one is needed.
 - Multi-hop lineage attribution, where a product passes through several households before a purchase. The settlement side is out of scope here.
 - Whether the feed extension should be proposed to the ACP community or remain a private extension.
-- Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure.
+- Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure, and §14b now lists every parameter of that kind in one place, with which of them have a default and why.
 
 ----
 
