@@ -375,6 +375,9 @@ GET    /offers?household={id}&presenter={id}   the presenter's vertical view, an
 POST   /candidates/{id}/note        one line, shared with whom the writer says
 GET    /candidates/{id}/note?as=    the lines shared with that party (clause 27)
 POST   /lineage                     accept an edge
+POST   /households/{id}/offers      the person's copy of a decided offer, sent by the engine (§13.2)
+POST   /households/{id}/settled     the person's copy of what settled, an amount and a date (§13.2, §16.3)
+GET    /households/{id}/settled?since=  what has settled for this household since a moment, as a total
 ```
 
 The same operations SHOULD be exposed as MCP tools, so that a merchant's agent and a household's agent call the same surface.
@@ -385,6 +388,8 @@ Three of these lines were corrected on 2026-09-08, after the conformance suites 
 - **`POST /offers/{id}/remind` and `GET /offers/{id}` are named.** Both were required by the specification's own prose, §10.4 and §2.1, and neither appeared here. An implementation built from this section alone had no route for the one reminder clause 33 permits, and no way to read back the state the state machine describes.
 
 A fourth line was added on 2026-09-09. **`GET /offers/{id}/settlement`** reads a settlement back. §6 delivers a signed receipt to the household in the response to `POST /offers/{id}/settle` and gave no way to ask for it again, so a household that lost that response had lost its receipt, and clause 43's export could omit settlements while every read still agreed. A conformance probe comparing two hosts found it: the export dropped the settlements and the hosts still answered alike, because nothing asked.
+
+Three more were added on 2026-09-11 with §13.2, and they are the ones a deployment presenting a single role cannot do without: they are how the person's side comes to hold what is the person's. A deployment presenting both roles reaches the same state in process and need never call them, which is what the reference does.
 
 An endpoint a conformance test depends on belongs in this list. Where the two disagree, this list is what an implementer reads.
 
