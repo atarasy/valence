@@ -4,9 +4,19 @@
 # The notes in the suites are a claim; this is the measurement. A probe that
 # never appears here has not been shown to fail, whatever its comment says, and
 # by the rule in tests/README.md it is not counted.
+#
+# The sweep takes hours, and on 2026-09-10 it was killed for memory at 155 of
+# 173 with nothing kept. So each mutation's result is written to a directory
+# keyed by the content of everything that decides the outcome, and a rerun
+# reuses only what was measured against that exact content. A change to src, to
+# a mutation script or to a suite gives a different key and measures again.
+# `--fresh` discards the directory first.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
+TESTS="${ATARAXIA_TESTS:-$HOME/Documents/GitHub/ataraxia/tests}"
+FRESH=""
+case "${1:-}" in --fresh) FRESH=1; shift ;; esac
 OUT="${1:-/tmp/valence-coverage.txt}"
 # Two mutations break offer creation for the whole suite: every probe that
 # creates an offer then fails in its setup, whatever its own assertion says.
@@ -14,29 +24,60 @@ OUT="${1:-/tmp/valence-coverage.txt}"
 # something other than the rule in tests/README.md, so they are measured
 # separately and named here. Found on 2026-09-09 by an adversarial pass.
 EXCLUDE="require_registered_merchant reject_foreign_offer_client"
-: > "$OUT"
-INERT=""
-SURVIVED=""
-ABORTED=""
-COUNT=0
+
+# Hashing the files rather than asking git what is committed, because a sweep
+# is often run against a working tree that is ahead of HEAD, and a key that
+# said "HEAD" would hand back results measured against different code.
+tree_key() {
+  find "$1" -type f \( -name '*.ts' -o -name '*.py' -o -name '*.sh' -o -name '*.json' \) \
+    -not -path '*/node_modules/*' -print0 \
+    | sort -z | xargs -0 shasum 2>/dev/null | shasum | cut -c1-12
+}
+KEY="$(tree_key src)-$(tree_key scripts/mutations)-$(tree_key "$TESTS")"
+RESULTS="/tmp/valence-sweep-${KEY}"
+[ -n "$FRESH" ] && rm -rf "$RESULTS"
+mkdir -p "$RESULTS"
+echo "results: $RESULTS"
+
+TOTAL=$(ls scripts/mutations/*.py | wc -l | tr -d ' ')
+DONE=0
 for f in scripts/mutations/*.py; do
   m=$(basename "$f" .py)
+  DONE=$((DONE + 1))
+  [ -f "$RESULTS/$m.status" ] && continue
+  # A mutation left applied by a killed run would be measured as part of the
+  # next one, and every mutation after it too. mutate.sh refuses on a dirty
+  # src, but it refuses one at a time and the sweep would report the whole
+  # remainder as caught by nothing. Stop instead, and say what to do.
+  if ! git diff --quiet -- src; then
+    echo "src is dirty at mutation ${DONE}/${TOTAL} (${m}); a previous mutation was left applied." >&2
+    echo "Diff it against scripts/mutations/ to find which, restore with 'git checkout -- src', and rerun." >&2
+    exit 1
+  fi
+  printf '[%3d/%d] %s\n' "$DONE" "$TOTAL" "$m"
   RUN="$(./scripts/mutate.sh "$m" python3 "$f" 2>&1)"
-  status=$?
-  if [ "$status" = 2 ]; then INERT="$INERT $m"; continue; fi
-  COUNT=$((COUNT + 1))
-  # A mutation nothing caught, and one that broke the setup before any probe
-  # ran, both contribute no failing probe to the union above, and before
-  # 2026-09-09 both were indistinguishable from a mutation the probes caught.
-  # conformance.sh exited 1 on every run, so mutate.sh's SURVIVED branch could
-  # not fire, and the union is silent about a mutation that adds nothing to it.
   case "$RUN" in
-    *"SURVIVED:"*) SURVIVED="$SURVIVED $m" ;;
-    *"ABORTED:"*)  ABORTED="$ABORTED $m" ;;
+    *"INERT:"*)    echo INERT    > "$RESULTS/$m.status" ;;
+    *"SURVIVED:"*) echo SURVIVED > "$RESULTS/$m.status" ;;
+    *"ABORTED:"*)  echo ABORTED  > "$RESULTS/$m.status" ;;
+    *)             echo CAUGHT   > "$RESULTS/$m.status" ;;
   esac
-  case " $EXCLUDE " in *" $m "*) continue ;; esac
   grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" "/tmp/mutation-${m}-unit.log" 2>/dev/null \
-    | sed -E 's/^\(fail\) //; s/ \[[0-9.]+m?s\]$//' >> "$OUT"
+    | sed -E 's/^\(fail\) //; s/ \[[0-9.]+m?s\]$//' | sort -u > "$RESULTS/$m.fails"
+done
+
+: > "$OUT"
+INERT=""; SURVIVED=""; ABORTED=""; COUNT=0
+for f in scripts/mutations/*.py; do
+  m=$(basename "$f" .py)
+  case "$(cat "$RESULTS/$m.status")" in
+    INERT)    INERT="$INERT $m"; continue ;;
+    SURVIVED) SURVIVED="$SURVIVED $m" ;;
+    ABORTED)  ABORTED="$ABORTED $m" ;;
+  esac
+  COUNT=$((COUNT + 1))
+  case " $EXCLUDE " in *" $m "*) continue ;; esac
+  cat "$RESULTS/$m.fails" >> "$OUT"
 done
 sort -u -o "$OUT" "$OUT"
 echo "mutations run: $COUNT"
@@ -63,9 +104,8 @@ echo ""
 echo "mutations whose failures span four or more suites (check whether they break the fixture):"
 for f in scripts/mutations/*.py; do
   m=$(basename "$f" .py)
-  [ -f "/tmp/mutation-${m}.log" ] || continue
-  spread=$(grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" 2>/dev/null \
-    | sed -E 's/^\(fail\) //; s/:.*//' | sort -u | wc -l | tr -d ' ')
+  [ -f "$RESULTS/$m.fails" ] || continue
+  spread=$(sed -E 's/:.*//' "$RESULTS/$m.fails" | sort -u | wc -l | tr -d ' ')
   if [ "${spread:-0}" -ge 4 ]; then printf '  %-36s %s suites\n' "$m" "$spread"; fi
 done
 # The loop's last test decides the script's status otherwise, so a run whose
