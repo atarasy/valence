@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ValenceEngine } from "../engine/offers.js";
 import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "../common/types.js";
+import type { Permission, Query, PermissionLedger } from "./permissions.js";
+import type { Mandate, MandateRegister } from "./mandates.js";
+import type { Delivery, DeliveryRegister } from "./delivery.js";
 
 /**
  * A household's node, and what leaves with it.
@@ -20,7 +23,15 @@ import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } 
  * the export carries it. Otherwise a member who changes hosts loses their own
  * record of what they gave.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/1";
+/**
+ * Bumped to /2 on 2026-09-09, when the permission ledger, the mandates and the
+ * queries joined the export. A host on /1 has no field for them, and the
+ * project's own rule is that an unknown field is refused rather than dropped
+ * (`common/validate.ts`). A silent drop here is worse than a refused move: the
+ * member arrives at the new host apparently intact and without their
+ * protections.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/2";
 
 export type NodeExport = {
   format: string;
@@ -38,6 +49,14 @@ export type NodeExport = {
   receipts: { ref: string; at: number }[];
   /** Clause 53. Recovery is logged, and the log leaves with the node. */
   recoveries: RecoveryRecord[];
+  /** Clause 43. Every permission the person granted, revoked rows included. */
+  permissions: Permission[];
+  /** Clause 20. The duplicate checks written into the recipient's record. */
+  queries: Query[];
+  /** Clauses 46, 47, 52, 58. The person's standing protections. */
+  mandates: Mandate[];
+  /** §7.5b. Carriage and where each parcel is. The person's side of clause 49. */
+  deliveries: Delivery[];
 };
 
 export type RecoveryRecord = {
@@ -114,6 +133,11 @@ export class RecoveryRegister {
     return record;
   }
 
+  /** Clause 53: the log leaves with the node, so it must also arrive with it. */
+  importLog(household: string, records: RecoveryRecord[]): void {
+    if (records.length) this.log.set(household, [...records]);
+  }
+
   logFor(household: string): RecoveryRecord[] {
     return this.log.get(household) ?? [];
   }
@@ -128,6 +152,9 @@ export class RecoveryRegister {
 export function exportNode(
   engine: ValenceEngine,
   recovery: RecoveryRegister,
+  permissions: PermissionLedger,
+  mandates: MandateRegister,
+  deliveries: DeliveryRegister,
   household: string,
   now = Date.now()
 ): NodeExport {
@@ -148,6 +175,9 @@ export function exportNode(
     lineage: engine.edgesTouching(household),
     receipts: engine.receiptsFor(household),
     recoveries: recovery.logFor(household),
+    ...permissions.exportFor(household),
+    mandates: mandates.forHousehold(household),
+    deliveries: deliveries.forHousehold(offers.map((o) => o.id)),
   };
 }
 

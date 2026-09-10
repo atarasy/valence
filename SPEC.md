@@ -95,6 +95,7 @@ candidate
   unit_price             the merchant's own price. Immutable within the offer.
   merchant               who made it: the merchant of record (clauses 11, 12). From the catalogue, never the request.
   ships                  who carries it to the household (clause 12). From the catalogue.
+  category               the merchant's own category, or null. From the catalogue, never the request. A mandate names values of it (§16.4).
   predicted_conversion   0..1, or null. The presenter's own model output.
   is_exploration         boolean. Counts toward the floor (§5).
   given_by               the key of whoever gave this candidate, or null. A gift is never billed to its recipient (§6.2, clause 10).
@@ -172,6 +173,8 @@ Without this the floor is satisfiable by relabelling. A presenter marks the item
 
 The floor counts what **this presenter** has offered this household, so what a presenter is decides what the floor is worth. A presenter is the holder of a key: a catalogue is accepted only when it is signed by the key registered for the presenter it names, so nobody publishes catalogues under another presenter's name, and a presenter cannot disown one it published.
 
+**The category is inside the signed bytes of a catalogue**, beside the price. Left outside them, whoever relays a catalogue could strip a category, and a candidate that needed a second signature under §16.4 would quietly stop needing one. A protection that a relay can remove is not a protection.
+
 An offer says whether an identity root endorsed that key (`presenter_attested`, §7.1). Where it did, changing name means presenting a second identity to that root, which is a thing the root can see and a household can weigh. Where it did not, the name is the presenter's own word.
 
 **What this does not close, stated plainly.** An operator that can obtain two identities is two presenters as far as this specification can tell, and a household that has seen everything from one can be shown the same range again by the other, with the floor satisfied both times. Only the root that endorses identities can say the two are one. Nothing inside an engine can: it sees keys, and the question is about who holds them. This was measured on 2026-09-09, when an adversarial pass renamed a presenter and watched a household's history disappear.
@@ -204,13 +207,17 @@ settlement
 
 Every line names its merchant of record. A receipt that totals without saying who sold each item has hidden the merchant behind the curator, which clause 12 forbids and clause 11 makes a question of who is liable.
 
+**A settlement is a record and not an instruction to move money.** §1 says this specification does not define payment, and that has a consequence worth stating where the record is defined: `charged` is what the household owes on this offer, and how it is paid is the merchant's own arrangement with its processor. So a settlement whose `lines[]` name more than one merchant of record is well formed, and how many payments it corresponds to is not a question this specification answers.
+
 `charged` **MUST** equal `kept_amount + consumed_amount`, and it is what the ledger commits.
 
 The field is not redundant, and it was added on 2026-09-08 after a conformance probe failed to catch an implementation that billed for `lost`. Without it the settlement reports a breakdown and the ledger takes a number, and nothing in the record connects the two: a household reading a receipt that says nothing was kept has no way to see that it was charged anyway. An implementation whose `charged` disagrees with the sum above is not conformant even when every other amount is right.
 
 ### 6.1 Nothing accrues
 
-Nothing carries from one settlement to the next. There is no balance, and since 2026-09-09 there is nothing to deduct either: a trial is a sample, which is free, or it is goods, which are bought at the merchant's price. An implementation MUST NOT hold a household balance redeemable against future goods, which is a prepaid payment instrument in several jurisdictions and out of reach for most implementers.
+Nothing carries from one settlement to the next. There is no balance, and since 2026-09-09 there is nothing to deduct either: every line settles on one of the two bases in §6.2 and there is no third. An implementation MUST NOT hold a household balance redeemable against future goods, which is a prepaid payment instrument in several jurisdictions and out of reach for most implementers.
+
+An earlier wording of this paragraph said a trial "is a sample, which is free, or it is goods, which are bought at the merchant's price". That was a third basis, asserted three lines above the sentence in §6.2 denying that a third exists, and it used the word the model deliberately does not carry: goods received as a sample read as a promotion and as worth less than their price, which is why a candidate carries a giver (`given_by`) and never a sample flag.
 
 ### 6.2 What was used is bought; what was given is a gift
 
@@ -302,6 +309,27 @@ A grant with `kind: computation` MUST name `result_form: "aggregate"` and an imp
 
 The enum has one member on purpose. A person cannot grant raw data to a computation even if they wish to, because a model trained on it cannot un-train a revoked grant (clause 40), and whoever held the raw data would be holding per-person events (clause 29). The limit is on what a grant can express, which is the only place it can be enforced.
 
+### 7.5b Carriage and delivery, which the household sees and the merchant does not
+
+Added 2026-09-10. Two things belong on a household's surface and on no merchant's: **what carriage costs, and where the parcel is.**
+
+```
+delivery
+  offer
+  carriage      what carriage costs on this offer, in the smallest unit
+  code          the delivery code of clause 49
+  status        placed | in_transit | delivered | returned
+  updated_at
+```
+
+`GET /offers/{id}/delivery` returns it to the household. **It is not on the offer, not on the settlement, and not in `valence-merchant/1`.** An implementation MUST refuse `code` and `status` as request fields on any merchant-facing route, and MUST NOT carry them in the merchant export (§14.1).
+
+**Why the merchant is on the other side of this line.** Clause 49 keeps identity from the merchant, and a carrier's tracking number is a lookup key into the delivery address: a merchant holding one can read where the household lives from the carrier, without ever having a field for an address. The absence of the field is not the protection; the absence of anything that resolves to it is. This is the inference channel `04b` of the concept documents calls "an identifier that resolves elsewhere", and it is the one that made `leak_field_settlement` a mutation worth writing.
+
+**What the merchant needs instead, and already has.** A presenter learns what happened to the goods from the state machine and the recovery, not from a carrier: `present` ships, §11 records what came back, and settlement prices what was kept. Nothing in that path wants a tracking number.
+
+**Carriage is on this surface and not on the candidate.** Clause 10 keeps the price the merchant's and clause 4 keeps a person-side fee from being a function of what was bought, so carriage is neither a price nor a fee here: it is what the shop is charged and shows, quoted to the household on its own line before it decides. `17` §2b of the concept documents holds the shape.
+
 ### 7.6 The recipient's record
 
 A recipient's node records the fact of receipt and nothing else until that household becomes a giver (clause 19). No preference, no profile, no score is derived from having received.
@@ -321,6 +349,7 @@ A Valence-conformant merchant extends its ACP product feed. The two gift fields 
 | `valence.gift_unit` | the unit and quantity in which this product can be given rather than sold (§6.2) |
 | `valence.gift_eligible` | whether the maker allows it to be given |
 | `valence.gift_meta` | wrapping options, ceremonial eligibility, price band |
+| `category` | the merchant's own category for the product. It travels into the catalogue and onto the candidate, and a mandate names values of it (§16.4). The specification does not define a vocabulary: a hub that ranked or interpreted categories would be judging merchandise, which clauses 1 and 44 remove |
 | `valence.lineage_hook` | endpoint accepting lineage edges |
 | `valence.reciprocity` | whether purchase history is returned to the household in standard form |
 
@@ -341,6 +370,7 @@ POST   /offers/{id}/withdraw        revoke, release
 POST   /offers/{id}/remind          the one reminder (§10.4, clause 33)
 GET    /offers/{id}                 one offer, with its candidates
 GET    /offers/{id}/settlement      the settlement, once there is one
+GET    /offers/{id}/delivery        carriage and where the parcel is (§7.5b). The household's surface, never a merchant's
 GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
 POST   /candidates/{id}/note        one line, shared with whom the writer says
 GET    /candidates/{id}/note?as=    the lines shared with that party (clause 27)
@@ -377,7 +407,7 @@ A conforming implementation does not have these routes. Their absence is checkab
    | `auto_renewal` | the candidate carries an auto-renewing subscription (clause 48) |
    | `obstructed_cancellation` | cancelling it is harder than buying it (clause 48) |
    | `manufactured_scarcity` | the offer manufactures urgency or scarcity (clause 48) |
-   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 48; inside the network clause 10 prevents it, outside it does not) |
+   | `late_price` | the price rises at checkout, by carriage or a fee not shown with the candidate (clause 48). This bites inside the network as well as outside it. An earlier version of this row said clause 10 prevents it inside, which is a join of two true things into a false one: clause 10 forbids a curator, a representative or a platform raising the merchant's price, and says nothing about a merchant adding carriage at its own checkout. What prevents it is the requirement that carriage appear as a line of its own beside the candidates, with the terms of consolidation, before the person decides. That was clause 54 until 2026-09-09, when it was withdrawn as a requirement on a surface rather than a prohibition. **It is §7.5b of this specification since 2026-09-10**, where the delivery carries the carriage on the household's side and the merchant is on the other side of the line |
    | `outside_mandate` | the candidate falls outside the mandate the household gave |
    | `declined_before` | the household returned this product before, and the agent is not offering it again |
 
@@ -439,11 +469,11 @@ A ceremonial offer names a `giver` beside its `price_band`, and the giver is the
 
 | requirement | clause |
 |---|---|
-| The recipient chooses; the giver does not see the candidates | 27 |
-| The offer carries the band the giver chose, shown to the recipient on the approval surface as well as the offer, and no candidate lies outside it. The band bounds the **line**, `unit_price × quantity`, not the unit: five units of something inside the band is five times the band. A candidate outside it is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 26 |
-| If nothing is chosen before expiry, one candidate is `defaulted` and shipped. "Nothing chosen" is the whole condition: a recipient who kept one item and left the rest has chosen, and no default ships beside a kept candidate | 28 |
-| Nothing is earned from an unredeemed offer | 28 |
-| Cards, wrapping and denominational wording match local convention exactly | 29 |
+| The recipient chooses; the giver does not see the candidates | 24 |
+| The offer carries the band the giver chose, shown to the recipient on the approval surface as well as the offer, and no candidate lies outside it. The band bounds the **line**, `unit_price × quantity`, not the unit: five units of something inside the band is five times the band. A candidate outside it is refused with `422 outside_band`, and a ceremonial offer without a band with `400` | 23 |
+| If nothing is chosen before expiry, one candidate is `defaulted` and shipped. "Nothing chosen" is the whole condition: a recipient who kept one item and left the rest has chosen, and no default ships beside a kept candidate | 25 |
+| Nothing is earned from an unredeemed offer | 25 |
+| Cards, wrapping and denominational wording match local convention exactly | none. This was clause 29 until 2026-09-09, when the review withdrew it as a requirement standing in a list of prohibitions. It is this specification's, and no clause backs it |
 
 The last is not decoration. An implementation that gets the wording of a funeral return wrong has failed regardless of the rest.
 
@@ -468,7 +498,23 @@ An implementation is Valence-conformant when it:
 11. verifies what it imports: a signed edge, an offer belonging to the household whose path it arrives on, and never over a settled offer (§14.2), and exports a shop's ledgers in full (§14.1)
 12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
 
-Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine.
+Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16.
+
+### 13.1 Two roles, and what each is judged on
+
+Added 2026-09-10. **An implementation may present the engine's surface, the hub's surface, or both**, and it is judged on the surface it presents.
+
+| Role | Surface (§9) | Whose |
+|---|---|---|
+| **engine** | `/offers` and its actions except `decisions` and `delivery`, `/candidates/{id}/note`, `/presenters/{id}/export`, the presenter's own registration routes | the presenter's |
+| **hub** | `/households/{id}` and its actions, `/_node/mandates`, `/_node/recoverers`, `/lineage/*`, and the two actions on an offer that carry the person's authority: `decisions` and `delivery` | the person's |
+| both | the registry (§17) is answered by whichever role a deployment puts it behind | neither's |
+
+**Two actions live under an offer's path and belong to the hub.** `POST` and `DELETE /offers/{id}/decisions` carry the person's signature and the person's withdrawal; `GET` and `POST /offers/{id}/delivery` are the household's surface by §7.5b. The path is the offer's because the offer is what they concern. The authority is the person's, and **the role that answers them is the hub**.
+
+**An engine that does not hold the mandate asks the hub for it over these endpoints and not by reading its store.** What it asks for is a protection rather than data about a person: the ceiling, the categories that need a second signature, the length of the cooling window. Clause 52 makes the host replaceable and blind, and a boundary that a conformance probe cannot see is a boundary the specification cannot hold anyone to, which is the reason this is stated here rather than left to an implementation.
+
+**A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
 
 Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Passing them is what entitles an implementation to the mark.
 
@@ -509,12 +555,29 @@ An implementation MUST refuse the whole import with `422` when any of these fail
 
 ----
 
+## 14b. Deployment parameters
+
+Added 2026-09-10, because there was no list. Six values are the deployment's rather than this specification's, and until they were gathered a reader could not count them or tell which had a default. **A parameter with no recommended figure is a deliberate absence**: a number written here once becomes a standard by being quoted, and the ones below are properties of an operation rather than of the protocol.
+
+| Parameter | Where | Default | Why the specification names no figure |
+|---|---|---|---|
+| exploration rate | §5 | **none. An implementation without one MUST refuse to start** | A rate is a judgement about how much of an offer is given to what the household has not seen. Written here, it stops being the deployment's judgement |
+| recovery grace | §11 | **none, as above** | The days after a recovery deadline before goods are `lost` depend on the route and the goods |
+| reminder limit | §10.4 | 1, and configurable **downward only** | Clause 33 caps it at one. A deployment may send none |
+| the registry's reach | §16.2 | every merchant is in the network | Which merchants the registry lists is what "in the network" means. A deployment without a registry binds the ceiling to nothing, which is the honest reading rather than a silent one |
+| the day boundary | §16.3 | **UTC midnight, declared rather than assumed** | A household's day needs a time zone. Choosing one here would make when a person's day starts this specification's business. A deployment MUST apply the same boundary to every household it holds |
+| the bindings run | §2 | both | A deployment may run the digital binding alone, and §11's probes then have nothing to reach |
+
+**Three of the six have no default at all**, and that is the pattern worth seeing: where the value is a judgement about a person's experience, the specification refuses to supply one and an implementation that starts without it is not conformant. Where the value is a limit the constitution already fixes, or a fact about what a deployment has, a default is safe.
+
+----
+
 ## 15. Open
 
 - Binding an AP2 mandate to direct-debit rails. The specification is written for card authorisation; no equivalent exists for account transfer, and one is needed.
 - Multi-hop lineage attribution, where a product passes through several households before a purchase. The settlement side is out of scope here.
 - Whether the feed extension should be proposed to the ACP community or remain a private extension.
-- Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure.
+- Default values for the exploration rate, the recovery deadline and the loss threshold. All are currently deployment parameters with no recommended figure, and §14b now lists every parameter of that kind in one place, with which of them have a default and why.
 
 ----
 
@@ -527,16 +590,33 @@ mandate
   id
   household
   ceiling_out_of_network   what one offer may cost at merchants the registry does not list (clause 46)
+  ceiling_daily            what may settle for this household in one day, across every presenter
+  co_sign_categories[]     feed categories whose candidates need a co-signer on the decided set
+  cooling_seconds          how long a decided set waits before it settles
   co_signers[]             keys named while the person had capacity (clause 47)
   lapses_at                a standing mandate lapses unless renewed (clause 58)
   version                  1 for a new mandate, then one more each time
 ```
 
+`ceiling_daily` and `cooling_seconds` are absent when the person has not set
+them, and absent is not zero: no daily ceiling and no cooling, against a
+`ceiling_daily` of 0 that would refuse everything. `co_sign_categories` is
+absent or empty when nothing needs a second signature.
+
+**The three added on 2026-09-10 sit in the order above and not at the end**,
+which changes the canonical bytes. Nothing stored breaks, because a signature
+is checked when its version is submitted and is not retained (§16.1); a
+signature held outside the implementation and checked later against the newer
+form would break, and the rule that prevents it is that a signature covers the
+form current when it was made.
+
 ### 16.1 Who signs a change
 
 Every version is signed by the household over the canonical form: the fields above, one per line, in the order listed, with `co_signers` sorted and comma-separated, and the version inside the bytes so that an old signature cannot be replayed onto a new record.
 
-A change **loosens** when it raises the ceiling, pushes `lapses_at` further out, or drops a co-signer. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone. An implementation MUST refuse with `422` a version that is unsigned, signed by the wrong key, or missing a co-signer's signature on a loosening, and MUST refuse a version that is not exactly one more than the last.
+A change **loosens** when it raises either ceiling, pushes `lapses_at` further out, drops a co-signer, removes a category from `co_sign_categories`, or shortens `cooling_seconds`. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone: lowering a ceiling, adding a category and lengthening cooling are all tightenings.
+
+**Signatures are verified at submission and MUST NOT be retained.** What a signature covers is the canonical form as it stood when the signature was made, and an implementation that keeps signatures in order to re-check them later has taken on a compatibility problem that this one does not have. An implementation MUST refuse with `422` a version that is unsigned, signed by the wrong key, or missing a co-signer's signature on a loosening, and MUST refuse a version that is not exactly one more than the last.
 
 This is what clause 47 means by "nothing else changes it": not the person alone, not a co-signer alone, and no layer, which holds no key at all.
 
@@ -546,6 +626,43 @@ At presentation, an implementation that holds a mandate for the offer MUST refus
 
 An offer whose mandate this implementation does not hold is left alone. A deployment may carry mandates elsewhere, and refusing every offer whose mandate is unknown would be a gate rather than a protection.
 
+### 16.3 The daily ceiling
+
+At settlement, an implementation that holds a mandate for the offer MUST refuse with `422` when what has already settled for this household today, plus what this settlement would charge, exceeds `ceiling_daily`.
+
+**The day is the deployment's, not this specification's.** A household's day needs a time zone, and a specification that named one would be deciding when a person's day starts. A deployment declares the boundary and MUST apply the same one to every household it holds.
+
+**The sum is the household's own union.** It crosses presenters, so it is read by the person's own agent and by no merchant (clause 38). A presenter learns only that this settlement was refused, which is what it learns when a household declines.
+
+### 16.4 Categories that need a second signature
+
+`co_sign_categories` holds values of the `category` a merchant publishes for a product (§8). **The implementation matches strings and sorts nothing**: a hub that decided for itself which goods were medicines or investments would be making the judgement about merchandise that clauses 1 and 44 remove.
+
+A category travels from the catalogue onto the candidate with the price and the merchant (§3.1), and there is no request field that sets it.
+
+When a decided set contains a candidate whose category is in `co_sign_categories`, `POST /offers/{id}/decisions` MUST refuse with `422` unless it carries a co-signer's signature over the same canonical set beside the household's. One co-signer is enough, and the mandate's `co_signers` are the eligible set.
+
+### 16.5 Cooling
+
+A decided set under a mandate with `cooling_seconds` set does not settle when it is signed. `POST /offers/{id}/settle` MUST refuse with `422` until `cooling_seconds` have passed since the decision, and `DELETE /offers/{id}/decisions` withdraws the set before then, returning the offer to `presented`. Withdrawing is the person's alone and needs no co-signer.
+
+**Cooling does not make silence into consent** (clause 32). It applies only after the person has confirmed: the set is signed, and the window is time in which a signed decision can be taken back. An unconfirmed offer is still no order.
+
+**Why seconds and not a clock.** An order placed at night that runs the next morning is a cooling window expressed in seconds; expressed as a rule about clocks it would need a time zone, and the household's day would become this specification's business. §16.3 needs the boundary and says so, which is the difference between the two.
+
+### 16.6 A refusal names the threshold that refused it
+
+Four refusals in this section share a status code, and a person MUST be able to tell them apart. The body carries a `reason` of
+
+```
+mandate_ceiling_out_of_network | mandate_ceiling_daily |
+mandate_co_sign_required | mandate_cooling | mandate_lapsed
+```
+
+**This is the lesson of `novelty_from_this_catalogue`**, a mutation that survived every probe because two different refusals shared a status code and nothing else. A `422` with no name is a refusal no probe can tell from another `422`, and clause 36 requires that the reason an order was not executed be shown to the person.
+
+These name refusals of a request. They are not the deliberation reasons of §10, which name why a candidate was left out of an offer, and `outside_mandate` stays the reason there.
+
 ----
 
 ## 17. The endpoint registry
@@ -554,7 +671,7 @@ Added 2026-09-09. A merchant that speaks Valence has to be findable by a househo
 
 ### 17.1 What it is
 
-A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 2 calls shared and neutral, made concrete.
+A shared, neutral directory of merchant endpoints. It answers one question: given a merchant's key, or a protocol, which endpoints exist and where. It is the routing layer clause 1 asks for, one that resolves and does not rank, made concrete. This sentence cited clause 2 until 2026-09-09; routing moved to clause 1 in the review and the citation did not follow, so it named the identity clause as authority for a directory.
 
 ```
 entry

@@ -45,13 +45,25 @@ cleanup() {
   # an EXIT-only trap fires. Either way the server outlives the run and the
   # next run refuses to start, which reads as a broken suite rather than a
   # stale process. So the port is what gets cleared, not a remembered pid.
+  #
+  # Under `pipefail` an `lsof` that finds nothing returns 1, which is the
+  # ordinary case once the kill above has worked, and `set -e` then terminates
+  # the shell from inside this trap. (It is NOT that a trap's return status
+  # becomes the script's status; bash does not do that, and an earlier version
+  # of this comment said so wrongly.) Measured 2026-09-09: the script exited 1
+  # on every clean run from the commit that added this loop, and mutate.sh
+  # reads that status, so its SURVIVED branch could not fire and a mutation
+  # caught by nothing was reported as though it had been caught. `set -e` also
+  # abandoned the loop on its first iteration, so the second port was never
+  # swept here. Hence `|| true` on the pipeline and an explicit success below.
   kill "$SERVER_PID" 2>/dev/null || true
   kill "${SECOND_PID:-0}" 2>/dev/null || true
   for p in "${PORT}" "$((PORT + 100))"; do
-    lsof -ti ":${p}" 2>/dev/null | while read -r pid; do
+    { lsof -ti ":${p}" 2>/dev/null || true; } | while read -r pid; do
       kill "$pid" 2>/dev/null || true
     done
   done
+  return 0
 }
 trap cleanup EXIT INT TERM HUP PIPE
 

@@ -61,14 +61,14 @@ const post = async (path: string, body: unknown) => {
 // §5.4. A catalogue is signed by the presenter it names. The reference
 // presenter's key is root-endorsed; the second one's is not, which is what a
 // rename looks like from outside: a new identity, visibly not the same one.
-const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; ships: string; price: number }> }) =>
+const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; ships: string; price: number; category?: string }> }) =>
   Buffer.from(
     [
       c.version,
       c.presenter,
       ...Object.keys(c.products).sort().map((ref) => {
         const e = c.products[ref]!;
-        return [ref, e.merchant, e.ships, String(e.price)].join(":");
+        return [ref, e.merchant, e.ships, String(e.price), e.category ?? ""].join(":");
       }),
     ].join("\n"),
     "utf8"
@@ -94,11 +94,14 @@ await postConfig({
   version: "cfg-conformance",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, physical: PHYSICAL },
-    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, physical: PHYSICAL },
-    "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, physical: PHYSICAL },
-    "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, physical: PHYSICAL },
-    "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, physical: PHYSICAL },
+    // §16.4. The categories are the merchant's own words. The fixture needs
+    // two that differ so a mandate can name one of them and leave the other
+    // alone; nothing here interprets either.
+    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, category: "tea", physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, category: "tea", physical: PHYSICAL },
+    "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, category: "coffee", physical: PHYSICAL },
+    "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, category: "seasoning", physical: PHYSICAL },
+    "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, category: "seasoning", physical: PHYSICAL },
   },
 });
 
@@ -291,13 +294,29 @@ const baseMandate = {
   id: "mandate-conformance",
   household: "household-conformance",
   ceiling_out_of_network: 100000,
+  // §16. The fixture leaves the three protections of 2026-09-10 unset, so the
+  // suites that do not care about them see the mandate they always saw. The
+  // probes that do care sign their own versions.
+  ceiling_daily: null as number | null,
+  co_sign_categories: [] as string[],
+  cooling_seconds: null as number | null,
   co_signers: ["key-cosigner-conformance"],
   lapses_at: Date.now() + 365 * 86_400_000,
   version: 1,
 };
 const canonicalMandate = (m: typeof baseMandate) =>
   Buffer.from(
-    [m.id, m.household, String(m.ceiling_out_of_network), [...m.co_signers].sort().join(","), String(m.lapses_at), String(m.version)].join("\n"),
+    [
+      m.id,
+      m.household,
+      String(m.ceiling_out_of_network),
+      m.ceiling_daily === null ? "" : String(m.ceiling_daily),
+      [...m.co_sign_categories].sort().join(","),
+      m.cooling_seconds === null ? "" : String(m.cooling_seconds),
+      [...m.co_signers].sort().join(","),
+      String(m.lapses_at),
+      String(m.version),
+    ].join("\n"),
     "utf8"
   );
 await post("/_node/mandates", {

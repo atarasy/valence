@@ -50,7 +50,22 @@ export type EngineConfig = {
    * honest default rather than a silent one.
    */
   isInNetwork?: (merchant: string) => boolean;
+  /**
+   * §16.3. Where the deployment puts the start of a household's day, for the
+   * daily ceiling. The specification does not name one: a household's day
+   * needs a time zone, and choosing it here would make when a person's day
+   * starts this engine's business. The default is UTC midnight, which is a
+   * declared choice rather than an absent one, and a deployment MUST apply
+   * the same boundary to every household it holds.
+   */
+  dayStart?: (now: number) => number;
 };
+
+/** §16.3. The default day boundary: UTC midnight, declared rather than assumed. */
+function utcMidnight(now: number): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
 
 /**
  * §5.4. What a presenter signs when it publishes a catalogue: the version,
@@ -62,7 +77,10 @@ export function canonicalConfig(config: PresenterConfig): Buffer {
     .sort()
     .map((ref) => {
       const e = config.products[ref]!;
-      return [ref, e.merchant, e.ships, String(e.price)].join(":");
+      // §16.4. The category is signed with the price. Left out of the bytes,
+      // whoever relays a catalogue could strip it, and a candidate that needed
+      // a second signature would quietly stop needing one.
+      return [ref, e.merchant, e.ships, String(e.price), e.category ?? ""].join(":");
     });
   return Buffer.from([config.version, config.presenter, ...products].join("\n"), "utf8");
 }
@@ -173,7 +191,7 @@ export class ValenceEngine {
     if (attested) this.rootEndorsed.add(key);
   }
 
-  /** §7.1. Whether an identity root endorsed this key (clause 2, `02` §3.2). */
+  /** §7.1. Whether an identity root endorsed this key (clause 2). */
   isRootEndorsed(key: string): boolean {
     return this.rootEndorsed.has(key);
   }
@@ -254,6 +272,9 @@ export class ValenceEngine {
         unit_price: entry.price,
         merchant: entry.merchant,
         ships: entry.ships,
+        // §16.4. The category travels with the price and the merchant, from
+        // the catalogue and never from the request.
+        category: entry.category ?? null,
         predicted_conversion: c.predicted_conversion,
         is_exploration: c.is_exploration,
         given_by: c.given_by,
@@ -344,6 +365,7 @@ export class ValenceEngine {
       mandate: input.mandate,
       candidates,
       reminders_sent: 0,
+      decided_at: null,
     };
     this.offers.set(offer.id, offer);
     for (const c of candidates) this.candidateIndex.set(c.id, offer.id);
@@ -404,6 +426,7 @@ export class ValenceEngine {
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
     signature: string,
+    coSignature?: string,
     now = Date.now()
   ): Offer {
     const offer = this.mustGet(offerId, now);
@@ -460,6 +483,31 @@ export class ValenceEngine {
       }
       plan.push({ candidate, d });
     }
+    // §16.4. A category the person named needs a second signature over the
+    // same bytes. The check runs after the plan is built and before anything
+    // is written, so a set that is refused leaves the offer as it was.
+    const mandateForSet = this.mandates.get(offer.mandate);
+    if (mandateForSet && mandateForSet.co_sign_categories.length > 0) {
+      const needs = plan.filter(
+        ({ candidate }) =>
+          candidate.category !== null &&
+          mandateForSet.co_sign_categories.includes(candidate.category)
+      );
+      if (needs.length > 0) {
+        const signed =
+          coSignature !== undefined &&
+          mandateForSet.co_signers.some((key) => {
+            const pem = this.identities.get(key);
+            return pem ? verifyDecisions(offerId, decisions, coSignature, pem) : false;
+          });
+        if (!signed) {
+          throw unprocessable(
+            "mandate_co_sign_required",
+            `${needs[0]!.candidate.category} needs a co-signer's signature on this set`
+          );
+        }
+      }
+    }
     for (const { candidate, d } of plan) {
       if (d.valence === "kept") {
         candidate.kept_as = d.kept_as!;
@@ -470,7 +518,48 @@ export class ValenceEngine {
     }
     if (offer.candidates.every((c) => c.valence !== "offered")) {
       offer.state = "decided";
+      // §16.5. The cooling window starts when the set is signed, not when the
+      // offer was presented.
+      offer.decided_at = now;
     }
+    return offer;
+  }
+
+  /**
+   * §16.5. The person takes back a signed set inside its cooling window. It is
+   * theirs alone and needs no co-signer: withdrawing removes a commitment, and
+   * every rule about second signatures is about adding one.
+   */
+  withdrawDecisions(offerId: string, now = Date.now()): Offer {
+    const offer = this.mustGet(offerId, now);
+    if (offer.state !== "decided") {
+      throw conflict("bad_state", `cannot withdraw decisions on an offer in ${offer.state}`);
+    }
+    if (this.settlements.get(offer.id)) {
+      throw conflict("bad_state", "this offer has settled");
+    }
+    const mandate = this.mandates.get(offer.mandate);
+    const cooling = mandate?.cooling_seconds ?? null;
+    if (cooling === null) {
+      throw unprocessable(
+        "no_cooling",
+        "this mandate has no cooling window, so a signed set is final"
+      );
+    }
+    if (offer.decided_at !== null && now >= offer.decided_at + cooling * 1000) {
+      throw unprocessable(
+        "cooling_over",
+        "the cooling window has closed and the set is final"
+      );
+    }
+    for (const c of offer.candidates) {
+      c.valence = "offered";
+      c.kept_as = null;
+      c.lineage = null;
+      c.decided_at = null;
+    }
+    offer.state = "presented";
+    offer.decided_at = null;
     return offer;
   }
 
@@ -514,6 +603,19 @@ export class ValenceEngine {
     if (offer.state !== "decided" && offer.state !== "expired") {
       throw conflict("bad_state", `cannot settle an offer in ${offer.state}`);
     }
+    // §16.5 and §16.3. Both refusals name themselves: four refusals in this
+    // section share a status code, and a `422` that says only "unprocessable"
+    // is one a person cannot act on and a probe cannot tell from another.
+    const mandate = this.mandates.get(offer.mandate);
+    if (mandate?.cooling_seconds != null && offer.decided_at !== null) {
+      const opens = offer.decided_at + mandate.cooling_seconds * 1000;
+      if (now < opens) {
+        throw unprocessable(
+          "mandate_cooling",
+          `this set settles at ${opens}, after the cooling window the person set`
+        );
+      }
+    }
 
     let kept = 0;
     let consumed = 0;
@@ -553,6 +655,25 @@ export class ValenceEngine {
       await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
     }
 
+    // §16.3. The daily ceiling is the household's own union across every
+    // presenter, so it is summed here and read by nobody else: a presenter
+    // learns that this settlement was refused, which is what it learns when a
+    // household declines (clause 38).
+    if (mandate?.ceiling_daily != null) {
+      const dayStart = (this.config.dayStart ?? utcMidnight)(now);
+      let already = 0;
+      for (const s of this.settlements.values()) {
+        if (s.settled_at < dayStart) continue;
+        const other = this.offers.get(s.offer);
+        if (other && other.household === offer.household) already += s.charged;
+      }
+      if (already + charged > mandate.ceiling_daily) {
+        throw unprocessable(
+          "mandate_ceiling_daily",
+          `${already + charged} would settle for this household today, above the daily ceiling of ${mandate.ceiling_daily}`
+        );
+      }
+    }
     const settlement: Settlement = {
       offer: offer.id,
       settled_at: now,

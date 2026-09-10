@@ -1,8 +1,9 @@
 import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
-import { exportNode, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
+import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
+import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -67,6 +68,10 @@ function candidateView(c: Candidate) {
     unit_price: c.unit_price,
     merchant: c.merchant,
     ships: c.ships,
+    // §16.4. The merchant's own category, travelling with the price. It is the
+    // merchant's published data rather than anything about the household, and
+    // the person's agent needs it to say why a second signature was asked for.
+    category: c.category,
     predicted_conversion: c.predicted_conversion,
     is_exploration: c.is_exploration,
     given_by: c.given_by,
@@ -102,14 +107,17 @@ export type Hub = {
   approvals: ApprovalDesk;
   permissions: PermissionLedger;
   registry: Registry;
+  /** §7.5b. Carriage and where the parcel is, on the person's side of clause 49. */
+  deliveries: DeliveryRegister;
 };
 
 /**
  * The composition root, and the only place the three sides meet.
  *
  * `src/engine/` is the presenter's: offers, decisions, settlement, the
- * physical binding and the billing ledger. Anyone who presents runs it, and
- * Vox is one implementation of it as a Shopify app would be another.
+ * physical binding and the billing ledger. Anyone who presents runs it, so a
+ * merchant-side platform and a shop's own Shopify app are peers here, and this
+ * file names neither.
  *
  * `src/hub/` is the person's: the approval surface, the permission ledger,
  * mandates, recovery and the node's export. A member opens it, and Atarasy
@@ -156,7 +164,7 @@ async function route(
   hub: Hub,
   request: Request
 ): Promise<Response> {
-  const { recovery, approvals, permissions, registry } = hub;
+  const { recovery, approvals, permissions, registry, deliveries } = hub;
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
@@ -181,7 +189,7 @@ async function route(
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["merchant", "ships", "price", "physical"], `product ${ref}`);
+        const entry = strict(value, ["merchant", "ships", "price", "category", "physical"], `product ${ref}`);
         const physicalRaw = entry.physical;
         let physical;
         if (physicalRaw !== undefined) {
@@ -204,6 +212,13 @@ async function route(
           merchant: requireString(entry, "merchant", `product ${ref}`),
           ships: requireString(entry, "ships", `product ${ref}`),
           price: requireInteger(entry, "price", `product ${ref}`, 0),
+          // §8, §16.4. The merchant's own category. Optional, because a
+          // catalogue that names none is a catalogue nothing needs a second
+          // signature for, not a malformed one.
+          category:
+            entry.category === undefined
+              ? undefined
+              : requireString(entry, "category", `product ${ref}`),
           physical,
         };
       }
@@ -437,7 +452,11 @@ async function route(
         return json(offerView(await engine.present(id)));
       }
       if (method === "POST" && action === "decisions") {
-        const raw = strict(await body(request), ["decisions", "signature"], "decisions");
+        const raw = strict(
+          await body(request),
+          ["decisions", "signature", "co_signature"],
+          "decisions"
+        );
         const list = raw.decisions;
         if (!Array.isArray(list)) {
           throw badRequest("malformed", "decisions must be an array");
@@ -471,7 +490,26 @@ async function route(
                 : requireString(entry, "lineage", `decision ${i}`),
           };
         });
-        return json(offerView(engine.decide(id, decisions, requireString(raw, "signature", "decisions"))));
+        // §16.4. A co-signature is present only when a category the person
+        // named is in the set; the engine decides whether it was needed.
+        const coSignature =
+          raw.co_signature === undefined
+            ? undefined
+            : requireString(raw, "co_signature", "decisions");
+        return json(
+          offerView(
+            engine.decide(
+              id,
+              decisions,
+              requireString(raw, "signature", "decisions"),
+              coSignature
+            )
+          )
+        );
+      }
+      // §16.5. The person takes back a signed set inside its cooling window.
+      if (method === "DELETE" && action === "decisions") {
+        return json(offerView(engine.withdrawDecisions(id)));
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
@@ -587,6 +625,28 @@ async function route(
         // settlement after this call sees the valences it produced.
         engine.applyRecoveryTo(id);
         return json(collected);
+      }
+      // §7.5b. The household's surface. A merchant never reaches this: a
+      // carrier's code resolves to an address, which clause 49 keeps away
+      // from them, and the state machine already tells them what they need.
+      if (method === "GET" && action === "delivery") {
+        return json(deliveries.mustGet(id));
+      }
+      if (method === "POST" && action === "delivery") {
+        const raw = strict(
+          await body(request),
+          ["carriage", "code", "status"],
+          "delivery"
+        ) as { carriage: number; code: string; status: string };
+        return json(
+          deliveries.record({
+            offer: id,
+            carriage: raw.carriage,
+            code: raw.code,
+            status: raw.status as DeliveryStatus,
+          }),
+          201
+        );
       }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can
@@ -741,13 +801,35 @@ async function route(
   if (parts[0] === "_node" && parts[1] === "mandates" && method === "POST") {
     const raw = strict(
       await body(request),
-      ["id", "household", "ceiling_out_of_network", "co_signers", "lapses_at", "version", "signatures"],
+      [
+        "id",
+        "household",
+        "ceiling_out_of_network",
+        "ceiling_daily",
+        "co_sign_categories",
+        "cooling_seconds",
+        "co_signers",
+        "lapses_at",
+        "version",
+        "signatures",
+      ],
       "mandate"
     );
     const coRaw = raw.co_signers;
     if (!Array.isArray(coRaw) || coRaw.some((k) => typeof k !== "string")) {
       throw badRequest("malformed", "co_signers must be an array of keys");
     }
+    // §16. Absent is not zero. A missing ceiling_daily is no daily ceiling,
+    // where 0 would refuse everything; a missing cooling_seconds is no
+    // cooling, where 0 is the same behaviour by a different route.
+    const catRaw = raw.co_sign_categories ?? [];
+    if (!Array.isArray(catRaw) || catRaw.some((c) => typeof c !== "string")) {
+      throw badRequest("malformed", "co_sign_categories must be an array of categories");
+    }
+    const optionalInteger = (field: string): number | null =>
+      raw[field] === undefined || raw[field] === null
+        ? null
+        : requireInteger(raw, field, "mandate", 0);
     const sigRaw = raw.signatures;
     if (typeof sigRaw !== "object" || sigRaw === null || Array.isArray(sigRaw)) {
       throw badRequest("malformed", "signatures is an object of key to signature");
@@ -763,6 +845,9 @@ async function route(
           id: requireString(raw, "id", "mandate"),
           household: requireString(raw, "household", "mandate"),
           ceiling_out_of_network: requireInteger(raw, "ceiling_out_of_network", "mandate", 0),
+          ceiling_daily: optionalInteger("ceiling_daily"),
+          co_sign_categories: catRaw as string[],
+          cooling_seconds: optionalInteger("cooling_seconds"),
           co_signers: coRaw as string[],
           lapses_at: requireInteger(raw, "lapses_at", "mandate", 0),
           version: requireInteger(raw, "version", "mandate", 1),
@@ -847,7 +932,7 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "export") {
     // Clause 43. Everything the household holds, whatever a surface shows.
     if (method === "GET") {
-      return json(exportNode(engine, recovery, parts[1]));
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, parts[1]));
     }
   }
 
@@ -855,7 +940,7 @@ async function route(
     // Clause 52. The receiving host of a move.
     if (method === "POST") {
       const body_ = (await body(request)) as NodeExport;
-      if (!body_ || body_.format !== "valence-node/1") {
+      if (!body_ || body_.format !== EXPORT_FORMAT_VERSION) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);
@@ -864,6 +949,16 @@ async function route(
       for (const n of body_.notes ?? []) engine.importNote(n);
       for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
       engine.importReceipts(parts[1], body_.receipts ?? []);
+      // Until 2026-09-09 the loop stopped above. The export already carried the
+      // recovery log, and this end dropped it; the ledger, the queries and the
+      // mandates were in neither end. A member who moved kept their offers and
+      // arrived with no ceiling, no co-signers, no lapse, no permissions and no
+      // record of who had recovered their node, while every probe stayed green
+      // because none of them asked.
+      recovery.importLog(moving, body_.recoveries ?? []);
+      permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
+      for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
+      deliveries.importRows(body_.deliveries ?? []);
       return json({ imported: true }, 201);
     }
   }
