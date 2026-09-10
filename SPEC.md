@@ -640,6 +640,12 @@ At settlement, an implementation that holds a mandate for the offer MUST refuse 
 
 **The sum is the household's own union.** It crosses presenters, so it is read by the person's own agent and by no merchant (clause 38). A presenter learns only that this settlement was refused, which is what it learns when a household declines.
 
+**Where the sum is kept is not settled, and the reference keeps it in the wrong place.** Found on 2026-09-11 by an adversarial pass over §13.1's own work. The reference sums the settlements it holds, which was the household's whole union while one process held everything. It is not, once the roles are split: **an engine sums its own settlements, so a household served by two engines has two ceilings and can settle twice the amount it set.** The paragraph above says the union crosses presenters, and the code makes it cross nothing but one deployment's own offers.
+
+It is worse than a gap. The union of a person's settlements is the person's, and an engine that computes it is a merchant computing the household's union, which is the thing clause 38 and §7.4 keep away from a merchant. **The place the sum belongs is the hub**, beside the mandate that carries the ceiling.
+
+What that needs is one more thing on the interface of §13.1: either the engine asks the hub whether an amount may settle today, or it reports each settlement to the hub and the hub answers with the total. **Neither is built.** Until one is, `ceiling_daily` binds within a deployment and an implementation MUST NOT claim more for it than that.
+
 ### 16.4 Categories that need a second signature
 
 `co_sign_categories` holds values of the `category` a merchant publishes for a product (§8). **The implementation matches strings and sorts nothing**: a hub that decided for itself which goods were medicines or investments would be making the judgement about merchandise that clauses 1 and 44 remove.
