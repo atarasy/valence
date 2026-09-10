@@ -520,6 +520,22 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 
 **A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
 
+### 13.2 What this section divides, and what it does not
+
+**It divides routes. It does not yet divide state**, and the difference is the honest limit of the reference as of 2026-09-11. Three places show it, and all three were found by an adversarial pass on the day the split was built rather than by reading the design:
+
+| The route | The hub answers it | The state it needs |
+|---|---|---|
+| `GET /households/{id}/export` | yes | the person's own copy of their offers, settlements and notes, which the reference keeps in the engine's store |
+| the daily ceiling of §16.3 | the mandate is the hub's | the sum of what settled today, which the engine computes from its own settlements |
+| `GET /offers/{id}/delivery` | yes, and it works | the delivery register, which the hub does hold |
+
+**So a hub presenting its role alone answers for the person's surface and, for two of those three, has nothing behind it.** An export would come back empty and a daily ceiling would bind one deployment rather than a household.
+
+What closes it is not more routing. `02` of the concept documents has said from the start that a person's record is **two copies**, the person's own and the merchant's vertical ledger, and the reference has one store doing both jobs. The hub needs its own, written as offers settle, and the daily sum belongs beside the mandate rather than beside the settlements.
+
+**An implementation MUST NOT present the hub role while answering the person's surface out of a presenter's store.** The reference does exactly that today when it runs both roles in one process, which is permitted because one party holds both; it is not permitted where the two are different parties, and that is the case the split exists for.
+
 **A route this deployment does not present MUST be refused with `404` and the reason `not_this_role`.** The status is a 404 because from the caller's side the route is not on this party. The name is required because the status alone says two different things: an implementation answers 404 for a household it has never heard of, and the same 404 for a surface it does not present. **A caller that cannot tell them apart retries against the party that will never answer**, and a conformance probe cannot tell an empty implementation from an absent role. This is §16.6's discipline in another place: a refusal names itself.
 
 **An engine that does not hold the mandate asks the hub for it over `GET /_node/mandates/{id}`**, and MUST NOT treat a hub it could not reach as a hub that holds no mandate. An unknown mandate is left alone (§16.2), and reading a transport failure as an unknown mandate would drop every protection the moment the network did.
