@@ -2,7 +2,7 @@ import { randomUUID, createHash, createPublicKey, verify } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
-import { verifyDecisions } from "../shared/decisions.js";
+import { verifyDecisions, verifyDecisionAssertion, type DecisionAssertion } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import { LocalDay, type DaySource } from "./day-source.js";
@@ -468,7 +468,7 @@ export class ValenceEngine {
   async decide(
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
-    signature: string,
+    signature: string | DecisionAssertion,
     coSignature?: string,
     now = Date.now()
   ): Promise<Offer> {
@@ -484,7 +484,14 @@ export class ValenceEngine {
     if (!mandateKey) {
       throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
     }
-    if (!verifyDecisions(offerId, decisions, signature, mandateKey)) {
+    // §10.5. Two shapes, and the canonical form is what is signed in both:
+    // once directly, and once as the challenge inside an authenticator's own
+    // client data. A passkey cannot sign bytes a caller hands it.
+    const covered =
+      typeof signature === "string"
+        ? verifyDecisions(offerId, decisions, signature, mandateKey)
+        : verifyDecisionAssertion(offerId, decisions, signature, mandateKey);
+    if (!covered) {
       throw unprocessable("bad_signature", "the signature does not cover this decided set");
     }
     // §10.5: nothing is written on refusal. Every line is checked before any

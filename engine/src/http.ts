@@ -5,6 +5,7 @@ import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/ap
 import type { PermissionLedger } from "./hub/permissions.js";
 import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
+import type { DecisionAssertion } from "./shared/decisions.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -473,7 +474,7 @@ async function route(
       if (method === "POST" && action === "decisions") {
         const raw = strict(
           await body(request),
-          ["decisions", "signature", "co_signature"],
+          ["decisions", "signature", "assertion", "co_signature"],
           "decisions"
         );
         const list = raw.decisions;
@@ -515,15 +516,34 @@ async function route(
           raw.co_signature === undefined
             ? undefined
             : requireString(raw, "co_signature", "decisions");
+        // §10.5. A bare signature, or a passkey's assertion. Exactly one:
+        // a body carrying both would leave which one was checked to the
+        // implementation, and a caller could then satisfy the weaker.
+        const hasSignature = raw.signature !== undefined;
+        const hasAssertion = raw.assertion !== undefined;
+        if (hasSignature === hasAssertion) {
+          throw badRequest(
+            "malformed",
+            "a decided set carries a signature or an assertion, and not both"
+          );
+        }
+        let confirmation: string | DecisionAssertion;
+        if (hasSignature) {
+          confirmation = requireString(raw, "signature", "decisions");
+        } else {
+          const a = strict(
+            raw.assertion,
+            ["authenticator_data", "client_data_json", "signature"],
+            "assertion"
+          );
+          confirmation = {
+            authenticator_data: requireString(a, "authenticator_data", "assertion"),
+            client_data_json: requireString(a, "client_data_json", "assertion"),
+            signature: requireString(a, "signature", "assertion"),
+          };
+        }
         return json(
-          offerView(
-            await engine.decide(
-              id,
-              decisions,
-              requireString(raw, "signature", "decisions"),
-              coSignature
-            )
-          )
+          offerView(await engine.decide(id, decisions, confirmation, coSignature))
         );
       }
       // §16.5. The person takes back a signed set inside its cooling window.
