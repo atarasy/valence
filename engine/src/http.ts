@@ -1,4 +1,4 @@
-import { ValenceError, badRequest, notFound, conflict, unprocessable } from "./common/errors.js";
+import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
@@ -184,7 +184,7 @@ async function route(
   // that answers it. The registry is neither role's and is answered by
   // whichever roles run.
   if (parts.length > 0 && !answersFor(roles, parts)) {
-    throw notFound(
+    throw notThisRole(
       `this deployment presents ${[...roles].sort().join(" and ")}; /${parts[0]} is answered by the ${ownerOf(parts)}`
     );
   }

@@ -15,6 +15,16 @@ export const badRequest = (code: string, message: string) =>
 export const notFound = (message: string) =>
   new ValenceError(404, "not_found", message);
 
+/**
+ * §13.1. Not "there is nothing here" but "this party does not answer for that
+ * surface". It is a 404 because from the caller's side the route is not on
+ * this deployment, and it carries its own code because a caller that cannot
+ * tell it from an ordinary miss will retry against the same party forever.
+ * The same discipline as §16.6: a refusal names itself.
+ */
+export const notThisRole = (message: string) =>
+  new ValenceError(404, "not_this_role", message);
+
 export const conflict = (code: string, message: string) =>
   new ValenceError(409, code, message);
 

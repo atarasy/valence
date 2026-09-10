@@ -37,6 +37,22 @@ SECOND="http://localhost:${SECOND_PORT}"
 PORT="$SECOND_PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 SECOND_PID=$!
+
+# §13.1. Two more servers, each presenting one role, so the suites can ask what
+# a hub alone and an engine alone answer for. Without them the split is real in
+# the code and invisible to a probe, which is the state the split exists to
+# leave behind.
+ENGINE_ONLY_PORT=$((PORT + 200))
+ENGINE_ONLY="http://localhost:${ENGINE_ONLY_PORT}"
+PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+  bun src/server.ts &
+ENGINE_ONLY_PID=$!
+
+HUB_ONLY_PORT=$((PORT + 300))
+HUB_ONLY="http://localhost:${HUB_ONLY_PORT}"
+PORT="$HUB_ONLY_PORT" VALENCE_ROLES=hub VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+  bun src/server.ts &
+HUB_ONLY_PID=$!
 # PIPE matters: piping this script into `tail` kills it before an EXIT-only
 # trap runs, and the server outlives the run and blocks the next one.
 cleanup() {
@@ -58,7 +74,9 @@ cleanup() {
   # swept here. Hence `|| true` on the pipeline and an explicit success below.
   kill "$SERVER_PID" 2>/dev/null || true
   kill "${SECOND_PID:-0}" 2>/dev/null || true
-  for p in "${PORT}" "$((PORT + 100))"; do
+  kill "${ENGINE_ONLY_PID:-0}" 2>/dev/null || true
+  kill "${HUB_ONLY_PID:-0}" 2>/dev/null || true
+  for p in "${PORT}" "$((PORT + 100))" "$((PORT + 200))" "$((PORT + 300))"; do
     { lsof -ti ":${p}" 2>/dev/null || true; } | while read -r pid; do
       kill "$pid" 2>/dev/null || true
     done
@@ -103,9 +121,11 @@ VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":
 VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \
 VALENCE_SECOND_HOST_URL="$SECOND" \
+VALENCE_ENGINE_ONLY_URL="$ENGINE_ONLY" \
+VALENCE_HUB_ONLY_URL="$HUB_ONLY" \
 VALENCE_CONFIG_VERSION_LATER="cfg-conformance-v2" \
 VALENCE_CONFIG_VERSION_NARROW="cfg-conformance-narrow" \
 VALENCE_CONFIG_VERSION_UNROOTED="cfg-other-merchant" \
 VALENCE_PRODUCTS_UNROOTED="salt-a,salt-b" \
 VALENCE_PRICES_LATER='{"tea-a":9900,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
-  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry}
+  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry roles}
