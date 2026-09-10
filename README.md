@@ -48,11 +48,11 @@ The state machine is identical. Implementations differ in fulfilment and in one 
 
 Valence conformance is a requirement of the [Ataraxia](https://github.com/atarasy/ataraxia) mark, and several clauses of that constitution are enforced here rather than in any user interface:
 
-- **The exploration floor** (clause 26). An offer must contain a minimum number of candidates the merchant's own model predicts will not convert. `POST /offers` rejects an offer that does not. This is why selling out is not an achievable state.
+- **The exploration floor** (clause 26). An offer must contain a minimum number of candidates **this household has never been offered by this presenter**. `POST /offers` rejects an offer that does not, and a presenter with nothing new for a household makes it no offer at all. This is why selling out is not an achievable state. **The rule said "predicted not to convert" until 2026-09-09**, which asked a presenter to spend its shelf on goods it expected nobody to want; novelty is what the clause is about, and a presenter is free to fill the floor with the never-offered products it thinks most likely to be kept.
 - **No negative signal to the giver** (clause 16). Nothing in the gift-facing response surface can express a recipient's inaction.
 - **Absent capabilities** (clauses 28, 29, 30). There is no discount object, no per-person event store, no urgency field. Not disabled — absent.
 
-Conformance tests live in the Ataraxia repository. Four of the six suites are written, and they run against any implementation over HTTP.
+Conformance tests live in the Ataraxia repository. **Eleven suites, all written**, and they run against any implementation over HTTP, importing nothing from one. Measured on 2026-09-10: 168 mutations, 197 probes at runtime, 192 of them shown to fail under at least one deliberate break, and no break surviving.
 
 ## The reference engine
 
