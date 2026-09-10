@@ -346,6 +346,7 @@ A Valence-conformant merchant extends its ACP product feed. The two gift fields 
 | `valence.gift_unit` | the unit and quantity in which this product can be given rather than sold (§6.2) |
 | `valence.gift_eligible` | whether the maker allows it to be given |
 | `valence.gift_meta` | wrapping options, ceremonial eligibility, price band |
+| `category` | the merchant's own category for the product. It travels into the catalogue and onto the candidate, and a mandate names values of it (§16.4). The specification does not define a vocabulary: a hub that ranked or interpreted categories would be judging merchandise, which clauses 1 and 44 remove |
 | `valence.lineage_hook` | endpoint accepting lineage edges |
 | `valence.reciprocity` | whether purchase history is returned to the household in standard form |
 
@@ -553,16 +554,33 @@ mandate
   id
   household
   ceiling_out_of_network   what one offer may cost at merchants the registry does not list (clause 46)
+  ceiling_daily            what may settle for this household in one day, across every presenter
+  co_sign_categories[]     feed categories whose candidates need a co-signer on the decided set
+  cooling_seconds          how long a decided set waits before it settles
   co_signers[]             keys named while the person had capacity (clause 47)
   lapses_at                a standing mandate lapses unless renewed (clause 58)
   version                  1 for a new mandate, then one more each time
 ```
 
+`ceiling_daily` and `cooling_seconds` are absent when the person has not set
+them, and absent is not zero: no daily ceiling and no cooling, against a
+`ceiling_daily` of 0 that would refuse everything. `co_sign_categories` is
+absent or empty when nothing needs a second signature.
+
+**The three added on 2026-09-10 sit in the order above and not at the end**,
+which changes the canonical bytes. Nothing stored breaks, because a signature
+is checked when its version is submitted and is not retained (§16.1); a
+signature held outside the implementation and checked later against the newer
+form would break, and the rule that prevents it is that a signature covers the
+form current when it was made.
+
 ### 16.1 Who signs a change
 
 Every version is signed by the household over the canonical form: the fields above, one per line, in the order listed, with `co_signers` sorted and comma-separated, and the version inside the bytes so that an old signature cannot be replayed onto a new record.
 
-A change **loosens** when it raises the ceiling, pushes `lapses_at` further out, or drops a co-signer. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone. An implementation MUST refuse with `422` a version that is unsigned, signed by the wrong key, or missing a co-signer's signature on a loosening, and MUST refuse a version that is not exactly one more than the last.
+A change **loosens** when it raises either ceiling, pushes `lapses_at` further out, drops a co-signer, removes a category from `co_sign_categories`, or shortens `cooling_seconds`. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone: lowering a ceiling, adding a category and lengthening cooling are all tightenings.
+
+**Signatures are verified at submission and MUST NOT be retained.** What a signature covers is the canonical form as it stood when the signature was made, and an implementation that keeps signatures in order to re-check them later has taken on a compatibility problem that this one does not have. An implementation MUST refuse with `422` a version that is unsigned, signed by the wrong key, or missing a co-signer's signature on a loosening, and MUST refuse a version that is not exactly one more than the last.
 
 This is what clause 47 means by "nothing else changes it": not the person alone, not a co-signer alone, and no layer, which holds no key at all.
 
@@ -571,6 +589,43 @@ This is what clause 47 means by "nothing else changes it": not the person alone,
 At presentation, an implementation that holds a mandate for the offer MUST refuse with `422` when what the offer could cost at merchants the registry does not list exceeds `ceiling_out_of_network`, and MUST refuse when the mandate has lapsed. The registry is what "in the network" means (§17); a person's limit on the rest is applied inside their own mandate, which is where clause 55 says an exclusion may live.
 
 An offer whose mandate this implementation does not hold is left alone. A deployment may carry mandates elsewhere, and refusing every offer whose mandate is unknown would be a gate rather than a protection.
+
+### 16.3 The daily ceiling
+
+At settlement, an implementation that holds a mandate for the offer MUST refuse with `422` when what has already settled for this household today, plus what this settlement would charge, exceeds `ceiling_daily`.
+
+**The day is the deployment's, not this specification's.** A household's day needs a time zone, and a specification that named one would be deciding when a person's day starts. A deployment declares the boundary and MUST apply the same one to every household it holds.
+
+**The sum is the household's own union.** It crosses presenters, so it is read by the person's own agent and by no merchant (clause 38). A presenter learns only that this settlement was refused, which is what it learns when a household declines.
+
+### 16.4 Categories that need a second signature
+
+`co_sign_categories` holds values of the `category` a merchant publishes for a product (§8). **The implementation matches strings and sorts nothing**: a hub that decided for itself which goods were medicines or investments would be making the judgement about merchandise that clauses 1 and 44 remove.
+
+A category travels from the catalogue onto the candidate with the price and the merchant (§3.1), and there is no request field that sets it.
+
+When a decided set contains a candidate whose category is in `co_sign_categories`, `POST /offers/{id}/decisions` MUST refuse with `422` unless it carries a co-signer's signature over the same canonical set beside the household's. One co-signer is enough, and the mandate's `co_signers` are the eligible set.
+
+### 16.5 Cooling
+
+A decided set under a mandate with `cooling_seconds` set does not settle when it is signed. `POST /offers/{id}/settle` MUST refuse with `422` until `cooling_seconds` have passed since the decision, and `DELETE /offers/{id}/decisions` withdraws the set before then, returning the offer to `presented`. Withdrawing is the person's alone and needs no co-signer.
+
+**Cooling does not make silence into consent** (clause 32). It applies only after the person has confirmed: the set is signed, and the window is time in which a signed decision can be taken back. An unconfirmed offer is still no order.
+
+**Why seconds and not a clock.** An order placed at night that runs the next morning is a cooling window expressed in seconds; expressed as a rule about clocks it would need a time zone, and the household's day would become this specification's business. §16.3 needs the boundary and says so, which is the difference between the two.
+
+### 16.6 A refusal names the threshold that refused it
+
+Four refusals in this section share a status code, and a person MUST be able to tell them apart. The body carries a `reason` of
+
+```
+mandate_ceiling_out_of_network | mandate_ceiling_daily |
+mandate_co_sign_required | mandate_cooling | mandate_lapsed
+```
+
+**This is the lesson of `novelty_from_this_catalogue`**, a mutation that survived every probe because two different refusals shared a status code and nothing else. A `422` with no name is a refusal no probe can tell from another `422`, and clause 36 requires that the reason an order was not executed be shown to the person.
+
+These name refusals of a request. They are not the deliberation reasons of §10, which name why a candidate was left out of an offer, and `outside_mandate` stays the reason there.
 
 ----
 
