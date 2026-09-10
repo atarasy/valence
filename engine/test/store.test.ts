@@ -3,6 +3,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inMemoryStore, openStore } from "../src/common/store.js";
+import { ValenceEngine, canonicalConfig } from "../src/engine/offers.js";
+import { InMemoryLedger } from "../src/engine/ledger.js";
+import { generateKeyPairSync, sign } from "node:crypto";
 
 const fresh = () => join(mkdtempSync(join(tmpdir(), "valence-store-")), "db.sqlite");
 
@@ -44,6 +47,58 @@ describe("a store is a map that writes through", () => {
     store.map("offers");
     expect(() => store.map("offers")).toThrow(/opened twice/);
     store.close();
+  });
+
+  test("an offer moved through its states is in the state it was moved to", async () => {
+    // Written 2026-09-11, after a restart against the same file returned an
+    // offer that had been presented as `drafted`. The test above passed the
+    // whole time, because it writes a row with `set` and reads it back, and
+    // every state transition in this engine assigns a field of a value the
+    // map handed out. A map cannot see that, so the disk never heard.
+    //
+    // **This is the only kind of test that can ask.** A conformance probe
+    // talks HTTP to a running process and cannot outlive it.
+    const path = fresh();
+    const pair = generateKeyPairSync("ed25519");
+    const config = {
+      version: "cfg-restart",
+      presenter: "merchant-restart",
+      products: {
+        "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, physical: null },
+        "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, physical: null },
+      },
+    };
+
+    const before = openStore(path);
+    const first = new ValenceEngine(new InMemoryLedger(), { explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3 }, before);
+    first.registerIdentity(
+      "merchant-restart",
+      pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+      true
+    );
+    first.registerConfig(config, sign(null, canonicalConfig(config), pair.privateKey).toString("base64"));
+    const offer = first.createOffer({
+      binding: "digital",
+      household: "house-restart",
+      purpose: "replenish",
+      config_version: "cfg-restart",
+      expires_at: Date.now() + 3600_000,
+      mandate: "mandate-restart",
+      price_band: null,
+      giver: null,
+      candidates: [
+        { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null },
+        { product: "tea-b", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null },
+      ],
+    });
+    await first.present(offer.id);
+    expect(first.mustGet(offer.id).state).toBe("presented");
+    before.close();
+
+    const after = openStore(path);
+    const second = new ValenceEngine(new InMemoryLedger(), { explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3 }, after);
+    expect(second.mustGet(offer.id).state).toBe("presented");
+    after.close();
   });
 
   test("no path means no disk, which is what the suites run against", () => {

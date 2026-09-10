@@ -228,6 +228,9 @@ export class PermissionLedger {
       throw conflict("already_revoked", "that permission is already revoked");
     }
     permission.revoked_at = now;
+    // The list is the stored value, and changing a row inside it writes
+    // nothing on its own (see `OfferRegister.commit`).
+    this.rows.set(household, list);
     return permission;
   }
 

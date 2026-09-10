@@ -107,6 +107,7 @@ export class InMemoryLedger implements Ledger {
     }
     row.status = "committed";
     row.committed = input.amount;
+    this.rows.set(input.requestId, row);
     return row;
   }
 
@@ -118,6 +119,7 @@ export class InMemoryLedger implements Ledger {
     if (row.status === "held") {
       row.status = "released";
       row.committed = 0;
+      this.rows.set(input.requestId, row);
     }
     return row;
   }

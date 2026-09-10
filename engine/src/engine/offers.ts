@@ -462,7 +462,7 @@ export class ValenceEngine {
         graceDays: this.config.recoveryGraceDays,
       });
     }
-    return offer;
+    return this.commit(offer);
   }
 
   async decide(
@@ -584,7 +584,7 @@ export class ValenceEngine {
         offer: structuredClone(offer),
       });
     }
-    return offer;
+    return this.commit(offer);
   }
 
   /**
@@ -622,7 +622,7 @@ export class ValenceEngine {
     }
     offer.state = "presented";
     offer.decided_at = null;
-    return offer;
+    return this.commit(offer);
   }
 
   remind(offerId: string, now = Date.now()): Offer {
@@ -635,7 +635,7 @@ export class ValenceEngine {
       throw conflict("reminder_limit", "this offer has had its reminder");
     }
     offer.reminders_sent += 1;
-    return offer;
+    return this.commit(offer);
   }
 
   async withdraw(offerId: string, now = Date.now()): Promise<Offer> {
@@ -655,7 +655,7 @@ export class ValenceEngine {
     if (this.ledger.get(offer.id)) {
       await this.ledger.release({ requestId: offer.id, reason: "withdrawn" });
     }
-    return offer;
+    return this.commit(offer);
   }
 
   async settle(offerId: string, now = Date.now()): Promise<Settlement> {
@@ -765,6 +765,7 @@ export class ValenceEngine {
       settled_at: now,
     });
     offer.state = "settled";
+    this.commit(offer);
     return settlement;
   }
 
@@ -777,9 +778,9 @@ export class ValenceEngine {
    *
    * There is no parameter that makes an undecided digital candidate `kept`.
    */
-  private applyExpiry(offer: Offer, now: number): void {
-    if (offer.state !== "presented") return;
-    if (offer.expires_at > now) return;
+  private applyExpiry(offer: Offer, now: number): boolean {
+    if (offer.state !== "presented") return false;
+    if (offer.expires_at > now) return false;
     if (offer.binding === "physical") {
       // §11. What the route found decides first, and the deadline decides the
       // rest. Silence does not become `returned` here as it does in the
@@ -789,7 +790,7 @@ export class ValenceEngine {
       if (offer.candidates.every((c) => c.valence !== "offered")) {
         offer.state = "expired";
       }
-      return;
+      return true;
     }
     const undecided = offer.candidates.filter((c) => c.valence === "offered");
     // Clause 25: a default ships if nothing was chosen. A recipient who kept
@@ -807,6 +808,9 @@ export class ValenceEngine {
       }
     }
     offer.state = "expired";
+    // Past both guards, so the deadline has passed on an offer that was still
+    // presented and something above has changed. The caller writes it back.
+    return true;
   }
 
   /**
@@ -825,14 +829,14 @@ export class ValenceEngine {
     ) {
       offer.state = "decided";
     }
-    return offer;
+    return this.commit(offer);
   }
 
   sweep(now = Date.now()): Offer[] {
     const touched: Offer[] = [];
     for (const offer of this.offers.values()) {
       const before = offer.state;
-      this.applyExpiry(offer, now);
+      if (this.applyExpiry(offer, now)) this.commit(offer);
       if (offer.state !== before) touched.push(offer);
     }
     return touched;
@@ -1111,7 +1115,31 @@ export class ValenceEngine {
   mustGet(offerId: string, now?: number): Offer {
     const offer = this.offers.get(offerId);
     if (!offer) throw notFound(`no offer ${offerId}`);
-    if (now !== undefined) this.applyExpiry(offer, now);
+    // The physical binding can change a candidate's valence at the deadline
+    // and leave the offer presented, so what decides the write is whether
+    // anything changed and not whether the state did.
+    if (now !== undefined && this.applyExpiry(offer, now)) this.commit(offer);
+    return offer;
+  }
+
+  /**
+   * Put the offer back in the map, because changing it in place does not.
+   *
+   * A store's map writes through on `set` and can see nothing else: assigning
+   * a field of a value it handed out reaches memory and never the disk. Found
+   * on 2026-09-11 by restarting a server against the same file. An offer that
+   * read `presented` before the restart read `drafted` after it, because
+   * presentation assigns `offer.state` and stopped there, and the persistence
+   * built the same day was proven by a test that wrote a key rather than by
+   * one that moved an offer through its states.
+   *
+   * Every method here that changes an offer or one of its candidates ends by
+   * calling this. `store_does_not_write_through` breaks the write itself and
+   * `state_change_is_not_committed` breaks these calls; both are caught by
+   * `test/store.test.ts`, which is the only place a restart can happen.
+   */
+  private commit(offer: Offer): Offer {
+    this.offers.set(offer.id, offer);
     return offer;
   }
 

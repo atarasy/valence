@@ -120,6 +120,9 @@ export class RecoveryLedger {
     row.returned = [...input.returned];
     row.consumed = [...input.consumed];
     row.collected_at = input.at;
+    // A store's map writes through on `set` and cannot see a field being
+    // assigned, so the row goes back (see `OfferRegister.commit`).
+    this.rows.set(input.offer, row);
     return row;
   }
 
