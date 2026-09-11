@@ -540,7 +540,7 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 
 | Role | Surface (§9) | Whose |
 |---|---|---|
-| **engine** | `/offers` and its actions except `decisions` and `delivery`, `/candidates/{id}/note`, `/presenters/{id}/export`, the presenter's own registration routes | the presenter's |
+| **engine** | `/offers` and its actions except `delivery`, `/candidates/{id}/note`, `/presenters/{id}/export`, the presenter's own registration routes | the presenter's |
 | **hub** | `/households/{id}` and its actions, `/_node/mandates`, `/_node/recoverers`, `/lineage/*`, and `delivery` on an offer | the person's |
 | both | the registry (§17) is answered by whichever role a deployment puts it behind | neither's |
 
