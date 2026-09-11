@@ -5,7 +5,7 @@ import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/ap
 import type { PermissionLedger } from "./hub/permissions.js";
 import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
-import type { DecisionAssertion } from "./shared/decisions.js";
+import type { Assertion } from "./shared/decisions.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -61,6 +61,20 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+/**
+ * §10.5, §16.1, §16.4. The shape a passkey's assertion takes on the wire. A
+ * passkey cannot sign bytes a caller hands it, so this is the only shape a
+ * member holding one can send wherever a person is asked to sign.
+ */
+function readAssertion(value: unknown, where: string): Assertion {
+  const a = strict(value, ["authenticator_data", "client_data_json", "signature"], `${where} assertion`);
+  return {
+    authenticator_data: requireString(a, "authenticator_data", `${where} assertion`),
+    client_data_json: requireString(a, "client_data_json", `${where} assertion`),
+    signature: requireString(a, "signature", `${where} assertion`),
+  };
+}
 
 function candidateView(c: Candidate) {
   return {
@@ -500,10 +514,15 @@ async function route(
         });
         // §16.4. A co-signature is present only when a category the person
         // named is in the set; the engine decides whether it was needed.
+        // §16.4. The co-signer signs, or their passkey asserts, in the shapes
+        // §10.5 defines. A co-signer is a person, and a person who joined
+        // through a hub has only the second.
         const coSignature =
           raw.co_signature === undefined
             ? undefined
-            : requireString(raw, "co_signature", "decisions");
+            : typeof raw.co_signature === "string"
+              ? requireString(raw, "co_signature", "decisions")
+              : readAssertion(raw.co_signature, "co_signature");
         // §10.5. A bare signature, or a passkey's assertion. Exactly one:
         // a body carrying both would leave which one was checked to the
         // implementation, and a caller could then satisfy the weaker.
@@ -515,7 +534,7 @@ async function route(
             "a decided set carries a signature or an assertion, and not both"
           );
         }
-        let confirmation: string | DecisionAssertion;
+        let confirmation: string | Assertion;
         if (hasSignature) {
           confirmation = requireString(raw, "signature", "decisions");
         } else {
@@ -918,6 +937,7 @@ async function route(
         "lapses_at",
         "version",
         "signatures",
+        "assertions",
       ],
       "mandate"
     );
@@ -936,7 +956,9 @@ async function route(
       raw[field] === undefined || raw[field] === null
         ? null
         : requireInteger(raw, field, "mandate", 0);
-    const sigRaw = raw.signatures;
+    // §16.1. A key signs, or its passkey asserts. Either map may be absent;
+    // both absent is caught where the key that is missing is named.
+    const sigRaw = raw.signatures ?? {};
     if (typeof sigRaw !== "object" || sigRaw === null || Array.isArray(sigRaw)) {
       throw badRequest("malformed", "signatures is an object of key to signature");
     }
@@ -944,6 +966,14 @@ async function route(
     for (const [k, v] of Object.entries(sigRaw as Record<string, unknown>)) {
       if (typeof v !== "string") throw badRequest("malformed", `signature for ${k} is not a string`);
       signatures[k] = v;
+    }
+    const assertRaw = raw.assertions ?? {};
+    if (typeof assertRaw !== "object" || assertRaw === null || Array.isArray(assertRaw)) {
+      throw badRequest("malformed", "assertions is an object of key to assertion");
+    }
+    const assertions: Record<string, Assertion> = {};
+    for (const [k, v] of Object.entries(assertRaw as Record<string, unknown>)) {
+      assertions[k] = readAssertion(v, `mandate signature for ${k}`);
     }
     return json(
       engine.mandates.record({
@@ -959,7 +989,9 @@ async function route(
           version: requireInteger(raw, "version", "mandate", 1),
         },
         signatures,
+        assertions,
         keyOf: (key) => engine.publicKeyFor(key),
+        relyingPartyId: engine.relyingPartyId,
       }),
       201
     );

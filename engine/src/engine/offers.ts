@@ -2,7 +2,15 @@ import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
-import { confirmationToken, verifyBy, verifyDecisions, verifyDecisionAssertion, type DecisionAssertion } from "../shared/decisions.js";
+import {
+  canonicalDecisions,
+  confirmationToken,
+  verifyBy,
+  verifyDecisions,
+  verifyDecisionAssertion,
+  verifyPersonal,
+  type Assertion,
+} from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import { LocalDay, type DaySource } from "./day-source.js";
@@ -493,8 +501,16 @@ export class ValenceEngine {
   async decide(
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
-    signature: string | DecisionAssertion,
-    coSignature?: string,
+    signature: string | Assertion,
+    /**
+     * §16.4. The co-signer's own signature over the same canonical set, or
+     * the assertion their passkey makes instead. A co-signer is a person the
+     * household named while they had capacity (clause 47), and a person who
+     * joined through a hub holds a passkey and nothing else: until
+     * 2026-09-11 this took a string alone, so a family whose co-signer used a
+     * passkey could name a category and then satisfy it with nothing.
+     */
+    coSignature?: string | Assertion,
     now = Date.now()
   ): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
@@ -592,13 +608,26 @@ export class ValenceEngine {
           coSignature !== undefined &&
           mandateForSet.co_signers.some((key) => {
             const pem = this.identities.get(key);
-            if (!pem || !verifyDecisions(offerId, decisions, coSignature, pem)) return false;
+            if (
+              !pem ||
+              !verifyPersonal(
+                canonicalDecisions(offerId, decisions),
+                typeof coSignature === "string" ? { signature: coSignature } : { assertion: coSignature },
+                pem,
+                this.config.relyingPartyId
+              )
+            ) {
+              return false;
+            }
             // §10.5. A co-signature is used once, like the confirmation it
             // sits beside. Otherwise a person who withdrew could decide the
             // same set again with a fresh signature of their own and the
             // co-signer's old bytes, and the co-signer would have consented
             // to a decision nobody asked them about.
-            const token = confirmationToken(pem, coSignature);
+            const token = confirmationToken(
+              pem,
+              typeof coSignature === "string" ? coSignature : coSignature.signature
+            );
             if (used.includes(token)) {
               throw unprocessable(
                 "confirmation_reused",
@@ -887,6 +916,12 @@ export class ValenceEngine {
       offer.candidates.every((c) => c.valence !== "offered")
     ) {
       offer.state = "decided";
+      // §16.5. When the collection decides an offer, the moment is the
+      // collection's. Without it `decided_at` stayed null and the window that
+      // makes a decision final never started, so a physical offer could be
+      // taken back at any time until it settled, by anyone holding the offer
+      // id and with no signature. Measured 2026-09-11.
+      offer.decided_at = now;
     }
     return this.commit(offer);
   }
@@ -1091,6 +1126,11 @@ export class ValenceEngine {
     }
   }
 
+  /** §14b. The name a member's device signs for, which an assertion names. */
+  get relyingPartyId(): string {
+    return this.config.relyingPartyId;
+  }
+
   /** The registered public key for a name, if there is one. */
   publicKeyFor(key: string): string | undefined {
     return this.identities.get(key);
@@ -1124,9 +1164,26 @@ export class ValenceEngine {
     if (offer.household !== household) {
       throw unprocessable("wrong_household", `offer ${offer.id} belongs to ${offer.household}`);
     }
+    // §14.2. An import adds what this host does not hold, and changes nothing
+    // it does. A move lands on a host holding none of these offers, so it is
+    // unaffected; what this refuses is the other thing the route could do.
+    //
+    // Measured 2026-09-11, before this line existed: an offer sitting at
+    // `presented` was overwritten by an import that said `decided` with every
+    // candidate `kept`, and settling it charged 6,000. Nobody signed anything.
+    // Clause 35 makes a confirmation the person's signature and §10.5 refuses
+    // a decided set without one, and this route walked past both.
+    //
+    // Verifying the decision instead was considered and ruled out the same
+    // day: an assertion names the host it was made for, so a host cannot
+    // verify a confirmation made at another, and a move is a claim by the
+    // sending host rather than a proof (§14.2).
     const existing = this.offers.get(offer.id);
-    if (existing && existing.state === "settled") {
-      throw conflict("bad_state", `offer ${offer.id} is settled here and does not move`);
+    if (existing) {
+      throw conflict(
+        "bad_state",
+        `offer ${offer.id} is already here, and an import does not change what this host holds`
+      );
     }
     this.offers.set(offer.id, offer);
     for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);

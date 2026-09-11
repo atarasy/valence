@@ -138,7 +138,8 @@ export function confirmationToken(publicKeyPem: string, signature: string): stri
 }
 
 /**
- * §10.5. What a member's device sends instead of a bare signature.
+ * §10.5, §16.1, §16.4. What a member's device sends instead of a bare
+ * signature, wherever a person's signature is checked once and forgotten.
  *
  * An authenticator signs the concatenation of its own `authenticatorData` and
  * the SHA-256 of `clientDataJSON`, never bytes a caller hands it, so the
@@ -147,17 +148,28 @@ export function confirmationToken(publicKeyPem: string, signature: string): stri
  * random: a random one proves a person was present and says nothing about what
  * they agreed to, and clause 35 is about what they agreed to.
  */
-export type DecisionAssertion = {
+export type Assertion = {
   authenticator_data: string;
   client_data_json: string;
   signature: string;
 };
 
-/** §10.5. The challenge a decided set produces: base64url of its SHA-256, unpadded. */
+/**
+ * §10.5. The challenge a canonical form produces: base64url of its SHA-256,
+ * unpadded, which is what a browser writes into `clientDataJSON`.
+ *
+ * **This is not the decided set's alone.** Wherever a person's signature is
+ * checked once and then forgotten, a person holding a passkey can only send an
+ * assertion whose challenge is those bytes, so the same function serves a
+ * mandate change (§16.1) and a co-signature (§16.4).
+ */
+export function challengeForBytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("base64url");
+}
+
+/** §10.5. The challenge a decided set produces. */
 export function challengeFor(offerId: string, decisions: DecisionInput[]): string {
-  return createHash("sha256")
-    .update(canonicalDecisions(offerId, decisions))
-    .digest("base64url");
+  return challengeForBytes(canonicalDecisions(offerId, decisions));
 }
 
 /**
@@ -188,10 +200,9 @@ const USER_VERIFIED = 0x04;
  * hub's and the engine is told it, which is one more thing on §13.1's
  * interface.
  */
-export function verifyDecisionAssertion(
-  offerId: string,
-  decisions: DecisionInput[],
-  assertion: DecisionAssertion,
+export function verifyAssertion(
+  bytes: Buffer,
+  assertion: Assertion,
   publicKeyPem: string,
   relyingPartyId: string
 ): boolean {
@@ -201,9 +212,9 @@ export function verifyDecisionAssertion(
       type?: unknown;
       challenge?: unknown;
     };
-    // The challenge is the decided set. An assertion whose challenge is
-    // anything else is a person confirming something this offer is not.
-    if (parsed.challenge !== challengeFor(offerId, decisions)) return false;
+    // The challenge is what was agreed to. An assertion whose challenge is
+    // anything else is a person confirming something this is not.
+    if (parsed.challenge !== challengeForBytes(bytes)) return false;
     // `webauthn.get` is the assertion ceremony. A registration ceremony
     // replayed here would be a person proving they made a key, not that they
     // agreed to this.
@@ -215,8 +226,6 @@ export function verifyDecisionAssertion(
     if (!authenticatorData.subarray(0, 32).equals(relyingParty)) return false;
     // A device that signed without checking who was at it, or with nobody at
     // it, proves that a key was used. Clause 35 asks that a person agreed.
-    // Until 2026-09-11 the flags were not read, and an assertion made without
-    // either was taken for one made with both.
     const flags =
       authenticatorData.length >= AUTHENTICATOR_DATA_MIN ? authenticatorData[FLAGS_OFFSET]! : 0;
     if ((flags & USER_VERIFIED) === 0) return false;
@@ -229,4 +238,39 @@ export function verifyDecisionAssertion(
   } catch {
     return false;
   }
+}
+
+/** §10.5. The decided set's form of the same check. */
+export function verifyDecisionAssertion(
+  offerId: string,
+  decisions: DecisionInput[],
+  assertion: Assertion,
+  publicKeyPem: string,
+  relyingPartyId: string
+): boolean {
+  return verifyAssertion(canonicalDecisions(offerId, decisions), assertion, publicKeyPem, relyingPartyId);
+}
+
+/**
+ * §10.5, §16.1, §16.4. What a person sends where this specification asks them
+ * to sign and then forgets the signature: the bytes signed, or an assertion
+ * whose challenge is those bytes. Exactly one, because a body carrying both
+ * leaves which was checked to the implementation, and a caller could then
+ * satisfy the weaker.
+ *
+ * **A passkey cannot produce the first**, which is why the second exists. A
+ * member holding a passkey and nothing else could, until 2026-09-11, confirm
+ * an offer and then record no ceiling, no cooling window and no co-signer.
+ */
+export type PersonalSignature = { signature: string } | { assertion: Assertion };
+
+export function verifyPersonal(
+  bytes: Buffer,
+  sent: PersonalSignature,
+  publicKeyPem: string,
+  relyingPartyId: string
+): boolean {
+  return "signature" in sent
+    ? verifyBy(publicKeyPem, bytes, Buffer.from(sent.signature, "base64"))
+    : verifyAssertion(bytes, sent.assertion, publicKeyPem, relyingPartyId);
 }

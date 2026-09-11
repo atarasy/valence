@@ -1,6 +1,6 @@
 import { inMemoryStore, type Store } from "../common/store.js";
-import { verifyBy } from "../shared/decisions.js";
-import { conflict, notFound, unprocessable } from "../common/errors.js";
+import { verifyPersonal, type Assertion } from "../shared/decisions.js";
+import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 
 /**
  * Clauses 46 and 47. A person's standing protections, in a record only that
@@ -47,10 +47,21 @@ export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number
       // record's order is its own rather than an accident of history. Nothing
       // stored breaks: a signature is checked when its version is submitted
       // and is never retained.
-      m.ceiling_daily === null ? "" : String(m.ceiling_daily),
-      [...m.co_sign_categories].sort().join(","),
-      m.cooling_seconds === null ? "" : String(m.cooling_seconds),
-      [...m.co_signers].sort().join(","),
+      // Absent is an empty line and not a zero: a daily ceiling of 0 refuses
+      // everything and no daily ceiling refuses nothing, and the signed bytes
+      // have to tell them apart. `== null` rather than `=== null` because an
+      // older host's export can omit the field entirely.
+      m.ceiling_daily == null ? "" : String(m.ceiling_daily),
+      // **Each item is escaped before the join.** A plain comma join is
+      // malleable: `["coffee","tea"]` and `["coffee,tea"]` are the same bytes,
+      // so whoever relays a change can drop a category, or fuse two co-signers
+      // into a name nobody holds, and the signature still verifies. Measured
+      // 2026-09-11 by an adversarial pass: a category was removed under a good
+      // signature and the second signature it required stopped being asked
+      // for. §7.1's edge form already escapes for this reason.
+      [...m.co_sign_categories].sort().map(encodeURIComponent).join(","),
+      m.cooling_seconds == null ? "" : String(m.cooling_seconds),
+      [...m.co_signers].sort().map(encodeURIComponent).join(","),
       String(m.lapses_at),
       String(m.version),
     ].join("\n"),
@@ -133,11 +144,22 @@ export class MandateRegister {
    */
   record(input: {
     mandate: Mandate;
+    /** §16.1. A key's own signature over the canonical bytes. */
     signatures: Record<string, string>;
+    /**
+     * §16.1. Or the assertion a passkey makes instead, whose challenge is
+     * those bytes. A person who joined through a hub holds a passkey and
+     * nothing else, and until 2026-09-11 this route took a bare signature
+     * alone: that member could record no ceiling, no cooling window and no
+     * co-signer, so §16 was unreachable for them and §16.5 with it.
+     */
+    assertions: Record<string, Assertion>;
     keyOf: (key: string) => string | undefined;
+    /** §14b. The name a member's device signs for, which an assertion names. */
+    relyingPartyId: string;
     now?: number;
   }): Mandate {
-    const { mandate, signatures, keyOf } = input;
+    const { mandate, signatures, assertions, keyOf, relyingPartyId } = input;
     const now = input.now ?? Date.now();
     const before = this.rows.get(mandate.id);
     if (before && mandate.version !== before.version + 1) {
@@ -166,7 +188,14 @@ export class MandateRegister {
     for (const key of required) {
       const pem = keyOf(key);
       const signature = signatures[key];
-      if (!pem || !signature) {
+      const assertion = assertions[key];
+      if (signature !== undefined && assertion !== undefined) {
+        throw badRequest(
+          "malformed",
+          `${key} sent a signature and an assertion; exactly one covers a change`
+        );
+      }
+      if (!pem || (signature === undefined && assertion === undefined)) {
         throw unprocessable(
           "unsigned",
           `this change is signed by ${[...required].join(" and ")}; ${key} is missing`
@@ -174,7 +203,12 @@ export class MandateRegister {
       }
       let ok = false;
       try {
-        ok = verifyBy(pem, bytes, Buffer.from(signature, "base64"));
+        ok = verifyPersonal(
+          bytes,
+          signature !== undefined ? { signature } : { assertion: assertion! },
+          pem,
+          relyingPartyId
+        );
       } catch {
         ok = false;
       }
