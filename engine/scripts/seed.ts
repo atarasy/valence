@@ -264,10 +264,15 @@ await post("/lineage", {
 });
 
 // §15. Two registry entries, one carrying the mark and one not, so the
-// probes can check that the mark is recorded and never a gate. Their keys are
-// chosen so that key order and registration order disagree: "b-merchant" is
-// registered first and must still come second.
-for (const [merchant, mark] of [["b-merchant-no-mark", false], ["a-merchant-marked", true]] as const) {
+// probes can check that the mark is recorded and never a gate. Three orders
+// have to disagree here, and the names carry all three. Key order and
+// registration order disagree, because "b-merchant" is registered first and
+// must still come second. **And key order disagrees with mark-first order**:
+// the unmarked entry sorts first, so a registry that quietly put the marked
+// ones at the top would change the list. Until 2026-09-11 the marked entry
+// was the one named "a-", which made those two orders identical and let
+// `registry_sorts_by_the_mark` pass the key-order probe untouched.
+for (const [merchant, mark] of [["b-merchant-marked", true], ["a-merchant-no-mark", false]] as const) {
   const pair = pairFor(`registry:${merchant}`);
   await post("/registry/attest", {
     merchant,
