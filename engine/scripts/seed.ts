@@ -99,7 +99,11 @@ const canonicalConfig = (c: { version: string; presenter: string; products: Reco
       c.presenter,
       ...Object.keys(c.products).sort().map((ref) => {
         const e = c.products[ref]!;
-        return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""].join(":");
+        // Escaped exactly as `canonicalConfig` escapes it. A plain join lets
+        // a relay move the boundary between two fields under a good signature.
+        return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""]
+          .map(encodeURIComponent)
+          .join(":");
       }),
     ].join("\n"),
     "utf8"

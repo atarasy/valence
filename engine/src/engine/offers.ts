@@ -102,7 +102,17 @@ export function canonicalConfig(config: PresenterConfig): Buffer {
       // bytes, whoever relays a catalogue could change who made a product or
       // strip what the merchant said it was, under a signature that still
       // verifies, and clause 12 is answered by whatever the relay chose.
-      return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""].join(":");
+      // **Each part is escaped before the join.** A plain ":" join is
+      // malleable: a merchant named "a:b" with a maker of "c" produces the
+      // same bytes as a merchant "a" with a maker "b:c", so whoever relays a
+      // catalogue can move the boundary between who sold it and who made it
+      // under a signature that still verifies. Found 2026-09-12 while writing
+      // the unit test for the maker being in these bytes at all; the mandate's
+      // form (§16.1) and the edge's (§7.1) had both already been escaped for
+      // the same reason, and this was the third place with the same defect.
+      return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""]
+        .map(encodeURIComponent)
+        .join(":");
     });
   return Buffer.from([config.version, config.presenter, ...products].join("\n"), "utf8");
 }
