@@ -130,6 +130,7 @@ VALENCE_LINEAGE_EDGE="$EDGE" \
 VALENCE_UNATTESTED_EDGE="$UNATTESTED_EDGE" \
 VALENCE_MANDATE_STATE="$MANDATE_STATE" \
 VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
+VALENCE_MAKERS='{"tea-a":"made-by-tea","tea-b":"made-by-tea","coffee-a":"made-by-coffee","miso-a":"made-by-miso","nori-a":"made-by-nori"}' \
 VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \
 VALENCE_RP_ID="conformance.example" \
