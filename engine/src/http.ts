@@ -476,7 +476,7 @@ async function route(
       if (method === "POST" && action === "decisions") {
         const raw = strict(
           await body(request),
-          ["decisions", "signature", "assertion", "co_signature"],
+          ["decisions", "signature", "assertion"],
           "decisions"
         );
         const list = raw.decisions;
@@ -512,17 +512,6 @@ async function route(
                 : requireString(entry, "lineage", `decision ${i}`),
           };
         });
-        // §16.4. A co-signature is present only when a category the person
-        // named is in the set; the engine decides whether it was needed.
-        // §16.4. The co-signer signs, or their passkey asserts, in the shapes
-        // §10.5 defines. A co-signer is a person, and a person who joined
-        // through a hub has only the second.
-        const coSignature =
-          raw.co_signature === undefined
-            ? undefined
-            : typeof raw.co_signature === "string"
-              ? requireString(raw, "co_signature", "decisions")
-              : readAssertion(raw.co_signature, "co_signature");
         // §10.5. A bare signature, or a passkey's assertion. Exactly one:
         // a body carrying both would leave which one was checked to the
         // implementation, and a caller could then satisfy the weaker.
@@ -550,7 +539,7 @@ async function route(
           };
         }
         return json(
-          offerView(await engine.decide(id, decisions, confirmation, coSignature))
+          offerView(await engine.decide(id, decisions, confirmation))
         );
       }
       // §16.5. The person takes back a signed set inside its cooling window.
@@ -931,7 +920,6 @@ async function route(
         "household",
         "ceiling_out_of_network",
         "ceiling_daily",
-        "co_sign_categories",
         "cooling_seconds",
         "co_signers",
         "lapses_at",
@@ -948,10 +936,6 @@ async function route(
     // §16. Absent is not zero. A missing ceiling_daily is no daily ceiling,
     // where 0 would refuse everything; a missing cooling_seconds is no
     // cooling, where 0 is the same behaviour by a different route.
-    const catRaw = raw.co_sign_categories ?? [];
-    if (!Array.isArray(catRaw) || catRaw.some((c) => typeof c !== "string")) {
-      throw badRequest("malformed", "co_sign_categories must be an array of categories");
-    }
     const optionalInteger = (field: string): number | null =>
       raw[field] === undefined || raw[field] === null
         ? null
@@ -982,7 +966,6 @@ async function route(
           household: requireString(raw, "household", "mandate"),
           ceiling_out_of_network: requireInteger(raw, "ceiling_out_of_network", "mandate", 0),
           ceiling_daily: optionalInteger("ceiling_daily"),
-          co_sign_categories: catRaw as string[],
           cooling_seconds: optionalInteger("cooling_seconds"),
           co_signers: coRaw as string[],
           lapses_at: requireInteger(raw, "lapses_at", "mandate", 0),

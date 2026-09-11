@@ -25,8 +25,6 @@ export type Mandate = {
   /** Clause 58. A standing mandate lapses unless renewed. */
   /** §16.3. What may settle for this household in one day. Null is no ceiling, which 0 is not. */
   ceiling_daily: number | null;
-  /** §16.4. Feed categories whose candidates need a co-signer on the decided set. */
-  co_sign_categories: string[];
   /** §16.5. How long a decided set waits before it settles. Null is no cooling. */
   cooling_seconds: number | null;
   lapses_at: number;
@@ -52,15 +50,13 @@ export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number
       // have to tell them apart. `== null` rather than `=== null` because an
       // older host's export can omit the field entirely.
       m.ceiling_daily == null ? "" : String(m.ceiling_daily),
-      // **Each item is escaped before the join.** A plain comma join is
-      // malleable: `["coffee","tea"]` and `["coffee,tea"]` are the same bytes,
-      // so whoever relays a change can drop a category, or fuse two co-signers
-      // into a name nobody holds, and the signature still verifies. Measured
-      // 2026-09-11 by an adversarial pass: a category was removed under a good
-      // signature and the second signature it required stopped being asked
-      // for. §7.1's edge form already escapes for this reason.
-      [...m.co_sign_categories].sort().map(encodeURIComponent).join(","),
       m.cooling_seconds == null ? "" : String(m.cooling_seconds),
+      // **Each item is escaped before the join.** A plain comma join is
+      // malleable: `["a","b"]` and `["a,b"]` are the same bytes, so whoever
+      // relays a change can fuse two co-signers into a name nobody holds and
+      // the signature still verifies. Measured 2026-09-11 by an adversarial
+      // pass, on the category list that left with §16.4 the following day.
+      // §7.1's edge form already escapes for this reason.
       [...m.co_signers].sort().map(encodeURIComponent).join(","),
       String(m.lapses_at),
       String(m.version),
@@ -79,10 +75,10 @@ export function loosens(before: Mandate, after: Mandate): boolean {
   if (after.ceiling_out_of_network > before.ceiling_out_of_network) return true;
   if (after.lapses_at > before.lapses_at) return true;
   if (before.co_signers.some((k) => !after.co_signers.includes(k))) return true;
-  // §16.1. Removing a category and shortening cooling loosen for the same
-  // reason raising a ceiling does: each takes away a protection the person
-  // put there, so each needs every co-signer the previous version named.
-  if (before.co_sign_categories.some((c) => !after.co_sign_categories.includes(c))) return true;
+  // §16.1. Widening a ceiling and shortening cooling loosen for the same
+  // reason raising the out-of-network ceiling does: each takes away a
+  // protection the person put there, so each needs every co-signer the
+  // previous version named.
   if (widens(before.ceiling_daily, after.ceiling_daily)) return true;
   return shortens(before.cooling_seconds, after.cooling_seconds);
 }

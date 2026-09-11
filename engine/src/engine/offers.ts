@@ -502,15 +502,6 @@ export class ValenceEngine {
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
     signature: string | Assertion,
-    /**
-     * §16.4. The co-signer's own signature over the same canonical set, or
-     * the assertion their passkey makes instead. A co-signer is a person the
-     * household named while they had capacity (clause 47), and a person who
-     * joined through a hub holds a passkey and nothing else: until
-     * 2026-09-11 this took a string alone, so a family whose co-signer used a
-     * passkey could name a category and then satisfy it with nothing.
-     */
-    coSignature?: string | Assertion,
     now = Date.now()
   ): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
@@ -592,58 +583,6 @@ export class ValenceEngine {
         );
       }
       plan.push({ candidate, d });
-    }
-    // §16.4. A category the person named needs a second signature over the
-    // same bytes. The check runs after the plan is built and before anything
-    // is written, so a set that is refused leaves the offer as it was.
-    const mandateForSet = await this.mandateSource.get(offer.mandate);
-    if (mandateForSet && mandateForSet.co_sign_categories.length > 0) {
-      const needs = plan.filter(
-        ({ candidate }) =>
-          candidate.category !== null &&
-          mandateForSet.co_sign_categories.includes(candidate.category)
-      );
-      if (needs.length > 0) {
-        const signed =
-          coSignature !== undefined &&
-          mandateForSet.co_signers.some((key) => {
-            const pem = this.identities.get(key);
-            if (
-              !pem ||
-              !verifyPersonal(
-                canonicalDecisions(offerId, decisions),
-                typeof coSignature === "string" ? { signature: coSignature } : { assertion: coSignature },
-                pem,
-                this.config.relyingPartyId
-              )
-            ) {
-              return false;
-            }
-            // §10.5. A co-signature is used once, like the confirmation it
-            // sits beside. Otherwise a person who withdrew could decide the
-            // same set again with a fresh signature of their own and the
-            // co-signer's old bytes, and the co-signer would have consented
-            // to a decision nobody asked them about.
-            const token = confirmationToken(
-              pem,
-              typeof coSignature === "string" ? coSignature : coSignature.signature
-            );
-            if (used.includes(token)) {
-              throw unprocessable(
-                "confirmation_reused",
-                "this co-signature has already been used for this offer"
-              );
-            }
-            spent.push(token);
-            return true;
-          });
-        if (!signed) {
-          throw unprocessable(
-            "mandate_co_sign_required",
-            `${needs[0]!.candidate.category} needs a co-signer's signature on this set`
-          );
-        }
-      }
     }
     for (const { candidate, d } of plan) {
       if (d.valence === "kept") {

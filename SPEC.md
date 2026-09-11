@@ -95,7 +95,7 @@ candidate
   unit_price             the merchant's own price. Immutable within the offer.
   merchant               who made it: the merchant of record (clauses 11, 12). From the catalogue, never the request.
   ships                  who carries it to the household (clause 12). From the catalogue.
-  category               the merchant's own category, or null. From the catalogue, never the request. A mandate names values of it (§16.4).
+  category               the merchant's own category, or null. From the catalogue, never the request.
   predicted_conversion   0..1, or null. The presenter's own model output.
   is_exploration         boolean. Counts toward the floor (§5).
   given_by               the key of whoever gave this candidate, or null. A gift is never billed to its recipient (§6.2, clause 10).
@@ -173,7 +173,7 @@ Without this the floor is satisfiable by relabelling. A presenter marks the item
 
 The floor counts what **this presenter** has offered this household, so what a presenter is decides what the floor is worth. A presenter is the holder of a key: a catalogue is accepted only when it is signed by the key registered for the presenter it names, so nobody publishes catalogues under another presenter's name, and a presenter cannot disown one it published.
 
-**The category is inside the signed bytes of a catalogue**, beside the price. Left outside them, whoever relays a catalogue could strip a category, and a candidate that needed a second signature under §16.4 would quietly stop needing one. A protection that a relay can remove is not a protection.
+**The category is inside the signed bytes of a catalogue**, beside the price, so whoever relays a catalogue cannot strip one. It was put there for §16.4, which read the category and was withdrawn on 2026-09-12; it stays in the signed bytes because what a merchant said a product was is part of what it published, and a protection that a relay can remove is not a protection.
 
 An offer says whether an identity root endorsed that key (`presenter_attested`, §7.1). Where it did, changing name means presenting a second identity to that root, which is a thing the root can see and a household can weigh. Where it did not, the name is the presenter's own word.
 
@@ -349,7 +349,7 @@ A Valence-conformant merchant extends its ACP product feed. The two gift fields 
 | `valence.gift_unit` | the unit and quantity in which this product can be given rather than sold (§6.2) |
 | `valence.gift_eligible` | whether the maker allows it to be given |
 | `valence.gift_meta` | wrapping options, ceremonial eligibility, price band |
-| `category` | the merchant's own category for the product. It travels into the catalogue and onto the candidate, and a mandate names values of it (§16.4). The specification does not define a vocabulary: a hub that ranked or interpreted categories would be judging merchandise, which clauses 1 and 44 remove |
+| `category` | the merchant's own category for the product. It travels into the catalogue and onto the candidate. A mandate named values of it until §16.4 was withdrawn on 2026-09-12; nothing in this specification reads it now, and it is published because it is the merchant's own description. The specification does not define a vocabulary: a hub that ranked or interpreted categories would be judging merchandise, which clauses 1 and 44 remove |
 | `valence.lineage_hook` | endpoint accepting lineage edges |
 | `valence.reciprocity` | whether purchase history is returned to the household in standard form |
 
@@ -426,7 +426,7 @@ A conforming implementation does not have these routes. Their absence is checkab
    <candidate>:<valence>:<kept_as or empty>:<lineage or empty>
    ```
 
-   one line per decision in ascending candidate id, UTF-8, `\n` between lines; the signature is over those bytes, base64, by the key registered for the offer's `mandate`. **A signature is verified by the type of the key it is checked against**: ed25519 over the bytes as they are, ECDSA on P-256 (ES256) or RSA (RS256) over their SHA-256. This said ed25519 alone until 2026-09-11, and it refused the key most devices carry: a member who joined through a hub holds a passkey, which is P-256 on almost every phone and laptop, and that member could register a key and then confirm nothing with it, co-sign nothing (§16.4) and sign no change to their own mandate (§16.1). The same rule reads every signature this specification names. An implementation MUST refuse, with `422`, a decided set with no signature, a signature by another key, or a signature over a set other than the one sent; nothing is written on refusal.
+   one line per decision in ascending candidate id, UTF-8, `\n` between lines; the signature is over those bytes, base64, by the key registered for the offer's `mandate`. **A signature is verified by the type of the key it is checked against**: ed25519 over the bytes as they are, ECDSA on P-256 (ES256) or RSA (RS256) over their SHA-256. This said ed25519 alone until 2026-09-11, and it refused the key most devices carry: a member who joined through a hub holds a passkey, which is P-256 on almost every phone and laptop, and that member could register a key and then confirm nothing with it and sign no change to their own mandate (§16.1). The same rule reads every signature this specification names. An implementation MUST refuse, with `422`, a decided set with no signature, a signature by another key, or a signature over a set other than the one sent; nothing is written on refusal.
 
    **A passkey cannot sign those bytes, and the concept documents assume it does.** Found on 2026-09-11, while building the member's side. An authenticator signs the concatenation of its own `authenticatorData` and the SHA-256 of `clientDataJSON`, never bytes a caller hands it, so a signature made by a password manager over this canonical form does not exist. `04` §2.1 of the concept documents said the hub asks a manager for a WebAuthn signature and nothing else, `12` called the mandate "signed with a passkey (the SPC pattern)", and `05` said the same of an individual mandate. As written, an implementation that followed them could not conform. **All three were corrected on 2026-09-11**, each keeping the sentence it used to carry, and this paragraph is kept because the correction is the finding: the documents described the thing every payments article describes, and the thing does not exist.
 
@@ -660,7 +660,6 @@ mandate
   household
   ceiling_out_of_network   what one offer may cost at merchants the registry does not list (clause 46)
   ceiling_daily            what may settle for this household in one day, across every presenter
-  co_sign_categories[]     feed categories whose candidates need a co-signer on the decided set
   cooling_seconds          how long a decided set waits before it settles
   co_signers[]             keys named while the person had capacity (clause 47)
   lapses_at                a standing mandate lapses unless renewed (clause 58)
@@ -669,29 +668,30 @@ mandate
 
 `ceiling_daily` and `cooling_seconds` are absent when the person has not set
 them, and absent is not zero: no daily ceiling and no cooling, against a
-`ceiling_daily` of 0 that would refuse everything. `co_sign_categories` is
-absent or empty when nothing needs a second signature.
+`ceiling_daily` of 0 that would refuse everything.
 
-**The three added on 2026-09-10 sit in the order above and not at the end**,
-which changes the canonical bytes. Nothing stored breaks, because a signature
-is checked when its version is submitted and is not retained (§16.1); a
-signature held outside the implementation and checked later against the newer
-form would break, and the rule that prevents it is that a signature covers the
-form current when it was made.
+**Three fields were added on 2026-09-10 and one of them left on 2026-09-12.**
+`co_sign_categories` named the feed categories whose candidates needed a
+co-signer's signature on the decided set, and §16.4 was the rule that read it.
+It is removed rather than deprecated: a field nobody reads that everybody signs
+is residue, and the signed form is seven lines rather than eight. **The
+co-signers stay and so does clause 47**; what went is the per-purchase half.
+Nothing stored breaks, because a signature is checked when its version is
+submitted and is not retained (§16.1).
 
 ### 16.1 Who signs a change
 
-Every version is signed by the household over the canonical form: the fields above, one per line, in the order listed, with `co_sign_categories` and `co_signers` each sorted, **each item percent-encoded**, and joined by commas, an absent `ceiling_daily` or `cooling_seconds` as an empty line, and the version inside the bytes so that an old signature cannot be replayed onto a new record. This sentence named `co_signers` alone and no escaping until 2026-09-11; both lists were always in the bytes, and the escaping is why the next paragraph but three exists.
+Every version is signed by the household over the canonical form: the fields above, one per line, in the order listed, with `co_signers` sorted, **each item percent-encoded**, and joined by commas, an absent `ceiling_daily` or `cooling_seconds` as an empty line, and the version inside the bytes so that an old signature cannot be replayed onto a new record. This sentence named no escaping until 2026-09-11, and the escaping is why the next paragraph but three exists.
 
-A change **loosens** when it raises either ceiling, pushes `lapses_at` further out, drops a co-signer, removes a category from `co_sign_categories`, or shortens `cooling_seconds`. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone: lowering a ceiling, adding a category and lengthening cooling are all tightenings.
+A change **loosens** when it raises either ceiling, pushes `lapses_at` further out, drops a co-signer, or shortens `cooling_seconds`. A loosening MUST also carry the signature of every co-signer the **previous** version named. A tightening is the person's alone: lowering a ceiling and lengthening cooling are both tightenings.
 
 **Signatures are verified at submission and MUST NOT be retained.** What a signature covers is the canonical form as it stood when the signature was made, and an implementation that keeps signatures in order to re-check them later has taken on a compatibility problem that this one does not have. An implementation MUST refuse with `422` a version that is unsigned, signed by the wrong key, or missing a co-signer's signature on a loosening, and MUST refuse a version that is not exactly one more than the last.
 
 **A person signs, or their passkey asserts.** A key named here sends either the signature over those bytes or an assertion whose challenge is their SHA-256, in the shape §10.5 defines, and an implementation MUST accept both and MUST refuse a key that sends both at once. **The second shape is not a convenience.** An authenticator signs its own data and the hash of the client's, never bytes a caller hands it, so a person who holds a passkey and nothing else cannot produce the first, and until 2026-09-11 this section asked for the first alone: such a person could record no ceiling, no cooling window and no co-signer, and §16.5 went with it, because there is nothing to take a decided set back into. It was found by building the screen where a member sets their protections, which is how the same defect in §10.5 was found the same morning.
 
-**The rule is "wherever a person's signature is checked once and then forgotten", which is not the same as "wherever a person signs".** §16.4's co-signature is checked once and took the same change on the same day, after a review found that a family whose co-signer held a passkey could name a category needing a second signature and then have no way at all to give one. **§7.1's lineage edge is the one that stays**, and the reason is the one that settles §14.2's import question too: an edge is verified again every time it is imported, and an assertion names the host it was made for, so an edge signed by one could be re-verified nowhere but where it was made. A gift is therefore out of reach from a hub until §7.1 stops re-verifying, and that is written here rather than left to be discovered.
+**The rule is "wherever a person's signature is checked once and then forgotten", which is not the same as "wherever a person signs".** §16.4's co-signature was the other place it applied, and took the same change on the same day after a review found that a family whose co-signer held a passkey could name a category needing a second signature and then have no way at all to give one; §16.4 itself was removed on 2026-09-12 and the rule outlived it. **§7.1's lineage edge is the one that stays**, and the reason is the one that settles §14.2's import question too: an edge is verified again every time it is imported, and an assertion names the host it was made for, so an edge signed by one could be re-verified nowhere but where it was made. A gift is therefore out of reach from a hub until §7.1 stops re-verifying, and that is written here rather than left to be discovered.
 
-**Each item of the two lists is percent-encoded before the comma joins them.** A plain join is malleable: `["coffee","tea"]` and `["coffee,tea"]` are the same bytes, so whoever relays a change can post the second while the person signed the first, and the record then names one category that matches nothing while the signature still verifies. Measured 2026-09-11 by an adversarial pass, which also fused two co-signers into a name nobody holds, after which no loosening could ever be signed. §7.1's edge form already escapes, for this reason.
+**Each item of the co-signer list is percent-encoded before the comma joins them.** A plain join is malleable: `["a","b"]` and `["a,b"]` are the same bytes, so whoever relays a change can fuse two co-signers into a name nobody holds, after which no loosening could ever be signed, and the signature still verifies. Measured 2026-09-11 by an adversarial pass, on the category list that left with §16.4 the following day. §7.1's edge form already escapes, for this reason.
 
 This is what clause 47 means by "nothing else changes it": not the person alone, not a co-signer alone, and no layer, which holds no key at all.
 
@@ -717,19 +717,29 @@ It is worse than a gap. The union of a person's settlements is the person's, and
 
 What that needs is one more thing on the interface of §13.1: either the engine asks the hub whether an amount may settle today, or it reports each settlement to the hub and the hub answers with the total. **Neither is built.** Until one is, `ceiling_daily` binds within a deployment and an implementation MUST NOT claim more for it than that.
 
-### 16.4 Categories that need a second signature
+### 16.4 Withdrawn on 2026-09-12
 
-`co_sign_categories` holds values of the `category` a merchant publishes for a product (§8). **The implementation matches strings and sorts nothing**: a hub that decided for itself which goods were medicines or investments would be making the judgement about merchandise that clauses 1 and 44 remove.
+This section required a co-signer's signature on any decided set holding a
+candidate whose `category` the person had named, and `co_sign_categories`
+carried the list. **The number is kept so that citations of §16.5 and §16.6 do
+not move**, exactly as the constitution kept clause 50's.
 
-A category travels from the catalogue onto the candidate with the price and the merchant (§3.1), and there is no request field that sets it.
+**Three reasons, in the order they weigh.** Nobody asked for it: stopping a
+purchase by its kind rather than by its price was not requested by a customer,
+a member, or any candidate in the market study. The ceilings cover the same
+ground by amount, and **a ceiling is the protection a presenter cannot
+relabel**, because it is arithmetic on a price rather than a judgement about a
+word, which this section itself said. And the mechanism carried a defect nobody
+noticed until the screen was built: a category set while no co-signer was named
+locked the household out of it permanently, because a signature was required
+from `co_signers` and there was nobody to give one.
 
-**What signing the category does and does not buy.** It is inside the catalogue's signed bytes, so **a party relaying a catalogue cannot strip one**. It does not stop the presenter itself from publishing a version that omits the category, because a catalogue is signed by the presenter's own key and the presenter chooses which version an offer names. **So this protection binds a presenter that is careless and not one that is set on avoiding it.**
-
-That limit is written here rather than left to be discovered, and it has a shape a person can act on: **a ceiling is the protection a presenter cannot relabel**, because it is arithmetic on a price rather than a judgement about a word. A person who wants the second signature to survive a presenter's own choices pairs the category with a ceiling; a person who wants a prompt when goods of a kind arrive is served by the category alone.
-
-An implementation MUST NOT treat an absent category as a category the mandate names. Making absence trigger the second signature would close the gap above, and it would ask for a co-signer on every uncategorised product from every shop, which is a different protection than the one the person asked for.
-
-When a decided set contains a candidate whose category is in `co_sign_categories`, `POST /offers/{id}/decisions` MUST refuse with `422` unless it carries a co-signer's signature over the same canonical set beside the household's. One co-signer is enough, and the mandate's `co_signers` are the eligible set.
+**What it cost is worth recording.** The protection this section did offer was
+against a presenter that is careless rather than one set on avoiding it: the
+category is inside the catalogue's signed bytes, so a relaying party cannot
+strip one, while the presenter itself may publish a version that omits it. If
+stopping a purchase by kind is ever wanted again, it is built from nothing, and
+the second build starts without the probes and the mutations this one had.
 
 ### 16.5 Cooling
 
@@ -741,12 +751,15 @@ A decided set under a mandate with `cooling_seconds` set does not settle when it
 
 ### 16.6 A refusal names the threshold that refused it
 
-Four refusals in this section share a status code, and a person MUST be able to tell them apart. The body carries a `reason` of
+Refusals in this section share a status code, and a person MUST be able to tell them apart. The body carries a `reason` of
 
 ```
 mandate_ceiling_out_of_network | mandate_ceiling_daily |
-mandate_co_sign_required | mandate_cooling | mandate_lapsed
+mandate_cooling | mandate_lapsed
 ```
+
+There were five until 2026-09-12, when §16.4 was withdrawn and
+`mandate_co_sign_required` went with it.
 
 **This is the lesson of `novelty_from_this_catalogue`**, a mutation that survived every probe because two different refusals shared a status code and nothing else. A `422` with no name is a refusal no probe can tell from another `422`, and clause 36 requires that the reason an order was not executed be shown to the person.
 

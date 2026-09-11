@@ -330,11 +330,11 @@ const baseMandate = {
   id: "mandate-conformance",
   household: "household-conformance",
   ceiling_out_of_network: 100000,
-  // §16. The fixture leaves the three protections of 2026-09-10 unset, so the
+  // §16. The fixture leaves the two protections of 2026-09-10 unset, so the
   // suites that do not care about them see the mandate they always saw. The
-  // probes that do care sign their own versions.
+  // probes that do care sign their own versions. There were three until
+  // 2026-09-12, when the per-purchase second signature was removed.
   ceiling_daily: null as number | null,
-  co_sign_categories: [] as string[],
   cooling_seconds: null as number | null,
   co_signers: ["key-cosigner-conformance"],
   lapses_at: Date.now() + 365 * 86_400_000,
@@ -347,9 +347,11 @@ const canonicalMandate = (m: typeof baseMandate) =>
       m.household,
       String(m.ceiling_out_of_network),
       m.ceiling_daily === null ? "" : String(m.ceiling_daily),
-      [...m.co_sign_categories].sort().join(","),
       m.cooling_seconds === null ? "" : String(m.cooling_seconds),
-      [...m.co_signers].sort().join(","),
+      // Escaped exactly as `canonicalMandate` in the engine escapes it. The
+      // seed joined raw until 2026-09-12, which agreed only because no key
+      // here holds a character that changes under it.
+      [...m.co_signers].sort().map(encodeURIComponent).join(","),
       String(m.lapses_at),
       String(m.version),
     ].join("\n"),

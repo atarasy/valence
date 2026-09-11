@@ -7,7 +7,6 @@ const mandate: Mandate = {
   household: "h-1",
   ceiling_out_of_network: 1000,
   ceiling_daily: null,
-  co_sign_categories: [],
   cooling_seconds: null,
   co_signers: [],
   lapses_at: Date.now() + 86_400_000,
