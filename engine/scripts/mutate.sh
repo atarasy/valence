@@ -30,6 +30,14 @@ if ! git diff --quiet -- src || ! git diff --cached --quiet -- src; then
   exit 1
 fi
 
+# Where the per-mutation logs go. The default was /tmp, and a reboot on
+# 2026-09-11 took a finished sweep's logs with it, which is the evidence for
+# every figure the run produced. `coverage.sh` sets this for a sweep; a single
+# mutation run by hand still lands in /tmp, which is the right place for one
+# that nothing will be quoted from.
+LOGS="${VALENCE_LOG_DIR:-/tmp}"
+mkdir -p "$LOGS"
+
 NAME="$1"; shift
 echo "=== mutation: $NAME"
 "$@"
@@ -49,17 +57,17 @@ fi
 # that ran only the first reported "0 fail" for a mutation that removed the
 # reserve ceiling from the Meter adapter, which is the requirement the adapter
 # exists to satisfy.
-bun test > "/tmp/mutation-${NAME}-unit.log" 2>&1
+bun test > "$LOGS/mutation-${NAME}-unit.log" 2>&1
 UNIT=$?
-./scripts/conformance.sh > "/tmp/mutation-${NAME}.log" 2>&1
+./scripts/conformance.sh > "$LOGS/mutation-${NAME}.log" 2>&1
 STATUS=$?
 echo -n "unit: "
-grep -E '^ *[0-9]+ (pass|fail)' "/tmp/mutation-${NAME}-unit.log" | tr '\n' ' '
+grep -E '^ *[0-9]+ (pass|fail)' "$LOGS/mutation-${NAME}-unit.log" | tr '\n' ' '
 echo -n "  conformance: "
-grep -E '^ *[0-9]+ (pass|fail)' "/tmp/mutation-${NAME}.log" | tr '\n' ' '
+grep -E '^ *[0-9]+ (pass|fail)' "$LOGS/mutation-${NAME}.log" | tr '\n' ' '
 echo ""
-grep -hE '^\(fail\)' "/tmp/mutation-${NAME}-unit.log" "/tmp/mutation-${NAME}.log" | head -12
-if ! grep -q 'bun test v' "/tmp/mutation-${NAME}.log" 2>/dev/null; then
+grep -hE '^\(fail\)' "$LOGS/mutation-${NAME}-unit.log" "$LOGS/mutation-${NAME}.log" | head -12
+if ! grep -q 'bun test v' "$LOGS/mutation-${NAME}.log" 2>/dev/null; then
   # The run never reached a probe. A mutation that breaks the setup proves
   # nothing about the probes, and its log looks identical to a clean pass to
   # anything that greps for failures.

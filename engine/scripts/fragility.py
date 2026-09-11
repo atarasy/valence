@@ -7,9 +7,14 @@ the moment that script's anchor drifts, which happened to `accepts_unit_price`
 on 2026-09-09 and went unnoticed because the harness could not report it.
 
 Two weaknesses are reported here, both read from the logs `coverage.sh` leaves
-in /tmp. Run it after a full measurement.
+beside its verdicts. Run it after a full measurement.
 
   python3 scripts/fragility.py [run-start 'YYYY-MM-DD HH:MM']
+
+The logs are looked for in `$VALENCE_LOG_DIR`, then in the newest `logs`
+directory under `$VALENCE_SWEEP_HOME` (default `~/Documents/valence-sweeps`),
+then in /tmp, which is where they were written until 2026-09-11 and where a
+reboot found the last set.
 
 A mutation whose failures span many suites is flagged rather than judged: bun
 prints a probe's name whether it failed in its setup or in its assertion, so
@@ -20,16 +25,31 @@ import os, sys, glob, re, datetime, collections
 
 SPREAD_SUSPECT = 9  # suites; the excluded reject_foreign_offer_client spans 12
 
+def log_dir() -> str:
+    """Where coverage.sh left the per-mutation logs, newest sweep first."""
+    if os.environ.get("VALENCE_LOG_DIR"):
+        return os.environ["VALENCE_LOG_DIR"]
+    home = os.environ.get(
+        "VALENCE_SWEEP_HOME", os.path.expanduser("~/Documents/valence-sweeps")
+    )
+    sweeps = [d for d in glob.glob(f"{home}/*/logs") if glob.glob(f"{d}/mutation-*.log")]
+    if sweeps:
+        return max(sweeps, key=os.path.getmtime)
+    return "/tmp"
+
+
 def main() -> int:
     start = 0.0
     if len(sys.argv) > 1:
         start = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M").timestamp()
+    logs = log_dir()
+    print(f"logs                  : {logs}")
     by_probe: dict[str, set[str]] = collections.defaultdict(set)
     wide: set[str] = set()
     seen = 0
     for f in sorted(glob.glob("scripts/mutations/*.py")):
         m = os.path.basename(f)[:-3]
-        log = f"/tmp/mutation-{m}.log"
+        log = f"{logs}/mutation-{m}.log"
         if not os.path.exists(log) or os.path.getmtime(log) < start:
             continue
         seen += 1

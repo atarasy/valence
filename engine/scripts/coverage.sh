@@ -17,7 +17,7 @@ cd "$HERE"
 TESTS="${ATARAXIA_TESTS:-$HOME/Documents/GitHub/ataraxia/tests}"
 FRESH=""
 case "${1:-}" in --fresh) FRESH=1; shift ;; esac
-OUT="${1:-/tmp/valence-coverage.txt}"
+OUT="${1:-}"
 # Two mutations break offer creation for the whole suite: every probe that
 # creates an offer then fails in its setup, whatever its own assertion says.
 # Counting those as "shown to fail" would make the headline number mean
@@ -39,9 +39,21 @@ tree_key() {
 # out, because editing the harness that reads the results should not discard
 # them. Widened 2026-09-11, having been the narrower path for one run.
 KEY="$(tree_key src)-$(tree_key scripts)-$(tree_key "$TESTS")"
-RESULTS="/tmp/valence-sweep-${KEY}"
+# Results and per-mutation logs used to live under /tmp, and on 2026-09-11 a
+# reboot cleared it: a finished sweep of 192 mutations lost every verdict and
+# every log behind its figures, and the resume directory this script exists for
+# went with them. The default is now a directory that survives a restart, and
+# `VALENCE_SWEEP_HOME` moves it. The key still decides the subdirectory, so a
+# run against different code still measures again rather than reusing anything.
+HOME_DIR="${VALENCE_SWEEP_HOME:-$HOME/Documents/valence-sweeps}"
+RESULTS="${HOME_DIR}/sweep-${KEY}"
+# mutate.sh writes each mutation's logs, and fragility.py reads them. They are
+# the evidence for every per-probe figure, so they belong beside the verdicts.
+export VALENCE_LOG_DIR="${RESULTS}/logs"
 [ -n "$FRESH" ] && rm -rf "$RESULTS"
-mkdir -p "$RESULTS"
+mkdir -p "$RESULTS" "$VALENCE_LOG_DIR"
+# The union of probes is written beside the verdicts unless a path was given.
+OUT="${OUT:-$RESULTS/probes-shown-to-fail.txt}"
 echo "results: $RESULTS"
 
 TOTAL=$(ls scripts/mutations/*.py | wc -l | tr -d ' ')
@@ -67,12 +79,12 @@ for f in scripts/mutations/*.py; do
     *"ABORTED:"*)  echo ABORTED  > "$RESULTS/$m.status" ;;
     *)             echo CAUGHT   > "$RESULTS/$m.status" ;;
   esac
-  grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" "/tmp/mutation-${m}-unit.log" 2>/dev/null \
+  grep -hE '^\(fail\)' "$VALENCE_LOG_DIR/mutation-${m}.log" "$VALENCE_LOG_DIR/mutation-${m}-unit.log" 2>/dev/null \
     | sed -E 's/^\(fail\) //; s/ \[[0-9.]+m?s\]$//' | sort -u > "$RESULTS/$m.fails"
   # The spread is a count of conformance suites, so it reads the conformance
   # log alone. A unit test's name yields a prefix of its own, and counting
   # those inflates the number against a threshold calibrated on suites.
-  grep -hE '^\(fail\)' "/tmp/mutation-${m}.log" 2>/dev/null \
+  grep -hE '^\(fail\)' "$VALENCE_LOG_DIR/mutation-${m}.log" 2>/dev/null \
     | sed -E 's/^\(fail\) //; s/:.*//' | sort -u > "$RESULTS/$m.suites"
 done
 

@@ -71,9 +71,30 @@ repository is not beside this one.
 ```
 
 Applies one break, runs the suites, prints what failed, and restores. The
-seventeen mutations in `scripts/mutations/` are the ones the ledger in
-`ataraxia/tests/MUTATIONS.md` records. A probe that stays green under its
-mutation is not a probe, and this is how that is found out rather than assumed.
+mutations in `scripts/mutations/` are the ones the ledger in
+`ataraxia/tests/MUTATIONS.md` records, 198 of them as of 2026-09-11. A probe
+that stays green under its mutation is not a probe, and this is how that is
+found out rather than assumed.
+
+## Sweeping all of them
+
+```
+./scripts/coverage.sh                    # hours; resumable
+python3 scripts/fragility.py             # how much each proof rests on
+python3 scripts/anchors.py               # seconds; which breaks stopped applying
+```
+
+`coverage.sh` applies every mutation in turn and collects the probes that
+failed. It keeps each verdict and each run's logs under
+`~/Documents/valence-sweeps/sweep-<key>`, where the key is the content of
+`src`, of `scripts` and of the suites, so an interrupted run resumes and can
+never hand back a result measured against different code. `--fresh` discards
+the directory, and `VALENCE_SWEEP_HOME` moves it. **It lived under `/tmp` until
+2026-09-11, when a reboot took a finished sweep's verdicts and every log behind
+its figures.**
+
+Run `anchors.py` after any change to `src`: a mutation whose anchor has drifted
+changes nothing, reports nothing, and reads exactly like one the corpus catches.
 
 ## What this implementation found
 
