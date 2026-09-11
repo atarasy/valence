@@ -56,7 +56,13 @@ export type NodeExport = {
    */
   lineage: LineageEdge[];
   receipts: { ref: string; at: number }[];
-  /** Clause 53. Recovery is logged, and the log leaves with the node. */
+  /**
+   * Clause 53 says recovery is logged and the person is notified; **it does not
+   * say the log leaves with the node**, and this comment attributed that to it
+   * until 2026-09-12. What makes the log part of the export is clause 43, a
+   * person's data held in a form they can export in full, with clause 52's move
+   * to another host. Both halves are true and they come from different clauses.
+   */
   recoveries: RecoveryRecord[];
   /** Clause 43. Every permission the person granted, revoked rows included. */
   permissions: Permission[];
@@ -149,7 +155,7 @@ export class RecoveryRegister {
     return record;
   }
 
-  /** Clause 53: the log leaves with the node, so it must also arrive with it. */
+  /** Clauses 43 and 52: the log leaves with the node, so it must also arrive with it. Clause 53 is what put a row in it. */
   importLog(household: string, records: RecoveryRecord[]): void {
     if (records.length) this.log.set(household, [...records]);
   }
