@@ -92,7 +92,7 @@ const makeEngine = (ledger: MeterLedger) => {
   const later = {
     version: CONFIG_VERSION,
     presenter: "merchant-1",
-    products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
+    products: { "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200 }, "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900 } },
   };
   engine.registerConfig(later, signConfig(later));
   return engine;

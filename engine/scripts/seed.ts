@@ -92,14 +92,14 @@ const post = async (path: string, body: unknown) => {
 // §5.4. A catalogue is signed by the presenter it names. The reference
 // presenter's key is root-endorsed; the second one's is not, which is what a
 // rename looks like from outside: a new identity, visibly not the same one.
-const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; ships: string; price: number; category?: string }> }) =>
+const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; maker: string; ships: string; price: number; category?: string }> }) =>
   Buffer.from(
     [
       c.version,
       c.presenter,
       ...Object.keys(c.products).sort().map((ref) => {
         const e = c.products[ref]!;
-        return [ref, e.merchant, e.ships, String(e.price), e.category ?? ""].join(":");
+        return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""].join(":");
       }),
     ].join("\n"),
     "utf8"
@@ -128,11 +128,11 @@ await postConfig({
     // §16.4. The categories are the merchant's own words. The fixture needs
     // two that differ so a mandate can name one of them and leave the other
     // alone; nothing here interprets either.
-    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, category: "tea", physical: PHYSICAL },
-    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, category: "tea", physical: PHYSICAL },
-    "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, category: "coffee", physical: PHYSICAL },
-    "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, category: "seasoning", physical: PHYSICAL },
-    "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, category: "seasoning", physical: PHYSICAL },
+    "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200, category: "tea", physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900, category: "tea", physical: PHYSICAL },
+    "coffee-a": { merchant: "maker-a", maker: "made-by-coffee", ships: "carrier-a", price: 1500, category: "coffee", physical: PHYSICAL },
+    "miso-a": { merchant: "maker-a", maker: "made-by-miso", ships: "carrier-a", price: 700, category: "seasoning", physical: PHYSICAL },
+    "nori-a": { merchant: "maker-a", maker: "made-by-nori", ships: "carrier-a", price: 1100, category: "seasoning", physical: PHYSICAL },
   },
 });
 
@@ -147,8 +147,8 @@ await postConfig({
   version: "cfg-other-merchant",
   presenter: "other-merchant",
   products: {
-    "salt-a": { merchant: "maker-b", ships: "carrier-b", price: 500, physical: PHYSICAL },
-    "salt-b": { merchant: "maker-b", ships: "carrier-b", price: 600, physical: PHYSICAL },
+    "salt-a": { merchant: "maker-b", maker: "made-by-salt", ships: "carrier-b", price: 500, physical: PHYSICAL },
+    "salt-b": { merchant: "maker-b", maker: "made-by-salt", ships: "carrier-b", price: 600, physical: PHYSICAL },
   },
 });
 await post("/offers", {
@@ -173,8 +173,8 @@ await postConfig({
   version: "cfg-conformance-narrow",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, physical: PHYSICAL },
-    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, physical: PHYSICAL },
+    "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200, physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900, physical: PHYSICAL },
   },
 });
 
@@ -182,11 +182,11 @@ await postConfig({
   version: "cfg-conformance-v2",
   presenter: "reference-merchant",
   products: {
-    "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900, physical: PHYSICAL },
-    "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, physical: PHYSICAL },
-    "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, physical: PHYSICAL },
-    "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, physical: PHYSICAL },
-    "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, physical: PHYSICAL },
+    "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 9900, physical: PHYSICAL },
+    "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900, physical: PHYSICAL },
+    "coffee-a": { merchant: "maker-a", maker: "made-by-coffee", ships: "carrier-a", price: 1500, physical: PHYSICAL },
+    "miso-a": { merchant: "maker-a", maker: "made-by-miso", ships: "carrier-a", price: 700, physical: PHYSICAL },
+    "nori-a": { merchant: "maker-a", maker: "made-by-nori", ships: "carrier-a", price: 1100, physical: PHYSICAL },
   },
 });
 
@@ -213,6 +213,7 @@ const edge = {
   to: "key-recipient-conformance",
   product: "tea-a",
   merchant: "reference-merchant",
+  maker: "made-by-tea",
   kind: "gift" as const,
   occasion: "birth",
   receipt: "receipt-conformance-1",
@@ -235,6 +236,7 @@ const secondHop = {
   to: "key-third-party-conformance",
   product: "tea-b",
   merchant: "reference-merchant",
+  maker: "made-by-tea",
   kind: "gift" as const,
   occasion: "thanks",
   receipt: "receipt-conformance-2",
@@ -254,6 +256,7 @@ const thanks = {
   to: giver,
   product: "tea-a",
   merchant: "reference-merchant",
+  maker: "made-by-tea",
   kind: "thanks" as const,
   occasion: "birth",
   receipt: "receipt-conformance-3",
@@ -371,6 +374,7 @@ const strangerEdge = {
   to: "household-conformance",
   product: "nori-a",
   merchant: "maker-a",
+  maker: "made-by-tea",
   kind: "gift" as const,
   occasion: "no occasion",
   receipt: "receipt-stranger",

@@ -98,10 +98,11 @@ export function canonicalConfig(config: PresenterConfig): Buffer {
     .sort()
     .map((ref) => {
       const e = config.products[ref]!;
-      // §16.4. The category is signed with the price. Left out of the bytes,
-      // whoever relays a catalogue could strip it, and a candidate that needed
-      // a second signature would quietly stop needing one.
-      return [ref, e.merchant, e.ships, String(e.price), e.category ?? ""].join(":");
+      // The maker and the category are signed with the price. Left out of the
+      // bytes, whoever relays a catalogue could change who made a product or
+      // strip what the merchant said it was, under a signature that still
+      // verifies, and clause 12 is answered by whatever the relay chose.
+      return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""].join(":");
     });
   return Buffer.from([config.version, config.presenter, ...products].join("\n"), "utf8");
 }
@@ -345,8 +346,10 @@ export class ValenceEngine {
         // §3.1. Taken from the frozen catalogue, never from the request.
         unit_price: entry.price,
         merchant: entry.merchant,
+        // Clause 12. Who made it, from the catalogue with the price.
+        maker: entry.maker,
         ships: entry.ships,
-        // §16.4. The category travels with the price and the merchant, from
+        // §8. The category travels with the price and the merchant, from
         // the catalogue and never from the request.
         category: entry.category ?? null,
         predicted_conversion: c.predicted_conversion,
@@ -720,7 +723,7 @@ export class ValenceEngine {
     }
     const lines: SettlementLine[] = [];
     const line = (c: Candidate, amount: number) =>
-      lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, ships: c.ships, valence: c.valence, amount });
+      lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, maker: c.maker, ships: c.ships, valence: c.valence, amount });
     for (const c of offer.candidates) {
       if (c.valence === "kept" || c.valence === "defaulted") {
         kept += c.unit_price * c.quantity;
@@ -930,6 +933,7 @@ export class ValenceEngine {
     to: string;
     product: string;
     merchant: string;
+    maker: string;
     kind: LineageKind;
     occasion: string;
     receipt: string;
@@ -949,6 +953,7 @@ export class ValenceEngine {
       to: input.to,
       product: input.product,
       merchant: input.merchant,
+      maker: input.maker,
       kind: input.kind,
       occasion: input.occasion,
       receipt: input.receipt,

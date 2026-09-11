@@ -49,11 +49,11 @@ export function makeEngine(overrides: Partial<{
     products: {
       // §11.1. Ambient, long-keeping, ten to a container, unregulated: the
       // band the physical binding can carry.
-      "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200, physical: PHYSICAL },
-      "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900, physical: PHYSICAL },
-      "coffee-a": { merchant: "maker-a", ships: "carrier-a", price: 1500, physical: PHYSICAL },
-      "miso-a": { merchant: "maker-a", ships: "carrier-a", price: 700, physical: PHYSICAL },
-      "nori-a": { merchant: "maker-a", ships: "carrier-a", price: 1100, physical: PHYSICAL },
+      "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200, physical: PHYSICAL },
+      "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900, physical: PHYSICAL },
+      "coffee-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1500, physical: PHYSICAL },
+      "miso-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 700, physical: PHYSICAL },
+      "nori-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1100, physical: PHYSICAL },
     },
   };
   engine.registerConfig(config, signConfig(config));

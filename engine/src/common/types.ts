@@ -36,8 +36,23 @@ export type KeptAs = "self" | "gift" | "order";
  * settles at (§6.2). It is never returned to a household.
  */
 export type CatalogueEntry = {
-  /** Clause 11. Who made it: the merchant of record, on every line it appears in. */
+  /** Clause 11. The merchant of record, on every line it appears in. */
   merchant: string;
+  /**
+   * Clause 12. Who made it, which is a different party from the merchant
+   * wherever a shop sells goods it did not make. **This field carried the
+   * merchant's own name until 2026-09-12**, when the gloss "who made it: the
+   * merchant of record" was found to be answering clause 12 with a field that
+   * names somebody else. The box decision of 2026-09-10 is what made the two
+   * parties different: a weekly box holds four makers' goods and is one
+   * merchant's.
+   *
+   * It arrives from ACP's own product feed, where `brand` is required and
+   * separate from `seller_name`, so the data was already in every catalogue
+   * this specification extends. A brand is not always a maker, a retailer's own
+   * label being the case it misses, and that limit is in §8 rather than hidden.
+   */
+  maker: string;
   /** Clause 12. Who carries it to the household. */
   ships: string;
   price: number;
@@ -112,8 +127,10 @@ export type Candidate = {
   unit_price: number;
   /** Clauses 11 and 12. Copied from the catalogue with the price; never from the request. */
   merchant: string;
+  /** Clause 12. Who made it, which is the merchant only where it sells what it made. */
+  maker: string;
   ships: string;
-  /** §16.4. Copied from the catalogue with the price. No request field sets it. */
+  /** §8. Copied from the catalogue with the price. No request field sets it. */
   category: string | null;
   predicted_conversion: number | null;
   is_exploration: boolean;
@@ -208,6 +225,8 @@ export type SettlementLine = {
   candidate: string;
   product: string;
   merchant: string;
+  /** Clause 12: every line of every receipt names who made it. */
+  maker: string;
   ships: string;
   valence: Valence;
   amount: number;
@@ -221,6 +240,8 @@ export type LineageEdge = {
   to: string;
   product: string;
   merchant: string;
+  /** Clause 12: every lineage edge names who made it. */
+  maker: string;
   kind: LineageKind;
   occasion: string;
   receipt: string;

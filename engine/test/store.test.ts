@@ -64,8 +64,8 @@ describe("a store is a map that writes through", () => {
       version: "cfg-restart",
       presenter: "merchant-restart",
       products: {
-        "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 1200 },
-        "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 },
+        "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200 },
+        "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900 },
       },
     };
 

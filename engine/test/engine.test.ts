@@ -164,7 +164,7 @@ describe("price", () => {
     const later = {
       version: "cfg-2",
       presenter: "merchant-1",
-      products: { "tea-a": { merchant: "maker-a", ships: "carrier-a", price: 9900 }, "tea-b": { merchant: "maker-a", ships: "carrier-a", price: 900 } },
+      products: { "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 9900 }, "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900 } },
     };
     engine.registerConfig(later, signConfig(later));
     await decideSigned(engine, offer.id, [
@@ -349,6 +349,7 @@ describe("lineage", () => {
       to: "key-recipient",
       product: "tea-a",
       merchant: "merchant-1",
+      maker: "made-by-tea",
       kind: "gift" as const,
       occasion: "birth",
       receipt: "receipt-1",
@@ -368,6 +369,7 @@ describe("lineage", () => {
       to: "key-recipient",
       product: "tea-a",
       merchant: "merchant-1",
+      maker: "made-by-tea",
       kind: "gift" as const,
       occasion: "birth",
       receipt: "receipt-1",
@@ -388,6 +390,7 @@ describe("lineage", () => {
       to: "key-recipient",
       product: "tea-a",
       merchant: "merchant-1",
+      maker: "made-by-tea",
       kind: "gift" as const,
       occasion: "birth",
       receipt: "receipt-1",
@@ -398,6 +401,7 @@ describe("lineage", () => {
       to: "key-giver",
       product: "tea-a",
       merchant: "merchant-1",
+      maker: "made-by-tea",
       kind: "thanks" as const,
       occasion: "birth",
       receipt: "receipt-2",

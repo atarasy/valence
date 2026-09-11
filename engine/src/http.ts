@@ -83,10 +83,12 @@ function candidateView(c: Candidate) {
     quantity: c.quantity,
     unit_price: c.unit_price,
     merchant: c.merchant,
+    // Clause 12. Who made it, on the screen a person signs from as much as in
+    // the record. It is the merchant only where the merchant made the goods.
+    maker: c.maker,
     ships: c.ships,
-    // §16.4. The merchant's own category, travelling with the price. It is the
-    // merchant's published data rather than anything about the household, and
-    // the person's agent needs it to say why a second signature was asked for.
+    // §8. The merchant's own category, travelling with the price. It is the
+    // merchant's published data rather than anything about the household.
     category: c.category,
     predicted_conversion: c.predicted_conversion,
     is_exploration: c.is_exploration,
@@ -223,7 +225,7 @@ async function route(
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["merchant", "ships", "price", "category", "physical"], `product ${ref}`);
+        const entry = strict(value, ["merchant", "maker", "ships", "price", "category", "physical"], `product ${ref}`);
         const physicalRaw = entry.physical;
         let physical;
         if (physicalRaw !== undefined) {
@@ -240,10 +242,15 @@ async function route(
           };
         }
         entries[ref] = {
-          // Clauses 11 and 12. A catalogue entry that names no maker and no
-          // carrier is refused: the merchant is never hidden, and hiding
-          // starts at the catalogue.
+          // Clauses 11 and 12. A catalogue entry that names no merchant, no
+          // maker and no carrier is refused: the merchant is never hidden, and
+          // hiding starts at the catalogue. **The maker is required and not
+          // defaulted to the merchant**, which is what the field held until
+          // 2026-09-12: a default would answer clause 12 with the merchant's
+          // name wherever a shop sells goods it did not make, and nothing
+          // would say which it was.
           merchant: requireString(entry, "merchant", `product ${ref}`),
+          maker: requireString(entry, "maker", `product ${ref}`),
           ships: requireString(entry, "ships", `product ${ref}`),
           price: requireInteger(entry, "price", `product ${ref}`, 0),
           // §8, §16.4. The merchant's own category. Optional, because a
@@ -770,6 +777,7 @@ async function route(
           "to",
           "product",
           "merchant",
+          "maker",
           "kind",
           "occasion",
           "receipt",
@@ -782,6 +790,9 @@ async function route(
         to: requireString(raw, "to", "edge"),
         product: requireString(raw, "product", "edge"),
         merchant: requireString(raw, "merchant", "edge"),
+        // Clause 12: every lineage edge names who made it, and the maker is
+        // inside the giver's signed bytes like every other field here.
+        maker: requireString(raw, "maker", "edge"),
         kind: requireEnum(raw, "kind", "edge", KINDS),
         occasion: requireString(raw, "occasion", "edge"),
         receipt: requireString(raw, "receipt", "edge"),

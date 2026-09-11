@@ -6,6 +6,13 @@ export type EdgeInput = {
   to: string;
   product: string;
   merchant: string;
+  /**
+   * Clause 12: every lineage edge names who made it. Added 2026-09-12, when
+   * `merchant` stopped standing in for the maker. **Adding it to the bytes
+   * invalidates every signature made over the old form**, which costs nothing
+   * here and would cost a deployment its edges; §7.1 says so.
+   */
+  maker: string;
   kind: LineageKind;
   occasion: string;
   receipt: string;
@@ -24,6 +31,7 @@ export function canonical(edge: EdgeInput): Buffer {
     edge.to,
     edge.product,
     edge.merchant,
+    edge.maker,
     edge.kind,
     edge.occasion,
     edge.receipt,

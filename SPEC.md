@@ -93,7 +93,8 @@ candidate
   product                reference into the presenter's catalogue
   quantity               integer
   unit_price             the merchant's own price. Immutable within the offer.
-  merchant               who made it: the merchant of record (clauses 11, 12). From the catalogue, never the request.
+  merchant               the merchant of record (clause 11). From the catalogue, never the request.
+  maker                  who made it (clause 12). The merchant only where the merchant made the goods. From the catalogue.
   ships                  who carries it to the household (clause 12). From the catalogue.
   category               the merchant's own category, or null. From the catalogue, never the request.
   predicted_conversion   0..1, or null. The presenter's own model output.
@@ -199,7 +200,7 @@ settlement
   consumed_amount  sum over consumed candidates that were not given, at the merchant's price
   lost_amount      sum over lost, informational, not billed to the household
   charged          what the household is actually billed
-  lines[]          one per candidate charged or lost: candidate, product, merchant, ships, valence, amount (clause 11)
+  lines[]          one per candidate charged or lost: candidate, product, merchant, maker, ships, valence, amount (clauses 11, 12)
   signed_by        the presenter
   signed_as        "agent". The presenter is not the seller; it signs for the merchants named on the lines (clause 11)
   receipt          signed by the presenter as the merchants' disclosed agent, delivered to the household
@@ -260,6 +261,7 @@ edge
   to          key identifier of the recipient
   product     reference
   merchant    reference
+  maker       who made it (clause 12). Inside the signed bytes, like every other field here
   kind        gift | return | regift | thanks
   occasion    string
   receipt     reference to the merchant's signed transaction receipt
