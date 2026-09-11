@@ -451,6 +451,10 @@ A conforming implementation does not have these routes. Their absence is checkab
 
 6. **Order.** Kept candidates proceed to an ACP checkout session.
 
+   **§1 says this specification does not define payment, and this note does not start.** It records the one property of that checkout the constitution leans on, so that a reader does not have to find it twice. Constitution clause 49, as amended on 2026-09-11, says nothing sent to a merchant on a person's behalf can be used to charge that person again. In the digital binding what is sent is a delegated payment, and the Delegated Payment Spec (developers.openai.com/commerce/specs/payment, read 2026-09-11) says it is **single-use**, with an allowance whose `reason` is an enum of one value, `one_time`, described as "should not be used again for other flows. Usage upto max amount", bound to one `checkout_session_id`, one `merchant_id`, a `max_amount` and an `expires_at`.
+
+   **Two things follow, and only the second is this specification's.** The property clause 49 needs belongs to the payment spec and is enforced by the merchant's own processor, so an implementation that conforms here still owes nothing about payment. And **"single-use" is the payment spec's word rather than a count this specification can check**: the allowance says usage up to the maximum amount, which is a weaker sentence than one authorisation. Where a deployment wants the stronger property it asks its processor, and the concept documents record that conversation rather than this file.
+
 Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
 
 ----
