@@ -1,6 +1,7 @@
 import type { Offer } from "../common/types.js";
 import type { Delivery } from "./delivery.js";
 import { challengeForStatement, statementLines } from "../shared/statement.js";
+import { governing } from "./approval.js";
 
 /**
  * §6.5. The screen a household signs a physical settlement from, drawn by
@@ -34,6 +35,8 @@ export type Statement = {
     quantity: number;
     unit_price: number;
     amount: number;
+    /** §10a.5. Which of the blocks below governs this line. */
+    disclosure: { merchant: string; product: string | null };
   }[];
   /** §10a.4. The merchant's own blocks, as composed, beside the lines. */
   disclosures: {
@@ -68,6 +71,7 @@ export function renderStatement(offer: Offer, delivery: Delivery | undefined): S
         quantity: c.quantity,
         unit_price: c.unit_price,
         amount: l.amount,
+        disclosure: governing(offer, c.merchant, c.product),
       };
     }),
     disclosures: offer.disclosures.map((d) => ({
