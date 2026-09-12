@@ -95,8 +95,13 @@ the directory, and `VALENCE_SWEEP_HOME` moves it. **It lived under `/tmp` until
 2026-09-11, when a reboot took a finished sweep's verdicts and every log behind
 its figures.**
 
-Run `anchors.py` after any change to `src`: a mutation whose anchor has drifted
-changes nothing, reports nothing, and reads exactly like one the corpus catches.
+Run `anchors.py` after any change to `src`. It runs mutations on disposable
+copies and inspects executed replacements on file-derived text, including
+multiple files and intermediate replacements. Aliased methods, imported
+helpers and skipped branches are outside that inspection. A matching anchor
+can still target the wrong occurrence: the mutation's changed behaviour and
+failure context need review. `python3 scripts/test_anchors.py` checks the
+instrumentation against missing and legitimate replacement fixtures.
 
 ## What this implementation found
 

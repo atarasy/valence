@@ -8,9 +8,12 @@ old = """      const block = offer.disclosures.find(
         (d) => d.merchant === candidate.merchant && d.product === null
       );
       if (!block) {"""
-assert old in s, "decide_without_disclosure: the anchor has drifted"
-s = s.replace(old, """      const block = offer.disclosures.find(
+start = s.index("    for (const { candidate } of plan) {")
+end = s.index("    for (const block of offer.disclosures) {", start)
+branch = s[start:end]
+assert branch.count(old) == 1, "decision disclosure anchor drifted"
+branch = branch.replace(old, """      const block = offer.disclosures.find(
         (d) => d.merchant === candidate.merchant && d.product === null
       );
       if (false && !block) {""", 1)
-p.write_text(s)
+p.write_text(s[:start] + branch + s[end:])
