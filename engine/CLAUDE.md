@@ -4,9 +4,15 @@ Guidance for Claude Code working in this repository.
 
 ## What this repository is
 
-A reference implementation of the Valence Protocol, digital binding only,
-written so the Ataraxia conformance suites have a subject. Bun and TypeScript,
-no dependencies beyond type definitions, everything in memory.
+A reference implementation of the Valence Protocol, written so the Ataraxia
+conformance suites have a subject. Bun and TypeScript, no dependencies beyond
+type definitions, everything in memory.
+
+**It carried the digital binding only until 2026-09-12**, when the box was
+built: `src/engine/physical.ts`, the collection, the settlement statement a
+household signs, the delivery register and the carriage. A deployment may
+still run digital-only, and the suites read `HAS_PHYSICAL` to decide what to
+ask, so the two are a configuration rather than two implementations.
 
 It sits inside the specification's own repository, under `engine/`. That is
 deliberate and it is the arrangement the constitution's README already
@@ -42,6 +48,18 @@ before running the mutation: the first draft of the absence suite had notes
 written from intent, and two of them described behaviour the mutation did not
 produce.
 
+**And do not add a mutation without its row in `MUTATIONS.md`.** That ledger is
+the only document saying how much a rule rests on, so a mutation added beside a
+question's implementation is invisible to a reader while the sweep still counts
+it. Three were found that way on 2026-09-13. `python3 scripts/ledger.py` names
+them in a second, and reads the reverse direction too.
+
+**A mutation whose name is one word from another's is a trap rather than a
+duplicate.** `statement_without_carriage` breaks the hub's statement surface
+and `statement_without_the_carriage` broke the canonical form both sides
+compute; the second was renamed `canonical_form_without_carriage` on
+2026-09-13. Name a mutation for what it breaks, not for where it sits.
+
 ## Things that will be tempting and are wrong
 
 **Giving `explorationRate` a default.** The constructor refuses without one on
@@ -56,10 +74,12 @@ becomes permissive, which is the largest blast radius of any single break.
 
 **Letting the ledger own the ceiling.** See the README. It does not.
 
-**Adding the physical binding to make the model complete.** Recovery,
-redistribution and loss add operations and test nothing the constitution needs
-tested that the digital binding does not. The valence values exist in
-`types.ts` and settle correctly; what is absent is the operational half.
+**Reading the physical binding as optional detail.** It was absent here until
+2026-09-12 and this section said adding it would test nothing the digital
+binding does not. That was true while the concept had no box. It is not now:
+question 36 made the household's signature over the settlement statement the
+thing that charges a consumed line, and clause 35, 法11条1号 and 通信販売 all
+turn on it. Change it with the same care as the rest, not as a fixture.
 
 **Special-casing the forbidden routes.** `/segments`, `/broadcast`,
 `/discounts`, `/ratings` and `/events/track` return 404 because they are not
