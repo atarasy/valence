@@ -228,6 +228,8 @@ Two bases exist and no third. A candidate the collection records as `consumed` s
 
 A gift arriving this way is the same event as a gift between people (§7): whether a lineage edge exists for it is the giver's business, since an edge carries the giver's signature and a presenter cannot make one on their behalf.
 
+**A gift has a measurable value or it has none, and the feed already says which.** Several jurisdictions cap what a seller may give beside a sale, and the cap is the seller's law rather than this document's business, in the same way §10a leaves the disclosure's contents to the seller. What this specification supplies is the measure. A gift given in a unit the merchant also sells is the product itself, and its value is that unit's price; a gift given in a unit that is never sold (`valence.gift_unit` naming a trial size, §8) has no price and measures as nothing. **The measure of an offer's gifts is the sum of the priced gift lines in it**, and an implementation MUST NOT add a field to declare a gift as a sample or a trial in order to reach the second case: the unit says it, and a flag would let a presenter relabel the product itself.
+
 ### 6.3 Terms are frozen at presentation
 
 A settlement MUST use the `config_version` stamped on the offer at creation. A presenter who changes prices or rules mid-flight does not change what an outstanding offer costs.
