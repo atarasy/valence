@@ -45,7 +45,36 @@ export type ApprovalCandidate = {
   alternatives: string[];
   /** Clause 59. The argument against taking it. */
   argument_against: string;
+  /**
+   * §10a.5. **Which of the screen's blocks governs this line**: the merchant's
+   * block for this product where it registered one, and its standing text
+   * otherwise. One screen carries several merchants' blocks, and which applies
+   * to which line was a rendering instruction in prose until 2026-09-12, so no
+   * probe could reach it and a hub could pair any block with any line. Naming
+   * it here makes the join a property of the contract. **What is still the
+   * hub's** is the visual adjacency: this says which block, not where on the
+   * screen it sits.
+   */
+  disclosure: { merchant: string; product: string | null };
 };
+
+/**
+ * §10a.5. The block on this offer that governs one line: the merchant's block
+ * for that product where the offer carries one, and its standing text
+ * otherwise. The two are rendered as signed and never merged, so a label in
+ * both governs that line from the product block and every other line from the
+ * standing text.
+ */
+export function governing(
+  offer: Offer,
+  merchant: string,
+  product: string
+): { merchant: string; product: string | null } {
+  const forProduct = offer.disclosures.some(
+    (d) => d.merchant === merchant && d.product === product
+  );
+  return { merchant, product: forProduct ? product : null };
+}
 
 /**
  * Clause 6 and clause 36. The reason a candidate was left out is one of these
@@ -177,6 +206,7 @@ export class ApprovalDesk {
         is_exploration: c.is_exploration,
         alternatives: entry.alternatives,
         argument_against: entry.argument_against,
+        disclosure: governing(offer, c.merchant, c.product),
       });
     }
     return {
