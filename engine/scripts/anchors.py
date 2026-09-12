@@ -21,12 +21,46 @@ between two lines some script had named as one:
 Nothing here applies a mutation to the real source: the copy is thrown away.
 """
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent.parent
+
+
+ASSIGNED = re.compile(r'^(\w+)\s*=\s*("""(?:.|\n)*?"""|"(?:[^"\\]|\\.)*")', re.M)
+REPLACE = re.compile(r'\.replace\(\s*("""(?:.|\n)*?"""|"(?:[^"\\]|\\.)*"|\w+)\s*,')
+TARGET = re.compile(r'pathlib\.Path\("([^"]+)"\)')
+
+
+def static_drift(scripts: list[pathlib.Path]) -> list[tuple[str, str]]:
+    """Every anchor a script replaces on, checked against the file it names.
+
+    Read rather than run, so a script with no `assert` is covered too. It is
+    deliberately conservative: a script whose target or anchor it cannot parse
+    is skipped rather than reported, because a false name here would be read as
+    a defect in the corpus.
+    """
+    out: list[tuple[str, str]] = []
+    for script in scripts:
+        text = script.read_text()
+        targets = TARGET.findall(text)
+        if len(targets) != 1:
+            continue
+        source = HERE / targets[0]
+        if not source.exists():
+            continue
+        body = source.read_text()
+        names = {k: eval(v) for k, v in ASSIGNED.findall(text)}
+        for raw in REPLACE.findall(text):
+            anchor = names.get(raw) if raw.isidentifier() else eval(raw)
+            if anchor is None or not isinstance(anchor, str) or not anchor.strip():
+                continue
+            if anchor not in body:
+                out.append((script.stem, anchor.strip().split("\n")[0][:70]))
+    return out
 
 
 def main() -> int:
@@ -50,10 +84,24 @@ def main() -> int:
             if result.returncode != 0:
                 last = (result.stderr.strip().split("\n") or [""])[-1]
                 drifted.append((script.stem, last[:100]))
+    # **A script that asserts nothing cannot raise, so running it proves
+    # nothing about its anchors.** `settle_at_latest_config` reported SURVIVED
+    # in the sweep of 291 and was not a survivor: one of its two replacements
+    # had drifted under the kept-gift fix, the other still changed text, so
+    # `mutate.sh`'s inert check passed and the run read as a rule no probe
+    # covers. **A partly applied mutation is worse than an inert one**, because
+    # inert is reported and this is not. So every anchor is also read
+    # statically, whether or not the script asserts it.
+    silent = static_drift(scripts)
     print(f"mutation scripts: {len(scripts)}")
     print(f"anchors that no longer apply: {len(drifted)}")
     for name, err in drifted:
         print(f"  {name}: {err}")
+    print(f"anchors that are absent from the source but raise nothing: {len(silent)}")
+    for name, anchor in silent:
+        print(f"  {name}: {anchor}")
+    if silent:
+        drifted = drifted + silent
     # A drifted anchor is a finding, not an error in this script, so the exit
     # status says whether anything needs a person rather than whether the run
     # worked.
