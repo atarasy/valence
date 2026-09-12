@@ -2,6 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
+import { verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -128,6 +129,8 @@ export class ValenceEngine {
   private readonly configs: Map<string, PresenterConfig>;
   private readonly edges: Map<string, LineageEdge>;
   private readonly identities: Map<string, string>;
+  /** §10a. Each merchant's own disclosure, as that merchant signed it. */
+  private readonly disclosures: Map<string, Disclosure>;
   /**
    * §10.5. What has already confirmed each offer. A confirmation is used
    * once: the canonical form binds a decided set to an offer and to nothing
@@ -196,6 +199,7 @@ export class ValenceEngine {
     this.configs = store.map("configs");
     this.edges = store.map("edges");
     this.identities = store.map("identities");
+    this.disclosures = store.map("disclosures");
     this.confirmations = store.map("confirmations");
     this.rootEndorsed = store.map("root_endorsed");
     this.recoveries = new RecoveryLedger(store);
@@ -236,6 +240,34 @@ export class ValenceEngine {
    * its products, so nobody else registers catalogues under a presenter's
    * name and a presenter cannot disown one it registered.
    */
+  /**
+   * §10a. Record the block a merchant composed. **Nothing here reads an item**:
+   * what a seller must say is the seller's law, and an engine that judged the
+   * contents would be composing them. What is checked is that the merchant's
+   * own key signed these bytes, which is what makes the block provable later.
+   *
+   * It is deployment plumbing, like registering a catalogue or attesting a key,
+   * so the specification routes none of it.
+   */
+  putDisclosure(d: Disclosure): Disclosure {
+    const pem = this.identities.get(d.merchant);
+    if (!pem) {
+      throw unprocessable("unknown_merchant", `no key is registered for ${d.merchant}`);
+    }
+    let ok = false;
+    try {
+      ok = verifyDisclosure(d, pem);
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      throw unprocessable("bad_signature", `this disclosure is not signed by ${d.merchant}`);
+    }
+    const stored: Disclosure = { ...d, items: d.items.map((i) => ({ ...i })) };
+    this.disclosures.set(d.merchant, stored);
+    return stored;
+  }
+
   registerConfig(config: PresenterConfig, signature?: string): PresenterConfig {
     if (this.configs.has(config.version)) {
       throw conflict("config_exists", `config ${config.version} already exists`);
@@ -451,6 +483,19 @@ export class ValenceEngine {
       exploration_floor_met: true,
       mandate: input.mandate,
       candidates,
+      // §10a. Frozen here, like the prices, so that what a person decided on is
+      // what they were shown. One per merchant named on a candidate; a merchant
+      // with none makes the offer refusable at the decision (§10a.3) rather
+      // than at creation, because a presenter composing an offer is not the
+      // party that can fix another merchant's missing block.
+      disclosures: [
+        ...new Map(
+          candidates
+            .map((c) => this.disclosures.get(c.merchant))
+            .filter((d): d is Disclosure => d !== undefined)
+            .map((d) => [d.merchant, d] as const)
+        ).values(),
+      ],
       reminders_sent: 0,
       decided_at: null,
     };
@@ -596,6 +641,37 @@ export class ValenceEngine {
         );
       }
       plan.push({ candidate, d });
+    }
+    // §10a.3. Every merchant named in the decided set has a disclosure on this
+    // offer, and it still verifies against that merchant's key. The check runs
+    // after the plan is built and before anything is written, so a refusal
+    // leaves the offer as it was.
+    //
+    // **It is checked here rather than at creation** because the party that
+    // composes an offer is not the party that can supply another merchant's
+    // block, and refusing at creation would let one merchant's omission stop a
+    // presenter from offering anything at all.
+    for (const { candidate } of plan) {
+      const block = offer.disclosures.find((d) => d.merchant === candidate.merchant);
+      if (!block) {
+        throw unprocessable(
+          "disclosure_missing",
+          `${candidate.merchant} has no disclosure on this offer`
+        );
+      }
+      const pem = this.identities.get(block.merchant);
+      let ok = false;
+      try {
+        ok = pem !== undefined && verifyDisclosure(block, pem);
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        throw unprocessable(
+          "disclosure_missing",
+          `the disclosure for ${block.merchant} does not verify`
+        );
+      }
     }
     for (const { candidate, d } of plan) {
       if (d.valence === "kept") {

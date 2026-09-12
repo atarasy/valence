@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { canonicalConfig } from "../src/engine/offers.ts";
-import type { PresenterConfig } from "../src/common/types.ts";
+import { canonicalConfig } from "../src/engine/offers.js";
+import type { PresenterConfig } from "../src/common/types.js";
 
 /**
  * The bytes a presenter signs over its catalogue.

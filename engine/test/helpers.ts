@@ -3,6 +3,7 @@ import { ValenceEngine, canonicalConfig } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
+import { canonicalDisclosure } from "../src/shared/disclosure.js";
 
 /** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");
@@ -18,6 +19,29 @@ export const PHYSICAL = { ambient: true, keeps_for_days: 365, fits_ten_per_conta
 
 /** §5.4. The presenter key the unit tests publish catalogues with. */
 export const PRESENTER_PAIR = generateKeyPairSync("ed25519");
+export const MERCHANT_PAIR = generateKeyPairSync("ed25519");
+
+/**
+ * §10a. A block the merchant composed. **The contents say nothing about what
+ * any statute wants**, because the engine reads no item: what a seller must
+ * disclose is the seller's law, and a fixture that pretended otherwise would
+ * assert something this codebase cannot check.
+ */
+export function disclosureFor(merchant: string) {
+  const body = {
+    merchant,
+    version: "d-1",
+    items: [
+      { label: "payment", value: "charged when the household confirms" },
+      { label: "delivery", value: "already placed" },
+      { label: "returns", value: "as the merchant published" },
+    ],
+  };
+  return {
+    ...body,
+    signature: sign(null, canonicalDisclosure(body), MERCHANT_PAIR.privateKey).toString("base64"),
+  };
+}
 
 export function signConfig(config: Parameters<typeof canonicalConfig>[0]): string {
   return sign(null, canonicalConfig(config), PRESENTER_PAIR.privateKey).toString("base64");
@@ -58,6 +82,15 @@ export function makeEngine(overrides: Partial<{
   };
   engine.registerConfig(config, signConfig(config));
   engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
+  // §10a. Every merchant named on a candidate needs one, or a decision naming
+  // it is refused. The fixture's merchant is `maker-a`, which is not the
+  // presenter: the block belongs to the party that sells, not to the party
+  // that composed the offer.
+  engine.registerIdentity(
+    "maker-a",
+    MERCHANT_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString()
+  );
+  engine.putDisclosure(disclosureFor("maker-a"));
   return { engine, ledger };
 }
 

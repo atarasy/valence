@@ -26,6 +26,7 @@ function pairFor(name: string): { publicKey: KeyObject; privateKey: KeyObject } 
 
 import { canonical } from "../src/shared/lineage.js";
 import { canonicalEntry } from "../src/shared/registry.js";
+import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { ownerOf } from "../src/common/roles.js";
 
 const base = process.env.BASE ?? "http://localhost:8788";
@@ -119,6 +120,33 @@ for (const [name, pair] of Object.entries(presenterKeys)) {
     attested: name === "reference-merchant",
   });
 }
+// §10a. Every merchant named on a candidate has a block it composed and signed.
+// **Nothing here is a statute's list**: the engine reads no item, and a seed
+// that wrote one would be asserting something the codebase cannot check.
+let firstDisclosure = "";
+for (const merchant of ["maker-a", "maker-b"]) {
+  const pair = pairFor(`merchant:${merchant}`);
+  await post("/_identities", {
+    key: merchant,
+    public_key: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
+  });
+  const body = {
+    merchant,
+    version: "d-1",
+    items: [
+      { label: "payment", value: "charged when the household confirms" },
+      { label: "delivery", value: "already placed" },
+      { label: "returns", value: "as this merchant published" },
+    ],
+  };
+  const block = {
+    ...body,
+    signature: sign(null, canonicalDisclosure(body), pair.privateKey).toString("base64"),
+  };
+  await post("/_disclosures", block);
+  if (merchant === "maker-a") firstDisclosure = JSON.stringify(block);
+}
+
 const postConfig = async (config: Parameters<typeof canonicalConfig>[0] & Record<string, unknown>) =>
   post("/_presenter/configs", {
     ...config,
@@ -137,6 +165,11 @@ await postConfig({
     "coffee-a": { merchant: "maker-a", maker: "made-by-coffee", ships: "carrier-a", price: 1500, category: "coffee", physical: PHYSICAL },
     "miso-a": { merchant: "maker-a", maker: "made-by-miso", ships: "carrier-a", price: 700, category: "seasoning", physical: PHYSICAL },
     "nori-a": { merchant: "maker-a", maker: "made-by-nori", ships: "carrier-a", price: 1100, category: "seasoning", physical: PHYSICAL },
+    // §10a. Its merchant registers no disclosure, so a decision naming it is
+    // refused. A deployment whose every merchant has one cannot show a probe
+    // what happens when one is missing, which is the requirement that has a
+    // consequence.
+    "undisclosed-a": { merchant: "merchant-without-a-block", maker: "made-by-nobody", ships: "carrier-a", price: 800, physical: PHYSICAL },
   },
 });
 
@@ -399,3 +432,10 @@ console.log(
     "utf8"
   ).toString("base64")
 );
+
+// §10a. The block the probes compare an offer against, and a product whose
+// merchant registered none, so that the refusal can be reached. `salt-a` is in
+// the later catalogue under `maker-b`; the undisclosed one is in the first,
+// under a merchant this seed deliberately leaves without a block.
+console.log(firstDisclosure);
+console.log("undisclosed-a");

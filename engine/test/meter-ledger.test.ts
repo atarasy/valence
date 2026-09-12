@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { MeterLedger } from "../src/engine/meter-ledger.js";
 import { ValenceEngine } from "../src/engine/offers.js";
-import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR, signConfig, PRESENTER_PAIR } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR, signConfig, PRESENTER_PAIR, MERCHANT_PAIR, disclosureFor } from "./helpers.js";
 
 /**
  * The adapter is tested against a stand-in that reproduces the behaviour
@@ -95,6 +95,13 @@ const makeEngine = (ledger: MeterLedger) => {
     products: { "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200 }, "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900 } },
   };
   engine.registerConfig(later, signConfig(later));
+  // §10a. The merchant named on the candidates needs a disclosure, or a
+  // decision naming it is refused.
+  engine.registerIdentity(
+    "maker-a",
+    MERCHANT_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString()
+  );
+  engine.putDisclosure(disclosureFor("maker-a"));
   return engine;
 };
 

@@ -107,6 +107,8 @@ MANDATE_KEY="$(printf '%s\n' "$SEED_OUT" | sed -n 2p)"
 SEED_KEYS="$(printf '%s\n' "$SEED_OUT" | sed -n 3p)"
 UNATTESTED_EDGE="$(printf '%s\n' "$SEED_OUT" | sed -n 4p)"
 MANDATE_STATE="$(printf '%s\n' "$SEED_OUT" | sed -n 5p)"
+DISCLOSURE_JSON="$(printf '%s\n' "$SEED_OUT" | sed -n 6p)"
+UNDISCLOSED_PRODUCT="$(printf '%s\n' "$SEED_OUT" | sed -n 7p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
@@ -131,6 +133,8 @@ VALENCE_UNATTESTED_EDGE="$UNATTESTED_EDGE" \
 VALENCE_MANDATE_STATE="$MANDATE_STATE" \
 VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
 VALENCE_MAKERS='{"tea-a":"made-by-tea","tea-b":"made-by-tea","coffee-a":"made-by-coffee","miso-a":"made-by-miso","nori-a":"made-by-nori"}' \
+VALENCE_PRODUCT_UNDISCLOSED="$UNDISCLOSED_PRODUCT" \
+VALENCE_DISCLOSURE="$DISCLOSURE_JSON" \
 VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \
 VALENCE_RP_ID="conformance.example" \
@@ -142,4 +146,4 @@ VALENCE_CONFIG_VERSION_NARROW="cfg-conformance-narrow" \
 VALENCE_CONFIG_VERSION_UNROOTED="cfg-other-merchant" \
 VALENCE_PRODUCTS_UNROOTED="salt-a,salt-b" \
 VALENCE_PRICES_LATER='{"tea-a":9900,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
-  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry roles merchant-exit}
+  bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry roles merchant-exit disclosure}

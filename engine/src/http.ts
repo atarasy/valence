@@ -117,6 +117,15 @@ function offerView(o: Offer) {
     exploration_floor_met: o.exploration_floor_met,
     mandate: o.mandate,
     candidates: o.candidates.map(candidateView),
+    // §10a.4. The person sees it before they sign, so it travels on the offer
+    // rather than with a receipt. Returned as the merchant composed it: the
+    // items in the merchant's order, with no field added and none dropped.
+    disclosures: o.disclosures.map((d) => ({
+      merchant: d.merchant,
+      version: d.version,
+      items: d.items.map((i) => ({ label: i.label, value: i.value })),
+      signature: d.signature,
+    })),
   };
 }
 
@@ -852,6 +861,31 @@ async function route(
   // system and both roles verify signatures. It sat under `_presenter` until
   // 2026-09-11, where the name said a presenter's key and the contents were
   // everyone's, a person's included.
+  if (parts[0] === "_disclosures" && method === "POST") {
+    // §10a. Deployment plumbing, like a catalogue or a key: the specification
+    // says who composes a disclosure and what happens when one is missing, and
+    // routes none of it. **Nothing here reads an item.**
+    const raw = strict(await body(request), ["merchant", "version", "items", "signature"], "disclosure");
+    const itemsRaw = raw.items;
+    if (!Array.isArray(itemsRaw)) {
+      throw badRequest("malformed", "items must be an array of label and value");
+    }
+    const items = itemsRaw.map((entry, i) => {
+      const item = strict(entry, ["label", "value"], `disclosure item ${i}`);
+      return {
+        label: requireString(item, "label", `disclosure item ${i}`),
+        value: requireString(item, "value", `disclosure item ${i}`),
+      };
+    });
+    engine.putDisclosure({
+      merchant: requireString(raw, "merchant", "disclosure"),
+      version: requireString(raw, "version", "disclosure"),
+      items,
+      signature: requireString(raw, "signature", "disclosure"),
+    });
+    return json({ ok: true }, 201);
+  }
+
   if (parts[0] === "_identities" && method === "POST") {
     const raw = strict(await body(request), ["key", "public_key", "attested"], "identity");
     // §7.1. `attested` says an identity root endorsed this key. It is a

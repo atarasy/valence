@@ -1,3 +1,4 @@
+import type { Disclosure } from "../shared/disclosure.js";
 // Domain types for the Valence Protocol, draft 2026-09-08.
 // Section references are to valence/SPEC.md.
 
@@ -171,6 +172,14 @@ export type Offer = {
   exploration_floor_met: boolean;
   mandate: string;
   candidates: Candidate[];
+  /**
+   * §10a. One per merchant with a candidate in this offer, as that merchant
+   * composed and signed it. **Frozen onto the offer at creation** for the same
+   * reason the prices are (§6.3): what a person decided on is what they were
+   * shown, and a disclosure that changed after they read it is a disclosure
+   * they never read.
+   */
+  disclosures: Disclosure[];
   /** §10.4: at most one reminder. Not a rate limit; a hard count. */
   reminders_sent: number;
   /**
