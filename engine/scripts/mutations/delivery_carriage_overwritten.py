@@ -4,9 +4,11 @@ import pathlib
 # carriage as well as the status. **This is what the register did until
 # 2026-09-12**: a plain `rows.set` with nothing comparing the figure already
 # there. The carriage is what the approval and the statement put in front of
-# the household before it signed, and the signature covers the statement's
-# lines rather than this figure, so a despatch update carrying a different
-# amount rewrote what a person had read with no record that it had.
+# the household before it signs. The current canonical statement signs the
+# carriage as well as the lines; this mutation removes the separate register
+# guard that prevents a later delivery update changing the recorded figure.
+# Review of the original 299 run on 2026-09-13 found both the HTTP probe and
+# the unit test failing directly on acceptance of a changed carriage.
 
 p = pathlib.Path("src/hub/delivery.ts"); s = p.read_text()
 a = """    const before = this.rows.get(input.offer);
