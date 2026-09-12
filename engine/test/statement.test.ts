@@ -446,3 +446,72 @@ describe("§6.5, §14.2: a move carries what the route found", () => {
     expect(engine.recoveries.for(offer.id)!.consumed).toEqual(mine.consumed);
   });
 });
+
+describe("§6.2, clause 10: a gift is never billed, whatever became of it", () => {
+  /**
+   * **Measured on 2026-09-12 by a refutation pass over the hub, and it is the
+   * worst thing this corpus has found.** `settle`'s `kept` branch added
+   * `unit_price * quantity` for every line without asking whether it was
+   * given, while the `consumed` branch had asked since 2026-09-09. So a gift
+   * a household **kept** was charged at its price and a gift it **used** was
+   * free, which is the rule exactly backwards.
+   *
+   * The statement written the same evening made the two disagree in the open:
+   * `statementLines` puts 0 on a gift whatever its valence, so a household
+   * signed a document reading 0 and the ledger committed the price. §6.5
+   * exists so that what is signed is what is charged, and its first night
+   * shipped the opposite.
+   *
+   * **Every earlier test consumed the gift and none kept one**, which is why
+   * a rule with a probe, a mutation and three years of prose went untested on
+   * the branch that mattered.
+   */
+  test("a kept gift settles at nothing, and the statement agrees with the receipt", async () => {
+    const { engine, deliveries } = makeEngine();
+    const offer = engine.createOffer(
+      physical("house-kept-gift", [
+        { product: "coffee-a" },
+        { product: "tea-b", given_by: "maker-a" },
+      ])
+    );
+    await engine.present(offer.id);
+    deliveries.record({ offer: offer.id, carriage: 0, code: "dc-kept-gift", status: "delivered" });
+    await decideSigned(engine, offer.id, [
+      { candidate: offer.candidates[0]!.id, valence: "kept", kept_as: "self" },
+      { candidate: offer.candidates[1]!.id, valence: "kept", kept_as: "self" },
+    ]);
+    const settlement = await engine.settle(offer.id);
+    // coffee-a at 1500; the gift at nothing, because it was given.
+    expect(settlement.kept_amount).toBe(1500);
+    expect(settlement.charged).toBe(1500);
+    expect(settlement.lines.find((l) => l.product === "tea-b")!.amount).toBe(0);
+    // And the document a household would have signed says the same number.
+    const proposed = statementLines(engine.mustGet(offer.id), []);
+    expect(proposed.reduce((sum, l) => sum + l.amount, 0)).toBe(settlement.charged);
+  });
+
+  test("a defaulted gift settles at nothing too", async () => {
+    // Clause 25's default ships when nothing was chosen, and a gift that
+    // ships that way is still a gift; `defaulted` shares the line that billed
+    // a kept one. **A ceremonial offer is the only way to reach that valence**
+    // (§2.2), and the first version of this test used a `replenish` offer,
+    // whose undecided candidates become `returned`: it passed at zero without
+    // ever touching the branch it was written for, which is the shape this
+    // file keeps finding.
+    const { engine } = makeEngine();
+    const offer = engine.createOffer({
+      ...physical("house-default-gift", [{ product: "coffee-a", given_by: "maker-a" }]),
+      binding: "digital" as const,
+      purpose: "ceremonial" as const,
+      giver: "a-giver",
+      price_band: { min: 1, max: 100_000 },
+      expires_at: Date.now() + 700,
+    });
+    await engine.present(offer.id);
+    await new Promise((r) => setTimeout(r, 900));
+    const settled = engine.mustGet(offer.id, Date.now());
+    expect(settled.candidates[0]!.valence).toBe("defaulted");
+    const settlement = await engine.settle(offer.id, Date.now());
+    expect(settlement.charged).toBe(0);
+  });
+});

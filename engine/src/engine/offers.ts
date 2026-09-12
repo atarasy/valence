@@ -1052,8 +1052,21 @@ export class ValenceEngine {
       lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, maker: c.maker, ships: c.ships, valence: c.valence, amount, disputed: isDisputed });
     for (const c of offer.candidates) {
       if (c.valence === "kept" || c.valence === "defaulted") {
-        kept += c.unit_price * c.quantity;
-        line(c, c.unit_price * c.quantity);
+        // §6.2, clause 10. **A gift is never billed to the person who received
+        // it, and keeping one is not different from using one.** This branch
+        // charged every line at its price and asked nothing about `given_by`,
+        // while the branch below had asked since 2026-09-09, so a gift a
+        // household kept was charged and a gift it used was free: the rule
+        // exactly backwards. Measured on 2026-09-12 by a refutation pass over
+        // the hub, on a settlement that read 900 on the screen and committed
+        // 3,300 at the ledger, because §6.5's statement puts 0 on a gift
+        // whatever its valence. **What a person signs and what they are
+        // charged had come apart on the first night of the section written to
+        // keep them together.** Every test until then consumed the gift and
+        // none kept one.
+        const amount = c.given_by ? 0 : c.unit_price * c.quantity;
+        kept += amount;
+        line(c, amount);
       } else if (c.valence === "consumed") {
         // §6.2. A gift is never billed to the person who received it; anything
         // else used is bought at the merchant's price. No cost basis exists.
