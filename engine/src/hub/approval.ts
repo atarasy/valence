@@ -17,8 +17,16 @@ import type { Delivery } from "./delivery.js";
  * it. One such field and the merchant draws the screen after all.
  */
 export type ApprovalCandidate = {
-  /** Clauses 11, 12. The screen the person signs from names the maker and the carrier. */
+  /**
+   * Clauses 11, 12. The screen the person signs from names who sold it, who
+   * made it and who carries it. `maker` reached the candidate, the receipt
+   * line and the lineage edge on 2026-09-12 (question 32) and not this
+   * surface, while this comment said it did: the fourth time a surface was
+   * added without its probe, found by reading the contract in `04b` §2.1
+   * against the type.
+   */
   merchant: string;
+  maker: string;
   ships: string;
   id: string;
   product: string;
@@ -149,6 +157,7 @@ export class ApprovalDesk {
         quantity: c.quantity,
         unit_price: c.unit_price,
         merchant: c.merchant,
+        maker: c.maker,
         ships: c.ships,
         is_exploration: c.is_exploration,
         alternatives: entry.alternatives,
