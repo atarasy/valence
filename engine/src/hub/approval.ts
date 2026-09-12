@@ -50,6 +50,18 @@ export type ExclusionRule = (typeof EXCLUSION_RULES)[number];
 export type Approval = {
   /** Clause 23. The giver's band on a ceremonial offer, null otherwise. */
   price_band: { min: number; max: number } | null;
+  /**
+   * §10a.4. One per merchant with a candidate on the offer, as that merchant
+   * composed it. **This is the screen a person signs from**, and until
+   * 2026-09-12 the disclosures reached `GET /offers/{id}` and stopped there:
+   * the requirement was satisfied on a surface the member's hub does not read.
+   */
+  disclosures: {
+    merchant: string;
+    version: string;
+    items: { label: string; value: string }[];
+    signature: string;
+  }[];
   offer: string;
   presenter: string;
   expires_at: number;
@@ -139,6 +151,14 @@ export class ApprovalDesk {
       // Clause 23. The band the giver chose is never hidden from the recipient,
       // and the recipient decides on this screen.
       price_band: offer.price_band,
+      // §10a.4. Rendered as the merchant composed them, in the merchant's
+      // order, which is why this copies rather than sorts.
+      disclosures: offer.disclosures.map((d) => ({
+        merchant: d.merchant,
+        version: d.version,
+        items: d.items.map((i) => ({ label: i.label, value: i.value })),
+        signature: d.signature,
+      })),
       candidates,
       excluded: deliberation.excluded,
     };
