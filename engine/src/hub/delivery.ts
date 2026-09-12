@@ -89,6 +89,22 @@ export class DeliveryRegister {
   }
 
   importRows(rows: Delivery[]): void {
-    for (const r of rows) this.rows.set(r.offer, { ...r });
+    for (const r of rows) {
+      // §7.5b. **The same rule as `record`, because the same figure is at
+      // stake.** This was a plain overwrite, and `POST /households/{id}/import`
+      // reaches it with nothing in between, so the guard added to `record` on
+      // 2026-09-12 was bypassed by the household's own move route: measured
+      // the same night at 500 recorded, 800 refused through `record`, and 800
+      // read back after an import. A figure the household was shown before it
+      // signed must not move, whichever door it comes through.
+      const before = this.rows.get(r.offer);
+      if (before && before.carriage !== r.carriage) {
+        throw unprocessable(
+          "carriage_fixed",
+          `this offer's carriage was recorded as ${before.carriage} and is what the household was shown`
+        );
+      }
+      this.rows.set(r.offer, { ...r });
+    }
   }
 }

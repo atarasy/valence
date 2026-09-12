@@ -202,21 +202,30 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     },
   });
 
-  test("a candidate the collection resolved is not reset, and cannot be re-signed", async () => {
+  test("a box the collection resolved cannot be taken back at all", async () => {
+    // **This test used to assert that the withdrawal happened and left the
+    // collection's verdicts alone**, which was the fix of 2026-09-12 for a
+    // household signing `returned` over goods it had eaten. Question 43,
+    // decided 2026-09-13, went further: **there is nothing here the household
+    // signed, so there is no commitment to remove.** Allowing it returned the
+    // box to `presented`, where it reached no section of the household's own
+    // list, its signature over the statement was refused as out of state, and
+    // §6.5's block lifted, so a presenter that withdrew the box left the
+    // consumed goods charged to nobody.
     const made = makeEngine();
     const { engine } = made;
     engine.readMandatesFrom(cooling(3600));
     const offer = await collected(made);
     const [coffee, tea, nori] = offer.candidates;
-    const taken = await engine.withdrawDecisions(offer.id);
-    // The collection's two verdicts stand; the third, which the collection
-    // returned, stands too. There is nothing here the household signed.
-    expect(taken.candidates.find((c) => c.id === coffee!.id)!.valence).toBe("consumed");
-    expect(taken.candidates.find((c) => c.id === tea!.id)!.valence).toBe("consumed");
-    expect(taken.candidates.find((c) => c.id === nori!.id)!.valence).toBe("returned");
-    // And the household cannot sign over them: `consumed` and `lost` are
-    // refused as decisions, and `returned` over a consumed candidate would be
-    // the household naming the verdict, which §11.2 forbids.
+    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    // The box is as it was, so the household can still sign its statement.
+    const after = engine.mustGet(offer.id);
+    expect(after.state).toBe("decided");
+    expect(after.candidates.find((c) => c.id === coffee!.id)!.valence).toBe("consumed");
+    expect(after.candidates.find((c) => c.id === tea!.id)!.valence).toBe("consumed");
+    expect(after.candidates.find((c) => c.id === nori!.id)!.valence).toBe("returned");
+    // And it cannot be signed over: §11.2 forbids the household naming the
+    // verdict, whether or not a withdrawal was attempted first.
     await expect(
       decideSigned(engine, offer.id, [{ candidate: coffee!.id, valence: "returned" }])
     ).rejects.toMatchObject({ status: 409 });
@@ -549,6 +558,38 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
    * the signature could carry a different one and the household had no record
    * of what it had been shown.
    */
+  test("the same signature, sent twice, is the household's own application arriving twice", async () => {
+    // §6.5. A household signs, the engine settles, the answer is lost. The
+    // bytes it re-sends are the bytes that settled the box, and the engine
+    // holds them: refusing tells the member its signature "was not what
+    // settled it" while it is charged, and the hub has no settlement read
+    // that could correct the impression. A **different** signature over a
+    // different set is still refused, which is the two-tabs case.
+    const made = makeEngine();
+    const offer = await collected(made, "house-same-bytes");
+    const first = await settleSigned(made.engine, offer.id);
+    const again = await settleSigned(made.engine, offer.id);
+    expect(again.receipt).toBe(first.receipt);
+    expect(again.charged).toBe(first.charged);
+    // A signature over a set that disputes a line is not that signature.
+    await expect(
+      settleSigned(made.engine, offer.id, [offer.candidates[0]!.id])
+    ).rejects.toMatchObject({ code: "already_settled" });
+  });
+
+  test("the reserve taken at presentation does not hold a gift's price", async () => {
+    // §6.2, clause 10. A gift is never billed, so it is not part of what the
+    // offer can come to. Nothing was ever charged by the reserve, which is
+    // why it outlived by three days the settlement rule it contradicts.
+    const { engine, ledger } = makeEngine();
+    const offer = engine.createOffer(
+      physical("house-reserve", [{ product: "coffee-a" }, { product: "tea-b", given_by: "maker-a" }])
+    );
+    await engine.present(offer.id);
+    // coffee-a at 1500, and the gift at nothing.
+    expect(ledger.get(offer.id)!.reserved).toBe(1500);
+  });
+
   test("a delivery update may move the status and may not move the carriage", async () => {
     const { deliveries } = makeEngine();
     deliveries.record({ offer: "o-carriage", carriage: 500, code: "dc-1", status: "placed" });

@@ -840,6 +840,23 @@ export class ValenceEngine {
     if (this.settlements.get(offer.id)) {
       throw conflict("bad_state", "this offer has settled");
     }
+    // §16.5, question 43, decided 2026-09-13. **Where the household signed
+    // nothing there is no commitment to remove.** A physical box reaches this
+    // state when a collection resolves its last line, and this route then did
+    // three things instead: the box went back to `presented` with the
+    // collection's verdicts intact, so it reached no section of the
+    // household's own list and was invisible until it expired; the
+    // household's signature over the original statement was refused as out of
+    // state; and §6.5's block lifted, because the block counts only boxes in
+    // `decided` and `expired`, so a presenter that then withdrew the box left
+    // the consumed goods charged to nobody. The route needs no signature by
+    // design, and a presenter knows its own offer ids.
+    if ((this.confirmations.get(offer.id) ?? []).length === 0) {
+      throw conflict(
+        "not_withdrawable",
+        "this offer was resolved by a collection rather than by a signed set, so there is nothing to withdraw"
+      );
+    }
     const mandate = await this.mandateSource.get(offer.mandate);
     const cooling = mandate?.cooling_seconds ?? null;
     if (cooling === null) {
@@ -970,6 +987,19 @@ export class ValenceEngine {
       // the first settlement's charge, and the dispute was never recorded.
       // Found by a refutation pass over the reference hub on 2026-09-12.
       if (confirmation.signed) {
+        // **The one thing that has to be asked before refusing: is this the
+        // signature that settled it?** A household whose signed settle lost
+        // its answer re-sends the same bytes, and this told it that its
+        // signature "was not what settled it" when it is, byte for byte, with
+        // the engine holding the proof. The hub carries no settlement read
+        // that could have corrected the impression either. Measured by the
+        // second refutation round on 2026-09-12, the night after the refusal
+        // itself was written to close the two-tabs hole.
+        const sent = confirmation.signed;
+        const offered = "signature" in sent ? sent.signature : sent.assertion.signature;
+        if (existing.confirmation !== null && existing.confirmation === offered) {
+          return existing;
+        }
         throw conflict(
           "already_settled",
           "this box has already settled, and this signature was not what settled it"
@@ -1040,12 +1070,26 @@ export class ValenceEngine {
     // section share a status code, and a `422` that says only "unprocessable"
     // is one a person cannot act on and a probe cannot tell from another.
     const mandate = await this.mandateSource.get(offer.mandate);
-    if (mandate?.cooling_seconds != null && offer.decided_at !== null) {
+    // §16.5, question 42, decided 2026-09-13. **A cooling window belongs to a
+    // set the household signed and to nothing else.** §11 moves a box out of
+    // `presented` when a collection resolves its last line, stamping
+    // `decided_at` with the collection's own moment, so a box the household
+    // never answered sat inside a window: its signature over the statement
+    // was refused for the whole window and discarded, while §6.5's block on
+    // that presenter's next box stood. A member who set a day lost a day of
+    // deliveries after every swap with anything used, and the window
+    // protected a decision nobody had made. Where the statement is the
+    // application, there is nothing to take back and nothing to cool.
+    //
+    // **The message no longer promises a settle.** It read "this set settles
+    // at N", and nothing in this engine settles on a timer: `sweep` applies
+    // expiry and the only settle is the route.
+    if (!needsStatement(offer) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
       const opens = offer.decided_at + mandate.cooling_seconds * 1000;
       if (now < opens) {
         throw unprocessable(
           "mandate_cooling",
-          `this set settles at ${opens}, after the cooling window the person set`
+          `this set cannot settle before ${opens}, the cooling window the person set`
         );
       }
     }
@@ -1614,8 +1658,15 @@ export class ValenceEngine {
   // ---- internals -----------------------------------------------------------
 
   private upperBound(offer: Offer): number {
+    // §6.2, clause 10. **A gift is never billed to the person who received
+    // it, so it is not part of what this offer can come to.** The reserve
+    // summed every candidate at its price, so on an adapter that authorises,
+    // the household's authorisation covered money that can never be taken.
+    // Nothing was ever charged by it, which is why it outlived the settlement
+    // rule it contradicts by three days. Found by a sufficiency pass on
+    // 2026-09-12, in a passing note of the report that found the charge.
     return offer.candidates.reduce(
-      (sum, c) => sum + c.unit_price * c.quantity,
+      (sum, c) => sum + (c.given_by ? 0 : c.unit_price * c.quantity),
       0
     );
   }
