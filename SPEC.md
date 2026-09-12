@@ -200,10 +200,12 @@ settlement
   consumed_amount  sum over consumed candidates that were not given, at the merchant's price
   lost_amount      sum over lost, informational, not billed to the household
   charged          what the household is actually billed
-  lines[]          one per candidate charged or lost: candidate, product, merchant, maker, ships, valence, amount (clauses 11, 12)
+  disputed_amount  sum over consumed lines the household disputed (§6.5). Not in charged; the merchant's to pursue outside this record
+  lines[]          one per candidate charged, disputed or lost: candidate, product, merchant, maker, ships, valence, amount, disputed (clauses 11, 12)
   signed_by        the presenter
   signed_as        "agent". The presenter is not the seller; it signs for the merchants named on the lines (clause 11)
   receipt          signed by the presenter as the merchants' disclosed agent, delivered to the household
+  confirmation     the household's signature over the settlement statement (§6.5), or null where none was needed
 ```
 
 Every line names its merchant of record. A receipt that totals without saying who sold each item has hidden the merchant behind the curator, which clause 12 forbids and clause 11 makes a question of who is liable.
@@ -249,6 +251,31 @@ Valence assumes an authorising ledger with a reserve-and-commit primitive. The m
 The estimate at reserve MUST be an upper bound of the eventual settlement. A settlement above the reserve MUST fail rather than silently exceed the household's authorisation.
 
 This is a requirement on the implementation, not on the ledger it uses. A reserve-and-commit primitive does not supply it: the ledgers this maps onto typically treat a commit above the hold as an adjustment and refuse it only when the account cannot cover the difference, which means a funded household is the case that passes. An implementation MUST check the ceiling itself before it delegates.
+
+### 6.5 A physical box with goods used settles on the household's signature
+
+Added 2026-09-12. **The collection's record is a proposal, and the household's signature over the settlement statement is the application.**
+
+§11.2 makes `consumed` a fact the collection records and forbids a household to name it, for a reason that stands. What this section adds is what that fact is allowed to do on its own, which is nothing. Until this section existed the reference charged a physical box's consumed lines on the collection's record alone, through a settle call with an empty body, with no act of the household on any device. That is a debt made by a third party's record, which clause 35 forbids in terms, nothing settles on a set other than the one signed, and which the concept documents' own legal reading says loses the case for the sale being concluded at a distance rather than in the home. The digital binding never had the defect: its settlement charges lines the household signed at the decision.
+
+**What is signed.** The statement is the offer id, then one line per kept, defaulted or consumed candidate, in ascending candidate id, UTF-8, `\n` between lines:
+
+```
+<offer id>
+<candidate>:<valence>:<amount>:<"disputed" or empty>
+```
+
+`amount` is the line's own, `unit_price × quantity`, or 0 for a gift (§6.2). Lost lines are not in it; they are never charged (§3.2). A household confirms the statement as proposed, or marks consumed lines `disputed` and signs the rest; it may not add, remove or revalue a line, and the two shapes of §10.5 apply, a signature over these bytes or an assertion whose challenge is their SHA-256, by the key registered for the offer's mandate.
+
+**What an implementation MUST do.**
+
+- `GET /offers/{id}/statement` MUST return the statement as proposed: each line with its candidate, product, merchant, maker, carrier, giver, valence, quantity, unit price and amount, the merchants' blocks beside them (§10a), the carriage from the delivery record where one exists (§7.5b), and the challenge for a passkey. It is data and never presentation (clause 54); the hub draws it.
+- `POST /offers/{id}/settle` on a physical offer whose collection recorded any consumed line MUST refuse, with `422 statement_unsigned`, unless the body carries a signature or an assertion over the statement, and MUST refuse with `422 bad_signature` one by another key or over other lines. Nothing is written on refusal. The settlement records the signature as `confirmation`.
+- **A disputed line leaves the rail.** It is not charged, `charged` still equals `kept_amount + consumed_amount`, and the line is returned with `disputed: true` and its amount under `disputed_amount`. What is owed for it is between the merchant and the household under whatever agreement stands between them, and this specification does not carry it. Only a consumed line can be disputed; `422 not_disputable` otherwise, since a kept line is one the household signed itself.
+- **The next box does not come while a statement stands unsigned.** `POST /offers/{id}/present` on a physical offer MUST refuse, with `422 statement_unsigned`, while an earlier physical offer of the same household has a collection recording consumed lines and no settlement. The reminder clause 33 allows is the hub's and is sent before the next box is due; the refusal is what follows if it is not answered. Nothing accrues on the rail.
+- A physical box whose collection found nothing used, and every digital offer, settle as before, with an empty body and `confirmation` null: every charged line was signed at the decision.
+
+**The cost is named rather than hidden.** A household that used goods and never signs is not charged by the rail, and what it owes is the merchant's to pursue. That is the price of the sale being the household's act rather than the collector's, and the merchant-side platform this specification was written beside had already accepted it before this section was written: its charge refuses without the settlement the household signed for. **The alternative considered and refused** was a clause in the approval, that whatever the collection finds used is bought at the listed price, which satisfies a disclosure statute on its face and signs a rule rather than a set: the household would see the amount after the charge and dispute after it, which is exactly the order clause 35 exists to prevent.
 
 ----
 
@@ -346,11 +373,10 @@ Lineage is displayed as density within the viewer's own circle. Totals, network 
 
 ## 8. Feed extension
 
-A Valence-conformant merchant extends its ACP product feed. The two gift fields were named `valence.sample_unit` and `valence.trial_eligible` until 2026-09-09: the same goods, described as a sample, are received as a promotion and read as worth less than their price, and described as a gift are received at their price from someone who chose to give them. The field names follow the thing rather than the trade's habit.
+A Valence-conformant merchant extends its ACP product feed. The gift fields were named `valence.sample_unit` and `valence.trial_eligible` until 2026-09-09: the same goods, described as a sample, are received as a promotion and read as worth less than their price, and described as a gift are received at their price from someone who chose to give them. The field names follow the thing rather than the trade's habit. **A `valence.gift_unit` row stood here until the evening of 2026-09-12**, naming a unit in which a product could be given rather than sold; §6.2 forbids exactly that field, a lane relabelling the product itself, and the row is removed rather than left as a contradiction.
 
 | field | meaning |
 |---|---|
-| `valence.gift_unit` | the unit and quantity in which this product can be given rather than sold (§6.2) |
 | `valence.gift_eligible` | whether the maker allows it to be given |
 | `valence.gift_meta` | wrapping options, ceremonial eligibility, price band |
 | `category` | the merchant's own category for the product. It travels into the catalogue and onto the candidate. A mandate named values of it until §16.4 was withdrawn on 2026-09-12; nothing in this specification reads it now, and it is published because it is the merchant's own description. The specification does not define a vocabulary: a hub that ranked or interpreted categories would be judging merchandise, which clauses 1 and 44 remove |
@@ -369,10 +395,11 @@ There is no sponsored-placement field, and a conforming feed schema has no room 
 POST   /offers                      create. Validates the exploration floor.
 POST   /offers/{id}/present         ship or render. Reserves.
 POST   /offers/{id}/decisions       assign valences to candidates (signed as the mandate, §10.5, clause 35)
-POST   /offers/{id}/settle          price, commit, return a signed receipt
+POST   /offers/{id}/settle          price, commit, return a signed receipt. Carries the household's signature over the statement, and its disputed lines, for a physical box with goods used (§6.5)
 POST   /offers/{id}/withdraw        revoke, release
 POST   /offers/{id}/remind          the one reminder (§10.4, clause 33)
 GET    /offers/{id}                 one offer, with its candidates
+GET    /offers/{id}/statement       the settlement statement a household signs, as proposed by the collection's record (§6.5)
 GET    /offers/{id}/settlement      the settlement, once there is one
 GET    /offers/{id}/delivery        carriage and where the parcel is (§7.5b). The household's surface, never a merchant's
 GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
@@ -395,6 +422,8 @@ Three of these lines were corrected on 2026-09-08, after the conformance suites 
 A fourth line was added on 2026-09-09. **`GET /offers/{id}/settlement`** reads a settlement back. §6 delivers a signed receipt to the household in the response to `POST /offers/{id}/settle` and gave no way to ask for it again, so a household that lost that response had lost its receipt, and clause 43's export could omit settlements while every read still agreed. A conformance probe comparing two hosts found it: the export dropped the settlements and the hosts still answered alike, because nothing asked.
 
 Three more were added on 2026-09-11 with §13.2, and they are the ones a deployment presenting a single role cannot do without: they are how the person's side comes to hold what is the person's. A deployment presenting both roles reaches the same state in process and need never call them, which is what the reference does.
+
+**`GET /offers/{id}/statement` was added on 2026-09-12 with §6.5**, and `POST /offers/{id}/settle` gained a body the same day: a physical box with goods used had settled with no act of the household, and the statement is the screen that act is taken on.
 
 An endpoint a conformance test depends on belongs in this list. Where the two disagree, this list is what an implementer reads.
 
@@ -475,12 +504,13 @@ Drafting from history alone converges on last week's order. The exploration floo
 ```
 disclosure
   merchant     whose disclosure this is, matching a candidate's merchant
+  product      null for the merchant's standing text; a product reference for a block about that product alone (requirement 5)
   version      the merchant's own version of this text
   items[]      label and value, in the merchant's own order
   signature    by the merchant's registered key, over the canonical form
 ```
 
-The canonical form is the merchant, the version, and then each item as `label` and `value`, **every part percent-encoded** before the separators join them, for the reason §8 and §16.1 escape theirs: a plain join lets whoever relays the block move the boundary between two fields under a signature that still verifies.
+The canonical form is the merchant, the version, the product (empty for the standing text), and then each item as `label` and `value`, **every part percent-encoded** before the separators join them, for the reason §8 and §16.1 escape theirs: a plain join lets whoever relays the block move the boundary between two fields under a signature that still verifies. The product is inside the signed bytes so that a block signed for one product cannot be re-filed under another, or under the merchant as a whole.
 
 **The requirements are five, and each is checkable.**
 
@@ -493,7 +523,7 @@ The canonical form is the merchant, the version, and then each item as `label` a
 
 5. **A block is the merchant's standing text, and the screen is what discharges the duty.** A disclosure is keyed on the merchant and is registered before any offer exists, so it can carry only what the merchant knows in advance. **The facts of the particular sale come from the offer**, which already froze them at creation against the presenter's catalogue: the quantity and the unit price of each candidate, and the expiry. **That catalogue is the presenter's and not the merchant's**, registered at a route this engine marks out of specification and verified against the presenter's key, and a version of this sentence said the merchant had signed it. So the price on the screen is the presenter's assertion of the merchant's price, which is the merchant speaking through its own contractor where the presenter is its platform and is not the seller where it is not; **and from the hub's own delivery record (§7.5b), the carriage**, which the offer does not hold because a merchant must not. An implementation MUST render the quantity and the unit price per candidate beside that candidate's merchant's block on `GET /offers/{id}/approval`, and MUST render the carriage there whenever a delivery is recorded for the offer, as `carriage`, null until one is. **A screen that shows the block alone has shown standing terms and not a sale.**
 
-   **This requirement exists because the first version of this section got the diagnosis wrong.** A refutation pass on 2026-09-12 found that a block keyed on the merchant cannot carry 法12条の6第1項1号's 「当該売買契約に基づいて販売する商品……の分量」, which is per contract and per product, and the conclusion drawn was that the key was wrong. It is not: what the provision requires is that the items **appear on the screen**, not that one signed object carry all of them. **Rekeying would have cost what it does not buy.** Per merchant and product still misses the quantity, which is chosen when the offer is made. Per merchant and offer carries everything under one signature and forces a merchant to be able to sign while an offer is being assembled, which a shop hosted on somebody else's platform cannot do. The Japanese provision is named here as the worked example and not as the rule: **the general form is that standing facts come from the block and per-contract facts come from the offer.** Two things the refutation pass of 2026-09-12 added. A block keyed on the merchant cannot carry a term that differs between that merchant's products, and a strict term displayed against a product with better terms is a misleading display for which the merchant is liable and the household loses a statutory right; **the key SHOULD therefore admit an optional product**, the screen rendering the product's block where one exists and the merchant's otherwise, at no signing cost the merchant-keyed block does not already carry. And one screen carries several merchants' blocks, so each merchant's block is rendered adjacent to that merchant's own lines and to nothing else.
+   **This requirement exists because the first version of this section got the diagnosis wrong.** A refutation pass on 2026-09-12 found that a block keyed on the merchant cannot carry 法12条の6第1項1号's 「当該売買契約に基づいて販売する商品……の分量」, which is per contract and per product, and the conclusion drawn was that the key was wrong. It is not: what the provision requires is that the items **appear on the screen**, not that one signed object carry all of them. **Rekeying would have cost what it does not buy.** Per merchant and product still misses the quantity, which is chosen when the offer is made. Per merchant and offer carries everything under one signature and forces a merchant to be able to sign while an offer is being assembled, which a shop hosted on somebody else's platform cannot do. The Japanese provision is named here as the worked example and not as the rule: **the general form is that standing facts come from the block and per-contract facts come from the offer.** Two things the refutation pass of 2026-09-12 added. A block keyed on the merchant cannot carry a term that differs between that merchant's products, and a strict term displayed against a product with better terms is a misleading display for which the merchant is liable and the household loses a statutory right; **so the key admits an optional product**, taken the same evening. A block carrying `product` is about that product alone and carries only the items that differ for it. An implementation MUST store it beside the merchant's standing text and never in its place, MUST attach it to an offer only where a candidate names that product, and MUST NOT let it satisfy requirement 3, which asks for the standing text. On the screen the product block is rendered adjacent to that product's line, and where a label appears in both blocks the product block's item prevails for that line and the standing text's for every other; the two blocks are shown as signed, not merged, so that what a person read is what a merchant signed. It costs the merchant nothing the standing block does not already cost, one signature before any offer exists. And one screen carries several merchants' blocks, so each merchant's block is rendered adjacent to that merchant's own lines and to nothing else.
 
 **Why this is here rather than in the merchant-side platform.** The duty is the seller's, and the surface is the person's agent's. A specification that left the join to each deployment would leave the person's agent free to decide what a seller's notice says, which is a party that is not the seller speaking as the seller. **No clause is cited for that here on purpose.** Two were on 2026-09-12 and a refutation pass took both the same day: clause 45's subject is the hub, which is the person's agent, and clause 11 makes a curator a disclosed agent for the act of signing a receipt and for nothing wider. The requirement below stands on its own reasoning. **The hub is a contractor for rendering and never an agent for composing**, and clause 54 is satisfied because a party that renders a statutory notice is a party to no transaction.
 
@@ -522,6 +552,8 @@ The grace period after the recovery deadline is a deployment parameter with no r
 **Neither `consumed` nor `lost` is a verdict a decision may carry.** `POST /offers/{id}/decisions` MUST refuse a decided set naming either, with `422`. Both are facts the collection or the deadline records about goods in a home, and a household that could declare them would pay cost for what it kept, or nothing for what it lost. This was added on 2026-09-09, after an adversarial pass measured a household signing `consumed` and `lost` over its own goods and paying 2000 of 6000.
 
 A candidate MUST NOT appear in both the returned and the consumed list of one collection, and a collection MUST NOT be recorded twice for one offer.
+
+**What the collection's record may do on its own is nothing.** Added 2026-09-12 with §6.5. A consumed line is charged only on the household's signature over the settlement statement, a disputed line leaves the rail, and the next box is not presented while a statement stands unsigned. The household still cannot name the verdict; it confirms the collection's, or disputes a line of it. The rule above and §6.5 are two halves of one thing: the collection says what happened to the goods, and the household says what it will pay for.
 
 ### 11.1 Eligibility
 
@@ -571,9 +603,10 @@ An implementation is Valence-conformant when it:
 12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
 13. enforces the person's thresholds where each is enforced, and names the one that refused (§16.3 to §16.6)
 14. answers only for the surface it presents, and refuses the other with `not_this_role` (§13.1)
-15. carries each merchant's own disclosure on the offer and on the approval surface, unaltered, **carries beside it each candidate's quantity and unit price, the offer's expiry, and the carriage from the delivery record where one exists**, and refuses a decision without a disclosure (§10a). **This condition binds the engine's role, and the surface a person signs from is the hub's**: a hub-only implementation is asked nothing here, which is a gap in §13.1's split rather than in this condition
+15. carries each merchant's own disclosure on the offer and on the approval surface, unaltered, **carries beside it each candidate's quantity and unit price, the offer's expiry, and the carriage from the delivery record where one exists**, carries a product's block only where that product is and never in the standing text's place, and refuses a decision without a disclosure (§10a). **This condition binds the engine's role, and the surface a person signs from is the hub's**: a hub-only implementation is asked nothing here, which is a gap in §13.1's split rather than in this condition
+16. charges a physical box's consumed lines only on the household's signature over the settlement statement, leaves a disputed line off the charge, and presents no further physical box to a household while a statement stands unsigned (§6.5)
 
-Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent. **Condition 15 was added on 2026-09-12**, when three questions about where this system stands between a household and a merchant resolved into one answer: the seller composes what the seller must say, and the person's agent renders it.
+Condition 16 was added on 2026-09-12 with §6.5, the evening the reference was found to charge consumed lines on the collection's record alone. Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent. **Condition 15 was added on 2026-09-12**, when three questions about where this system stands between a household and a merchant resolved into one answer: the seller composes what the seller must say, and the person's agent renders it.
 
 ### 13.1 Two roles, and what each is judged on
 
