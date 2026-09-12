@@ -345,6 +345,12 @@ The giver's response surface MAY show acts of the recipient: a `regift`, a `retu
 
 This is a constraint on the schema, not on the interface. A conforming API has no field whose absence or value discloses recipient inaction. Implementers should test for inference, not only for presence.
 
+**And the protection has a second half, which was assumed rather than written until 2026-09-13.** The reads under an offer's path say what a recipient did with a gift: `GET /offers/{id}/statement` lists the lines a collection found used, `GET /offers/{id}/approval` names every candidate and the giver. Neither is a giver's surface, and the schema of the giver's surfaces is clean; **what keeps a giver away from them is that nothing hands a giver an offer id.** A giver's own surfaces deal in edges, a ceremonial offer is created by the presenter, and a lineage edge carries a receipt hash and no offer reference.
+
+So an implementation **MUST NOT put an offer reference on any giver-facing surface**, and that is checkable where the older sentence was not. §12 already shut the one route that would have: handing a giver the settlement statement of a ceremonial box. The rule generalises it.
+
+**What is left over is not this section's**, and a refutation pass on 2026-09-12 was right that the section reads as though it were. The reference engine authenticates nobody, so a party that obtains an offer id by any means reads everything under it. That is clause 53's open half, which `08` §3 of the concept documents records and which proving needs a conforming host that authenticates reads. **This section binds the shape of a response and the shape of a surface; it does not and cannot bind who may ask.**
+
 ### 7.3 Reciprocation
 
 An implementation MAY make reciprocation easy. It MUST NOT notify, remind, or impose a deadline on it (clause 18).
