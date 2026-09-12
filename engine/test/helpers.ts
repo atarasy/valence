@@ -5,6 +5,8 @@ import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
 import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
+import { DeliveryRegister } from "../src/hub/delivery.js";
+import { LocalDeliveries } from "../src/engine/delivery-source.js";
 
 /** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");
@@ -72,6 +74,10 @@ export function makeEngine(overrides: Partial<{
   relyingPartyId: string;
 }> = {}) {
   const ledger = new InMemoryLedger();
+  // §7.5b, §13.1. The register is the hub's and the screens are answered under
+  // an offer's path, so the engine is pointed at it exactly as `server.ts`
+  // points a deployment at its own.
+  const deliveries = new DeliveryRegister();
   const engine = new ValenceEngine(ledger, {
     explorationRate: 0.2,
     reminderLimit: 1,
@@ -110,7 +116,8 @@ export function makeEngine(overrides: Partial<{
     MERCHANT_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString()
   );
   engine.putDisclosure(disclosureFor("maker-a"));
-  return { engine, ledger };
+  engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
+  return { engine, ledger, deliveries };
 }
 
 export function signer() {

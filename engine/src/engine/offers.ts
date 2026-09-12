@@ -17,6 +17,8 @@ import {
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import { LocalDay, type DaySource } from "./day-source.js";
+import { type DeliverySource } from "./delivery-source.js";
+import type { Delivery } from "../hub/delivery.js";
 import { inMemoryStore, type Store } from "../common/store.js";
 import { HouseholdLedger } from "../hub/household-ledger.js";
 import {
@@ -175,10 +177,25 @@ export class ValenceEngine {
    */
   readonly householdLedger: HouseholdLedger;
   private daySource: DaySource;
+  private deliverySource: DeliverySource;
 
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
     this.mandateSource = source;
+  }
+
+  /**
+   * §13.1, §7.5b. Point the carriage at the hub that holds the register. The
+   * approval and the statement both render it and both are answered under an
+   * offer's path, which is the engine's; the register is the hub's.
+   */
+  readDeliveriesFrom(source: DeliverySource): void {
+    this.deliverySource = source;
+  }
+
+  /** §6.5, §10a.5. The delivery this offer's screens render the carriage from. */
+  async deliveryFor(offerId: string): Promise<Delivery | undefined> {
+    return this.deliverySource.find(offerId);
   }
 
   /** §16.3. Point the day's total at the hub that holds the person's copy. */
@@ -209,6 +226,12 @@ export class ValenceEngine {
     this.householdLedger = new HouseholdLedger(store);
     this.mandateSource = new LocalMandates(this.mandates);
     this.daySource = new LocalDay(this.householdLedger);
+    // §13.1. The register is the hub's, so an engine that has not been pointed
+    // at one holds nothing. The composition root wires it; the quiet default
+    // is the behaviour that was here before the source existed, and what makes
+    // an unwired deployment loud is §6.5's refusal to settle a physical box
+    // with goods used and no delivery, rather than a screen rendering null.
+    this.deliverySource = { async find() { return undefined; } };
     if (
       typeof config.explorationRate !== "number" ||
       !(config.explorationRate > 0)
@@ -448,6 +471,27 @@ export class ValenceEngine {
     // candidate in it lies outside that band. A band on any other purpose is
     // a field with no meaning, and is refused as such.
     if (input.purpose === "ceremonial") {
+      // §12, §6.5. **A ceremonial box is refused, and the reason is that the
+      // payer and the signer are different people.** Clause 25 makes the giver
+      // the party charged; §6.5 makes the household's signature over the
+      // settlement statement the application for a consumed line. On a
+      // physical ceremonial offer the person charged takes no act at
+      // settlement and the person who acts pays nothing, which is the premise
+      // §6.5 rests on. **Giving the statement to the giver instead is shut**:
+      // it lists what the recipient used, which is the candidates clause 24
+      // keeps from the giver and the signal clause 16 and §7.2 forbid.
+      //
+      // A shape that would work is recorded rather than built, because nothing
+      // asks for this combination today: the giver's choice of band is an
+      // authorisation made in advance and bounded by the band, so a consumed
+      // line could settle as a kept line inside it. Refusing is one line and
+      // opens again; the alternative is a design nothing exercises.
+      if (input.binding === "physical") {
+        throw unprocessable(
+          "ceremonial_is_digital",
+          "a ceremonial offer is digital: the giver pays and the recipient signs, so a physical box would charge a party that signed nothing (§12, §6.5)"
+        );
+      }
       if (!input.price_band) {
         throw badRequest("malformed", "a ceremonial offer carries a price_band");
       }
@@ -941,6 +985,21 @@ export class ValenceEngine {
     // line of it.
     let signed: string | null = null;
     if (needsStatement(offer)) {
+      // §6.5, 法11条1号. The statement is the screen this application is made
+      // on, and the carriage belongs on it. **`null` and `0` are different
+      // facts**: 1号 asks for the carriage beside the price 「販売価格に商品の
+      // 送料が含まれない場合には」, so a merchant whose price includes it owes
+      // no separate figure and records `0`, while `null` is an implementation
+      // that never recorded what it did. For a statement the goods have by
+      // definition been delivered and collected, so there is a delivery to
+      // record. Added 2026-09-12 after a sufficiency pass found the screen
+      // rendering null with nothing refusing.
+      if ((await this.deliverySource.find(offer.id)) === undefined) {
+        throw unprocessable(
+          "delivery_missing",
+          "a physical box with goods used settles on a statement, and the statement carries the carriage from the delivery record (§6.5, §7.5b)"
+        );
+      }
       const householdKey = this.identities.get(offer.mandate);
       if (!householdKey) {
         throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);

@@ -34,9 +34,18 @@ const physical = (household: string, products: { product: string; given_by?: str
   })),
 });
 
-async function collected(engine: ReturnType<typeof makeEngine>["engine"], household = "house-s") {
+async function collected(
+  made: ReturnType<typeof makeEngine>,
+  household = "house-s"
+) {
+  const { engine, deliveries } = made;
   const offer = engine.createOffer(physical(household, [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
   await engine.present(offer.id);
+  // §6.5, 法11条1号. A box that was delivered and collected has a delivery
+  // record, and the statement renders the carriage from it. A merchant whose
+  // price includes carriage records 0; `null` is an implementation that never
+  // recorded what it did, and `settle` refuses it.
+  deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
   engine.recoveries.collect({
     offer: offer.id,
     returned: [offer.candidates[2]!.id],
@@ -49,15 +58,17 @@ async function collected(engine: ReturnType<typeof makeEngine>["engine"], househ
 
 describe("§6.5: a physical box with goods used settles on the household's signature", () => {
   test("an empty settle is refused, and names itself", async () => {
-    const { engine } = makeEngine();
-    const offer = await collected(engine);
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made);
     await expect(engine.settle(offer.id)).rejects.toMatchObject({ code: "statement_unsigned" });
     expect(engine.settlement(offer.id)).toBeUndefined();
   });
 
   test("a signature by another key, or over other lines, is refused", async () => {
-    const { engine } = makeEngine();
-    const offer = await collected(engine);
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made);
     const lines = statementLines(offer, []);
     const stranger = generateKeyPairSync("ed25519");
     const forged = sign(null, canonicalStatement(offer.id, lines), stranger.privateKey).toString("base64");
@@ -69,8 +80,9 @@ describe("§6.5: a physical box with goods used settles on the household's signa
   });
 
   test("the signed statement settles, and the settlement carries it", async () => {
-    const { engine } = makeEngine();
-    const offer = await collected(engine);
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made);
     const settlement = await settleSigned(engine, offer.id);
     expect(settlement.consumed_amount).toBe(1500 + 900);
     expect(settlement.charged).toBe(1500 + 900);
@@ -79,8 +91,9 @@ describe("§6.5: a physical box with goods used settles on the household's signa
   });
 
   test("a disputed line leaves the rail: not charged, and shown as disputed", async () => {
-    const { engine } = makeEngine();
-    const offer = await collected(engine);
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made);
     const coffee = offer.candidates[0]!.id;
     const settlement = await settleSigned(engine, offer.id, [coffee]);
     expect(settlement.consumed_amount).toBe(900);
@@ -93,8 +106,9 @@ describe("§6.5: a physical box with goods used settles on the household's signa
   });
 
   test("only a consumed line can be disputed", async () => {
-    const { engine } = makeEngine();
-    const offer = await collected(engine);
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made);
     const returned = offer.candidates[2]!.id;
     await expect(settleSigned(engine, offer.id, [returned])).rejects.toMatchObject({ code: "not_disputable" });
   });
@@ -111,8 +125,9 @@ describe("§6.5: a physical box with goods used settles on the household's signa
   });
 
   test("the next box does not come while a statement stands unsigned", async () => {
-    const { engine } = makeEngine();
-    const first = await collected(engine, "house-next");
+    const made = makeEngine();
+    const { engine } = made;
+    const first = await collected(made, "house-next");
     const second = engine.createOffer(physical("house-next", [{ product: "nori-a" }, { product: "coffee-a" }]));
     await expect(engine.present(second.id)).rejects.toMatchObject({ code: "statement_unsigned" });
     await settleSigned(engine, first.id);
@@ -188,9 +203,10 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
   });
 
   test("a candidate the collection resolved is not reset, and cannot be re-signed", async () => {
-    const { engine } = makeEngine();
+    const made = makeEngine();
+    const { engine } = made;
     engine.readMandatesFrom(cooling(3600));
-    const offer = await collected(engine);
+    const offer = await collected(made);
     const [coffee, tea, nori] = offer.candidates;
     const taken = await engine.withdrawDecisions(offer.id);
     // The collection's two verdicts stand; the third, which the collection
@@ -217,9 +233,10 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
   });
 
   test("a used box still settles only on the signature after the window", async () => {
-    const { engine } = makeEngine();
+    const made = makeEngine();
+    const { engine } = made;
     engine.readMandatesFrom(cooling(null));
-    const offer = await collected(engine);
+    const offer = await collected(made);
     await expect(engine.settle(offer.id)).rejects.toMatchObject({ code: "statement_unsigned" });
   });
 });
@@ -254,8 +271,9 @@ describe("§6.5: the block is a pressure the household can lift, and nobody else
   });
 
   test("the refusal names no offer at all", async () => {
-    const { engine } = makeEngine();
-    const first = await collected(engine, "house-quiet");
+    const made = makeEngine();
+    const { engine } = made;
+    const first = await collected(made, "house-quiet");
     const second = engine.createOffer(physical("house-quiet", [{ product: "nori-a" }, { product: "coffee-a" }]));
     await expect(engine.present(second.id)).rejects.toMatchObject({ code: "statement_unsigned" });
     try {
@@ -272,8 +290,9 @@ describe("§6.5: the block is a pressure the household can lift, and nobody else
     // merchant out of it; §16.3 records the same objection against an engine
     // computing a household's daily total. Narrowed on the founder's decision
     // of 2026-09-12.
-    const { engine } = makeEngine();
-    await collected(engine, "house-two-shops");
+    const made = makeEngine();
+    const { engine } = made;
+    await collected(made, "house-two-shops");
     // A second presenter, with its own key and its own catalogue.
     const other = generateKeyPairSync("ed25519");
     engine.registerIdentity(
@@ -302,8 +321,9 @@ describe("§6.5: the block is a pressure the household can lift, and nobody else
 
 describe("§6.5: the statement's bytes are its own", () => {
   test("a decided set's signature does not verify as a statement", async () => {
-    const { engine } = makeEngine();
-    const offer = await collected(engine, "house-tag");
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made, "house-tag");
     const lines = statementLines(engine.mustGet(offer.id), []);
     const asDecisions = canonicalDecisions(
       offer.id,
@@ -392,8 +412,9 @@ describe("§6.5, §14.2: a move carries what the route found", () => {
    * person lost.
    */
   test("without the rows the block lifts, and with them it holds", async () => {
-    const { engine: first } = makeEngine();
-    const offer = await collected(first, "house-moving");
+    const madeFirst = makeEngine();
+    const first = madeFirst.engine;
+    const offer = await collected(madeFirst, "house-moving");
     // The sending host blocks the next box.
     const next = first.createOffer(physical("house-moving", [{ product: "nori-a" }, { product: "coffee-a" }]));
     await expect(first.present(next.id)).rejects.toMatchObject({ code: "statement_unsigned" });
@@ -417,8 +438,9 @@ describe("§6.5, §14.2: a move carries what the route found", () => {
     // §14.2's rule for offers, for the same reason: a receiving host that
     // overwrote its own record of a collection would let whoever composed the
     // export decide what a box came back with.
-    const { engine } = makeEngine();
-    const offer = await collected(engine, "house-own-row");
+    const made = makeEngine();
+    const { engine } = made;
+    const offer = await collected(made, "house-own-row");
     const mine = engine.recoveries.for(offer.id)!;
     engine.recoveries.importRows([{ ...mine, consumed: [], returned: offer.candidates.map((c) => c.id) }]);
     expect(engine.recoveries.for(offer.id)!.consumed).toEqual(mine.consumed);

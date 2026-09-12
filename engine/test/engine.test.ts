@@ -275,7 +275,7 @@ describe("settlement", () => {
     // §6.2, clause 10. Two bases and no third: the cost of goods left the
     // model on 2026-09-09, when charging a household a cost basis was judged
     // to price the same goods two ways.
-    const { engine } = makeEngine();
+    const { engine, deliveries } = makeEngine();
     const offer = engine.createOffer(
       baseOffer(
         [
@@ -287,6 +287,9 @@ describe("settlement", () => {
       )
     );
     await engine.present(offer.id);
+    // §6.5. A box that was delivered and collected has a delivery record, and
+    // the statement renders the carriage from it.
+    deliveries.record({ offer: offer.id, carriage: 550, code: "dc-gift", status: "delivered" });
     // §11. Consumed is what the collection found, not a verdict.
     engine.recoveries.collect({
       offer: offer.id,
