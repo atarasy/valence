@@ -512,6 +512,30 @@ export class ValenceEngine {
     if (offer.expires_at <= now) {
       throw unprocessable("already_expired", "expires_at is in the past");
     }
+    // §10a.3. Every merchant named on this offer has a disclosure on it.
+    //
+    // **This is the point where refusing costs least**, and the first version
+    // of §10a refused at the decision instead. Its stated reason was that
+    // refusing at creation would let one merchant's omission stop a presenter
+    // offering anything at all, and a refutation pass on 2026-09-12 showed the
+    // reasoning backwards: refusing at creation costs the presenter one
+    // candidate, and refusing at the decision costs a household the whole
+    // signed set, because `decide` is all-or-nothing. The person had already
+    // read it, decided and signed.
+    //
+    // Presentation is the third option neither version considered. The offer
+    // is complete, the presenter is still the party acting, and the household
+    // has not seen anything yet. **The check at the decision stays**, because
+    // an offer imported under §14.2 never passed through this host's `present`.
+    for (const candidate of offer.candidates) {
+      const block = offer.disclosures.find((d) => d.merchant === candidate.merchant);
+      if (!block) {
+        throw unprocessable(
+          "disclosure_missing",
+          `${candidate.merchant} has no disclosure on this offer`
+        );
+      }
+    }
     // §6.4. The reserve is the upper bound of what this offer can ever settle
     // at: every candidate kept, at the frozen price.
     // Clauses 46 and 58. The mandate is checked at presentation: it has not

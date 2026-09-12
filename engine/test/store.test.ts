@@ -1,3 +1,4 @@
+import { MERCHANT_PAIR, disclosureFor } from "./helpers.js";
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,6 +78,13 @@ describe("a store is a map that writes through", () => {
       true
     );
     first.registerConfig(config, sign(null, canonicalConfig(config), pair.privateKey).toString("base64"));
+    // §10a.3. The merchant named on the candidates needs a disclosure, or the
+    // offer cannot be presented.
+    first.registerIdentity(
+      "maker-a",
+      MERCHANT_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString()
+    );
+    first.putDisclosure(disclosureFor("maker-a"));
     const offer = first.createOffer({
       binding: "digital",
       household: "house-restart",
