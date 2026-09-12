@@ -130,6 +130,25 @@ export class RecoveryLedger {
     return this.rows.get(offer);
   }
 
+  /**
+   * §14.2, §6.5. Take the rows a move carried.
+   *
+   * **A row this host already holds is never replaced**, for the reason
+   * §14.2 gives for offers: an import adds what the host does not have, and a
+   * receiving host that overwrote its own record of a collection would let
+   * whoever composed the export decide what a box came back with.
+   */
+  importRows(rows: readonly Recovery[]): void {
+    for (const row of rows) {
+      if (this.rows.has(row.offer)) continue;
+      this.rows.set(row.offer, {
+        ...row,
+        returned: [...row.returned],
+        consumed: [...row.consumed],
+      });
+    }
+  }
+
   /** Past the deadline and the grace period, with nothing collected. */
   overdue(offer: string, now: number): boolean {
     const row = this.rows.get(offer);

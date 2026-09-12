@@ -681,6 +681,10 @@ Tests are in the [Ataraxia](https://github.com/atarasy/ataraxia) repository. Pas
 
 A household moves its node by exporting it from one host and importing it at another (clauses 43, 52). The export carries the household's offers, settlements, notes, receipts and the lineage edges it is an endpoint of.
 
+**It also carries what the route found in each physical box**, as `collections`, one row per offer that has one: what came back, what was used, and when. The format's version is `valence-node/4` since 2026-09-12, because a host that does not know the field would drop it and the member would arrive apparently intact. **The field exists because a refutation pass asked what a move does to §6.5's block**, and the answer was that it lifted: the offers moved with their `consumed` valences, the rows saying a collection had happened did not, and the receiving host presented the next box freely while the sending host held a block over a household that had left. **The merchant's export carried those rows all along** (§14.1), so the shop kept what the person lost, which is the direction clause 43 exists against. **An import MUST NOT replace a row the receiving host already holds**, for §14.2's reason: an import adds what the host does not have, and a host that overwrote its own record of a collection would let whoever composed the export decide what a box came back with.
+
+**Two fields are one word apart and mean different things.** `recoveries` is clause 53's account-recovery log, which says who recovered a locked-out node and when. `collections` is §11's record of a physical box coming back. The first was in the export before the second and the names are kept as they are, because renaming a field in a moved format costs more than a sentence here.
+
 ### 14.1 A shop leaves with its ledgers
 
 Clauses 5 and 43 say a merchant can leave a platform with its data and that a shop's product ledger and customer ledger are the shop's, exportable in full, in a standard format, at any time. `GET /presenters/{id}/export` is that format:

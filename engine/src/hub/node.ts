@@ -32,7 +32,13 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * member arrives at the new host apparently intact and without their
  * protections.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/3";
+/**
+ * Bumped to /4 on 2026-09-12, when the collections joined it. A host on /3 has
+ * no field for them, and this project's own rule is that an unknown field is
+ * refused rather than dropped: a member who arrived at such a host would look
+ * intact and would carry no record that any box had been collected.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/4";
 
 export type NodeExport = {
   format: string;
@@ -64,6 +70,21 @@ export type NodeExport = {
    * to another host. Both halves are true and they come from different clauses.
    */
   recoveries: RecoveryRecord[];
+  /**
+   * §11, §6.5. What the route found in each of this household's physical
+   * boxes, and when. **Two names, one word**: `recoveries` above is clause
+   * 53's account-recovery log and this is the collection of goods, which is
+   * why the field is spelled out rather than shortened.
+   *
+   * It joined the export on 2026-09-12, when a refutation pass asked what a
+   * move does to the block of §6.5. The answer was that the block vanished:
+   * the offers moved with their `consumed` valences, the rows that say a
+   * collection happened did not, and the receiving host presented the next box
+   * freely while the sending host held a block over a household that had left.
+   * **The merchant's export carried the rows all along**, so the shop kept
+   * what the person lost, which is the direction clause 43 exists against.
+   */
+  collections: Recovery[];
   /** Clause 43. Every permission the person granted, revoked rows included. */
   permissions: Permission[];
   /** Clause 20. The duplicate checks written into the recipient's record. */
@@ -203,6 +224,9 @@ export function exportNode(
     lineage: engine.edgesTouching(household),
     receipts: engine.receiptsFor(household),
     recoveries: recovery.logFor(household),
+    collections: offers
+      .map((o) => engine.recoveries.for(o.id))
+      .filter((r): r is Recovery => r !== undefined),
     confirmations: engine.confirmationsFor(offers.map((o) => o.id)),
     ...permissions.exportFor(household),
     mandates: mandates.forHousehold(household),

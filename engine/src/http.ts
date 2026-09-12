@@ -1172,6 +1172,12 @@ async function route(
       // record of who had recovered their node, while every probe stayed green
       // because none of them asked.
       recovery.importLog(moving, body_.recoveries ?? []);
+      // §6.5, §11. What the route found in each physical box. Without it the
+      // moved offers keep their `consumed` valences and the receiving host has
+      // no record that a collection happened, so the block of §6.5 lifts on
+      // the move and the household's next box comes with a statement unsigned.
+      // Measured by a refutation pass on 2026-09-12.
+      engine.recoveries.importRows(body_.collections ?? []);
       // §10.5. Without this a move resets the one-use rule, and a confirmation
       // captured on the sending host decides the moved offer on this one.
       // Measured 2026-09-11 before the field existed.

@@ -313,3 +313,114 @@ describe("§6.5: the statement's bytes are its own", () => {
     expect(canonicalStatement(offer.id, lines).toString("utf8").startsWith("valence.statement.1\n")).toBe(true);
   });
 });
+
+describe("§6, §16.3: nothing is written on refusal, at the ledger as well", () => {
+  /**
+   * The commit used to run before the daily ceiling was asked. On a refusal
+   * the settlement was never written and the offer stayed `decided`, but the
+   * reservation was already committed, and `commit` is idempotent, so a
+   * second attempt returned the committed row and could not undo it. On an
+   * adapter that moves money the household had been charged for a settlement
+   * that does not exist. Found by a refutation pass on 2026-09-12.
+   */
+  const withCeiling = (daily: number) => ({
+    async get() {
+      return {
+        id: "mandate-1",
+        household: "house-ceiling",
+        ceiling_out_of_network: 1_000_000,
+        ceiling_daily: daily,
+        cooling_seconds: null,
+        co_signers: [],
+        lapses_at: Date.now() + 86_400_000,
+        version: 1,
+      } as never;
+    },
+  });
+
+  test("a settlement above the daily ceiling leaves the ledger holding, not committed", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(withCeiling(100));
+    const offer = engine.createOffer({
+      ...physical("house-ceiling", [{ product: "coffee-a" }, { product: "tea-b" }]),
+      binding: "digital" as const,
+    });
+    await engine.present(offer.id);
+    await decideSigned(
+      engine,
+      offer.id,
+      offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const }))
+    );
+    await expect(engine.settle(offer.id)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+    // The refusal is the whole of what happened: no settlement, and the hold
+    // is still a hold.
+    expect(engine.settlement(offer.id)).toBeUndefined();
+    const row = ledger.get(offer.id)!;
+    expect(row.status).toBe("held");
+    expect(row.committed).toBeNull();
+  });
+
+  test("under the ceiling it commits exactly what the settlement records", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(withCeiling(1_000_000));
+    const offer = engine.createOffer({
+      ...physical("house-ceiling", [{ product: "coffee-a" }, { product: "tea-b" }]),
+      binding: "digital" as const,
+    });
+    await engine.present(offer.id);
+    await decideSigned(
+      engine,
+      offer.id,
+      offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const }))
+    );
+    const settlement = await engine.settle(offer.id);
+    const row = ledger.get(offer.id)!;
+    expect(row.status).toBe("committed");
+    expect(row.committed).toBe(settlement.charged);
+  });
+});
+
+describe("§6.5, §14.2: a move carries what the route found", () => {
+  /**
+   * A refutation pass on 2026-09-12 asked what a host move does to §6.5's
+   * block, and the answer was that it lifted. The offers moved with their
+   * `consumed` valences; the rows saying a collection had happened did not,
+   * because the node export's `recoveries` is clause 53's account-recovery
+   * log and not this. The receiving host presented the next box freely while
+   * the sending host held a block over a household that had left. The
+   * merchant's export carried the rows all along, so the shop kept what the
+   * person lost.
+   */
+  test("without the rows the block lifts, and with them it holds", async () => {
+    const { engine: first } = makeEngine();
+    const offer = await collected(first, "house-moving");
+    // The sending host blocks the next box.
+    const next = first.createOffer(physical("house-moving", [{ product: "nori-a" }, { product: "coffee-a" }]));
+    await expect(first.present(next.id)).rejects.toMatchObject({ code: "statement_unsigned" });
+
+    // A move that carries the offers and not the collections: the receiving
+    // host has the `consumed` valences and no record of a collection.
+    const { engine: blind } = makeEngine();
+    blind.importOffer(first.mustGet(offer.id), "house-moving");
+    const atBlind = blind.createOffer(physical("house-moving", [{ product: "nori-a" }, { product: "coffee-a" }]));
+    expect((await blind.present(atBlind.id)).state).toBe("presented");
+
+    // The same move carrying them.
+    const { engine: second } = makeEngine();
+    second.importOffer(first.mustGet(offer.id), "house-moving");
+    second.recoveries.importRows([first.recoveries.for(offer.id)!]);
+    const atSecond = second.createOffer(physical("house-moving", [{ product: "nori-a" }, { product: "coffee-a" }]));
+    await expect(second.present(atSecond.id)).rejects.toMatchObject({ code: "statement_unsigned" });
+  });
+
+  test("an import never replaces a row this host already holds", async () => {
+    // §14.2's rule for offers, for the same reason: a receiving host that
+    // overwrote its own record of a collection would let whoever composed the
+    // export decide what a box came back with.
+    const { engine } = makeEngine();
+    const offer = await collected(engine, "house-own-row");
+    const mine = engine.recoveries.for(offer.id)!;
+    engine.recoveries.importRows([{ ...mine, consumed: [], returned: offer.candidates.map((c) => c.id) }]);
+    expect(engine.recoveries.for(offer.id)!.consumed).toEqual(mine.consumed);
+  });
+});

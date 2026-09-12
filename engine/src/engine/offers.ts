@@ -1015,16 +1015,20 @@ export class ValenceEngine {
     }
 
     const charged = kept + consumed;
-    if (charged > 0) {
-      await this.ledger.commit({ requestId: offer.id, amount: charged });
-    } else if (this.ledger.get(offer.id)) {
-      await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
-    }
 
     // §16.3. The daily ceiling is the household's own union across every
     // presenter, so it is summed here and read by nobody else: a presenter
     // learns that this settlement was refused, which is what it learns when a
     // household declines (clause 38).
+    //
+    // **It is asked before the ledger commits, and it used to be asked
+    // after.** §6 says nothing is written on refusal, and that was false at
+    // the ledger: the commit went through, the throw followed, the settlement
+    // was never written and the offer stayed `decided`, so a second attempt
+    // returned the already-committed row and could not undo it. On an adapter
+    // that moves money, the household had been charged by a settlement that
+    // does not exist. Found by a refutation pass on 2026-09-12; the reserve
+    // stays held on refusal, which is what the person's authorisation is for.
     if (mandate?.ceiling_daily != null) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
@@ -1039,6 +1043,15 @@ export class ValenceEngine {
         );
       }
     }
+
+    // Past every refusal, so what the ledger is told and what the settlement
+    // records are the same event.
+    if (charged > 0) {
+      await this.ledger.commit({ requestId: offer.id, amount: charged });
+    } else if (this.ledger.get(offer.id)) {
+      await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
+    }
+
     const settlement: Settlement = {
       offer: offer.id,
       settled_at: now,
