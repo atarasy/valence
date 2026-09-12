@@ -420,6 +420,8 @@ A conforming implementation does not have these routes. Their absence is checkab
    | `declined_before` | the household returned this product before, and the agent is not offering it again |
 
    An implementation MUST refuse a deliberation whose reason is not in this list, with `400`. Adding a rule is a change to this specification, which is what makes an agent's routing auditable: every exclusion a person sees names a rule they can read here.
+3b. **Disclose.** The screen a person decides on carries, for each merchant with a candidate in the offer, **a block of that merchant's own disclosure**, rendered as the merchant composed it. See §10a.
+
 4. **Decide.** Per candidate. One tap to confirm. At most one reminder (clause 33).
 5. **Sign.** The decided set is signed as an AP2 mandate, and `POST /offers/{id}/decisions` carries the signature beside the decisions (clause 35). What is signed is the set in this canonical shape, so a signature made by one hub verifies at any conforming endpoint:
 
@@ -460,6 +462,34 @@ A conforming implementation does not have these routes. Their absence is checkab
 Drafting from history alone converges on last week's order. The exploration floor is what prevents it; trial candidates are what fill the floor.
 
 ----
+
+
+----
+
+## 10a. The merchant's disclosure, which the hub renders and does not compose
+
+**Every jurisdiction makes a seller tell a buyer certain things before the buyer commits, and none of them makes the seller's software house tell them.** This specification does not say what those things are: the list is the seller's law and not this document's business, in the same way §5 publishes no exploration rate and §16.4 named no categories. What it says is **who composes the text, who may change it, and what happens when it is missing.**
+
+```
+disclosure
+  merchant     whose disclosure this is, matching a candidate's merchant
+  version      the merchant's own version of this text
+  items[]      label and value, in the merchant's own order
+  signature    by the merchant's registered key, over the canonical form
+```
+
+The canonical form is the merchant, the version, and then each item as `label` and `value`, **every part percent-encoded** before the separators join them, for the reason §8 and §16.1 escape theirs: a plain join lets whoever relays the block move the boundary between two fields under a signature that still verifies.
+
+**The requirements are four, and each is checkable.**
+
+1. **A disclosure is the merchant's.** An implementation MUST take it from the merchant's registered disclosure and MUST NOT take any part of it from the request that creates an offer or from the request that decides one. A field through which a caller can write a seller's legal text is the same defect as a field through which a caller can write a price (§3.1).
+2. **It is rendered as composed.** An implementation MUST return the items as the merchant signed them, in the merchant's order, without adding, removing, reordering, translating or summarising. **A hub that summarises a disclosure has composed one.**
+3. **A decision without one is refused.** `POST /offers/{id}/decisions` MUST refuse with `422` and the reason `disclosure_missing` when any candidate in the decided set names a merchant for which the offer carries no disclosure, or carries one whose signature does not verify.
+4. **The person sees it before they sign, not after.** It travels on the offer, so `GET /offers/{id}` carries it; an implementation that returns it only with a receipt has disclosed after the commitment, which is the one thing the requirement exists against.
+
+**Why this is here rather than in the merchant-side platform.** The duty is the seller's, and the surface is the person's agent's. A specification that left the join to each deployment would leave the person's agent free to decide what a seller's notice says, which is the shape clauses 1 and 44 remove from every other part of this system. **The hub is a contractor for rendering and never an agent for composing**, and clause 54 is satisfied because a party that renders a statutory notice is a party to no transaction.
+
+**What this does not do.** It does not check that a disclosure is complete, or true, or in the right language, because none of those is decidable here: the list is the seller's law. An implementation that carries an empty `items[]` signed by the merchant satisfies every requirement above and satisfies no statute anywhere. **That limit is written down rather than left to be discovered**, and it is the reason the block is signed: what a merchant disclosed is provable afterwards, which is what a regulator and a household both need.
 
 ## 11. Physical binding: recovery
 
@@ -533,8 +563,9 @@ An implementation is Valence-conformant when it:
 12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
 13. enforces the person's thresholds where each is enforced, and names the one that refused (§16.3 to §16.6)
 14. answers only for the surface it presents, and refuses the other with `not_this_role` (§13.1)
+15. carries each merchant's own disclosure on the offer, unaltered, and refuses a decision without one (§10a)
 
-Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent.
+Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent. **Condition 15 was added on 2026-09-12**, when three questions about where this system stands between a household and a merchant resolved into one answer: the seller composes what the seller must say, and the person's agent renders it.
 
 ### 13.1 Two roles, and what each is judged on
 
