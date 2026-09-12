@@ -728,6 +728,14 @@ export class ValenceEngine {
       // can: the suite cannot present a block signed by a key the host lacks
       // without importing an offer, which `exit/` does and `disclosure/` does
       // not. It is proven by `engine/test/` instead.
+    }
+    // **Every block on the offer is verified, not one per candidate.**
+    // §10a.5's product blocks reach the approval and the statement as the
+    // merchant's word, and the loop above finds only the standing text, so a
+    // product block that arrived by import signed for another product, or
+    // signed by nobody, was rendered unverified. Found by a refutation pass on
+    // 2026-09-12, hours after the product key was added.
+    for (const block of offer.disclosures) {
       const pem = this.identities.get(block.merchant);
       let ok = false;
       try {

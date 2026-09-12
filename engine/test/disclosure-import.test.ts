@@ -38,3 +38,41 @@ describe("§10a.3: an imported block signed by a key this host lacks", () => {
     await expect(engine.decide(offer.id, decisions, signature)).rejects.toThrow(/does not verify/);
   });
 });
+
+/**
+ * §10a.5, the same half for a product block.
+ *
+ * A product block reaches the approval and the settlement statement as the
+ * merchant's word. The check at the decision found the standing text per
+ * candidate and verified that one only, so a product block an import carried,
+ * signed for another product or signed by nobody, was rendered unverified.
+ * Found by a refutation pass on 2026-09-12, hours after the key was added.
+ */
+describe("§10a.5: an imported product block signed by a key this host lacks", () => {
+  test("a decision on the offer is refused", async () => {
+    const { engine } = makeEngine();
+    const offer = await engine.createOffer({
+      binding: "digital",
+      household: "household-2",
+      purpose: "replenish",
+      config_version: CONFIG_VERSION,
+      expires_at: Date.now() + 3_600_000,
+      mandate: "mandate-1",
+      price_band: null,
+      giver: null,
+      candidates: [{ product: "tea-a", quantity: 1, is_exploration: true }],
+    } as never);
+    await engine.present(offer.id);
+
+    // The standing text is this host's own and verifies. Beside it, a product
+    // block of the shape a sending host would have frozen on.
+    offer.disclosures = [
+      disclosureFor("maker-a"),
+      { ...disclosureFor("maker-a", "tea-a"), signature: "AAAA" },
+    ];
+
+    const decisions = [{ candidate: offer.candidates[0]!.id, valence: "kept" as const, kept_as: "self" as const }];
+    const signature = sign(null, canonicalDecisions(offer.id, decisions), MANDATE_PAIR.privateKey).toString("base64");
+    await expect(engine.decide(offer.id, decisions, signature)).rejects.toThrow(/does not verify/);
+  });
+});
