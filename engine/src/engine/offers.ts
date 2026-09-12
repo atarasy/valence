@@ -1040,7 +1040,8 @@ export class ValenceEngine {
       // definition been delivered and collected, so there is a delivery to
       // record. Added 2026-09-12 after a sufficiency pass found the screen
       // rendering null with nothing refusing.
-      if ((await this.deliverySource.find(offer.id)) === undefined) {
+      const carried = await this.deliverySource.find(offer.id);
+      if (carried === undefined) {
         throw unprocessable(
           "delivery_missing",
           "a physical box with goods used settles on a statement, and the statement carries the carriage from the delivery record (§6.5, §7.5b)"
@@ -1051,7 +1052,9 @@ export class ValenceEngine {
         throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
       }
       const lines = statementLines(offer, disputed);
-      const bytes = canonicalStatement(offer.id, lines);
+      // §6.5, question 40. The carriage is inside what the household signed,
+      // so a signature made against a different figure no longer verifies.
+      const bytes = canonicalStatement(offer.id, carried.carriage, lines);
       const sent = confirmation.signed;
       if (!sent) {
         throw unprocessable(

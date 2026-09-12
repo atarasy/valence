@@ -82,6 +82,12 @@ export function renderStatement(offer: Offer, delivery: Delivery | undefined): S
       signature: d.signature,
     })),
     carriage: delivery ? delivery.carriage : null,
-    challenge: challengeForStatement(offer.id, proposed),
+    // §6.5. The same bytes `settle` will verify, so the carriage the screen
+    // shows is the carriage the challenge covers. A statement is rendered only
+    // for a box that has one; `renderStatement` is also called before a
+    // delivery exists on other paths, where 0 stands for "nothing recorded"
+    // and no signature over it can settle anything, because `settle` refuses
+    // first with `delivery_missing`.
+    challenge: challengeForStatement(offer.id, delivery ? delivery.carriage : 0, proposed),
   };
 }

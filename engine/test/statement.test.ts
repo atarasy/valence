@@ -71,11 +71,11 @@ describe("§6.5: a physical box with goods used settles on the household's signa
     const offer = await collected(made);
     const lines = statementLines(offer, []);
     const stranger = generateKeyPairSync("ed25519");
-    const forged = sign(null, canonicalStatement(offer.id, lines), stranger.privateKey).toString("base64");
+    const forged = sign(null, canonicalStatement(offer.id, 550, lines), stranger.privateKey).toString("base64");
     await expect(engine.settle(offer.id, Date.now(), { signed: { signature: forged } })).rejects.toMatchObject({ code: "bad_signature" });
     // The right key over a statement that disputes a line, sent without the
     // dispute: the bytes differ and the signature does not cover what is sent.
-    const other = sign(null, canonicalStatement(offer.id, statementLines(offer, [offer.candidates[0]!.id])), MANDATE_PAIR.privateKey).toString("base64");
+    const other = sign(null, canonicalStatement(offer.id, 550, statementLines(offer, [offer.candidates[0]!.id])), MANDATE_PAIR.privateKey).toString("base64");
     await expect(engine.settle(offer.id, Date.now(), { signed: { signature: other } })).rejects.toMatchObject({ code: "bad_signature" });
   });
 
@@ -338,8 +338,8 @@ describe("§6.5: the statement's bytes are its own", () => {
       offer.id,
       lines.map((l) => ({ candidate: l.candidate, valence: l.valence as never }))
     );
-    expect(canonicalStatement(offer.id, lines).equals(asDecisions)).toBe(false);
-    expect(canonicalStatement(offer.id, lines).toString("utf8").startsWith("valence.statement.1\n")).toBe(true);
+    expect(canonicalStatement(offer.id, 550, lines).equals(asDecisions)).toBe(false);
+    expect(canonicalStatement(offer.id, 550, lines).toString("utf8").startsWith("valence.statement.1\n")).toBe(true);
   });
 });
 
@@ -588,6 +588,26 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
     await engine.present(offer.id);
     // coffee-a at 1500, and the gift at nothing.
     expect(ledger.get(offer.id)!.reserved).toBe(1500);
+  });
+
+  test("a signature against one carriage does not settle a box recorded at another", async () => {
+    // §6.5, question 40, decided 2026-09-13. The carriage is the one item
+    // 法11条1号 puts on this screen beside the price, and the signature covered
+    // the lines and not it: a household read a figure, signed, and had no
+    // record anywhere that it had.
+    const made = makeEngine();
+    const offer = await collected(made, "house-carriage-signed");
+    const lines = statementLines(made.engine.mustGet(offer.id), []);
+    // The box was delivered at 550. A signature over 0 is a signature over a
+    // screen nobody was shown.
+    const wrong = sign(null, canonicalStatement(offer.id, 0, lines), MANDATE_PAIR.privateKey).toString("base64");
+    await expect(
+      made.engine.settle(offer.id, Date.now(), { signed: { signature: wrong } })
+    ).rejects.toMatchObject({ code: "bad_signature" });
+    // And the figure that was recorded settles it.
+    const right = sign(null, canonicalStatement(offer.id, 550, lines), MANDATE_PAIR.privateKey).toString("base64");
+    const settlement = await made.engine.settle(offer.id, Date.now(), { signed: { signature: right } });
+    expect(settlement.charged).toBe(1500 + 900);
   });
 
   test("a delivery update may move the status and may not move the carriage", async () => {

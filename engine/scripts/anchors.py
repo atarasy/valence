@@ -53,9 +53,21 @@ def static_drift(scripts: list[pathlib.Path]) -> list[tuple[str, str]]:
         if not source.exists():
             continue
         body = source.read_text()
-        names = {k: eval(v) for k, v in ASSIGNED.findall(text)}
+        names = {}
+        for k, v in ASSIGNED.findall(text):
+            # A literal this cannot parse is skipped rather than raised on: the
+            # check exists to name drift, and a crash here would stop it naming
+            # any. Measured 2026-09-13, when a hand edit left a string open and
+            # the whole run died instead of reporting 295 scripts.
+            try:
+                names[k] = eval(v)
+            except SyntaxError:
+                continue
         for raw in REPLACE.findall(text):
-            anchor = names.get(raw) if raw.isidentifier() else eval(raw)
+            try:
+                anchor = names.get(raw) if raw.isidentifier() else eval(raw)
+            except SyntaxError:
+                continue
             if anchor is None or not isinstance(anchor, str) or not anchor.strip():
                 continue
             if anchor not in body:

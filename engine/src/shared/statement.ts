@@ -62,16 +62,30 @@ export function statementLines(offer: Offer, disputed: readonly string[]): State
 
 export const STATEMENT_DOMAIN = "valence.statement.1";
 
-export function canonicalStatement(offerId: string, lines: readonly StatementLine[]): Buffer {
+export function canonicalStatement(
+  offerId: string,
+  // §6.5, §7.5b, 法11条1号, question 40 decided 2026-09-13. **The one item the
+  // statute puts on this screen beside the price, and the signature covered
+  // the lines and not it**: a household read a carriage, signed, and had no
+  // record anywhere that it had. It is a whole number and never null here,
+  // because `settle` refuses a statement with no delivery recorded, so the
+  // `null` that means "nothing was ever recorded" cannot reach these bytes.
+  carriage: number,
+  lines: readonly StatementLine[]
+): Buffer {
   const body = [...lines]
     .sort((a, b) => (a.candidate < b.candidate ? -1 : a.candidate > b.candidate ? 1 : 0))
     .map((l) => `${l.candidate}:${l.valence}:${l.amount}:${l.disputed ? "disputed" : ""}`);
-  return Buffer.from([STATEMENT_DOMAIN, offerId, ...body].join("\n"), "utf8");
+  return Buffer.from([STATEMENT_DOMAIN, offerId, String(carriage), ...body].join("\n"), "utf8");
 }
 
 /** §10.5's challenge form of the same bytes, for a passkey. */
-export function challengeForStatement(offerId: string, lines: readonly StatementLine[]): string {
-  return challengeForBytes(canonicalStatement(offerId, lines));
+export function challengeForStatement(
+  offerId: string,
+  carriage: number,
+  lines: readonly StatementLine[]
+): string {
+  return challengeForBytes(canonicalStatement(offerId, carriage, lines));
 }
 
 /**

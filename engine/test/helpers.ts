@@ -29,7 +29,11 @@ export async function settleSigned(
 ) {
   const offer = engine.mustGet(offerId, now);
   const lines = statementLines(offer, disputed);
-  const signature = sign(null, canonicalStatement(offerId, lines), MANDATE_PAIR.privateKey).toString("base64");
+  // §6.5, question 40. The carriage is inside the bytes, and the helper reads
+  // it where the screen does rather than being told it, so a test that records
+  // a different figure signs the figure it recorded.
+  const carried = await engine.deliveryFor(offerId);
+  const signature = sign(null, canonicalStatement(offerId, carried ? carried.carriage : 0, lines), MANDATE_PAIR.privateKey).toString("base64");
   return await engine.settle(offerId, now, { signed: { signature }, disputed });
 }
 
