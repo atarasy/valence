@@ -563,7 +563,7 @@ An implementation is Valence-conformant when it:
 12. records a mandate only with the signatures its change needs, and refuses an offer over the ceiling or on a lapsed mandate (§16)
 13. enforces the person's thresholds where each is enforced, and names the one that refused (§16.3 to §16.6)
 14. answers only for the surface it presents, and refuses the other with `not_this_role` (§13.1)
-15. carries each merchant's own disclosure on the offer, unaltered, and refuses a decision without one (§10a)
+15. carries each merchant's own disclosure on the offer and on the approval surface, unaltered, and refuses a decision without one (§10a). **This condition binds the engine's role, and the surface a person signs from is the hub's**: a hub-only implementation is asked nothing here, which is a gap in §13.1's split rather than in this condition, and it is named in `10` §3 question 35 rather than papered over
 
 Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent. **Condition 15 was added on 2026-09-12**, when three questions about where this system stands between a household and a merchant resolved into one answer: the seller composes what the seller must say, and the person's agent renders it.
 
