@@ -74,6 +74,13 @@ export type Approval = {
    */
   disclosures: {
     merchant: string;
+    /**
+     * §10a.5. Null for the merchant's standing text; a product reference for
+     * a block about that product alone, which the hub renders beside that
+     * product's line, its items prevailing over the standing text's where a
+     * label appears in both. Question 35, taken 2026-09-12.
+     */
+    product: string | null;
     version: string;
     items: { label: string; value: string }[];
     signature: string;
@@ -186,6 +193,7 @@ export class ApprovalDesk {
       // order, which is why this copies rather than sorts.
       disclosures: offer.disclosures.map((d) => ({
         merchant: d.merchant,
+        product: d.product,
         version: d.version,
         items: d.items.map((i) => ({ label: i.label, value: i.value })),
         signature: d.signature,

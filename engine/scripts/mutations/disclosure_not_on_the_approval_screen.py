@@ -6,9 +6,11 @@ import pathlib
 # was satisfied on a surface nobody signs from and the probe that checked it
 # was looking at the wrong one. Found on 2026-09-12, hours after the section
 # was written, by asking whether the surface guarded is the surface used.
+# Re-anchored 2026-09-12 (evening), when the block gained a product key (question 35).
 p = pathlib.Path("src/hub/approval.ts"); s = p.read_text()
 old = """      disclosures: offer.disclosures.map((d) => ({
         merchant: d.merchant,
+        product: d.product,
         version: d.version,
         items: d.items.map((i) => ({ label: i.label, value: i.value })),
         signature: d.signature,

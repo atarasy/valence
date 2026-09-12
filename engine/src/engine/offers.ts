@@ -2,7 +2,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
-import { verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
+import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
+import { canonicalStatement, needsStatement, statementLines } from "../shared/statement.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -11,6 +12,7 @@ import {
   verifyDecisionAssertion,
   verifyPersonal,
   type Assertion,
+  type PersonalSignature,
 } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
@@ -264,7 +266,10 @@ export class ValenceEngine {
       throw unprocessable("bad_signature", `this disclosure is not signed by ${d.merchant}`);
     }
     const stored: Disclosure = { ...d, items: d.items.map((i) => ({ ...i })) };
-    this.disclosures.set(d.merchant, stored);
+    // §10a.5. A product block sits beside the merchant's standing text and
+    // never in its place: a block for one product filed under the merchant
+    // would replace the terms every other product is shown.
+    this.disclosures.set(disclosureKey(d.merchant, d.product), stored);
     return stored;
   }
 
@@ -491,9 +496,16 @@ export class ValenceEngine {
       disclosures: [
         ...new Map(
           candidates
-            .map((c) => this.disclosures.get(c.merchant))
+            // §10a.5. The merchant's standing text, and beside it the block
+            // for this product where the merchant registered one. The
+            // product block carries only what differs, and the screen
+            // renders it beside that product's line and nothing else.
+            .flatMap((c) => [
+              this.disclosures.get(disclosureKey(c.merchant, null)),
+              this.disclosures.get(disclosureKey(c.merchant, c.product)),
+            ])
             .filter((d): d is Disclosure => d !== undefined)
-            .map((d) => [d.merchant, d] as const)
+            .map((d) => [disclosureKey(d.merchant, d.product), d] as const)
         ).values(),
       ],
       reminders_sent: 0,
@@ -528,11 +540,27 @@ export class ValenceEngine {
     // has not seen anything yet. **The check at the decision stays**, because
     // an offer imported under §14.2 never passed through this host's `present`.
     for (const candidate of offer.candidates) {
-      const block = offer.disclosures.find((d) => d.merchant === candidate.merchant);
+      const block = offer.disclosures.find(
+        (d) => d.merchant === candidate.merchant && d.product === null
+      );
       if (!block) {
         throw unprocessable(
           "disclosure_missing",
           `${candidate.merchant} has no disclosure on this offer`
+        );
+      }
+    }
+    // §6.5, §11.2. The next box does not come while the last one's statement
+    // stands unsigned. Question 36: a household whose collection found goods
+    // used owes a signature over that statement before anything is charged,
+    // and the weekly swap is the only pressure this specification puts on it.
+    // Nothing accrues on the rail; what is owed is the merchant's to pursue.
+    if (offer.binding === "physical") {
+      const unsigned = this.unsignedStatementFor(offer.household, offer.id);
+      if (unsigned) {
+        throw unprocessable(
+          "statement_unsigned",
+          `offer ${unsigned} was collected with goods used and its settlement statement is not signed`
         );
       }
     }
@@ -676,7 +704,11 @@ export class ValenceEngine {
     // block, and refusing at creation would let one merchant's omission stop a
     // presenter from offering anything at all.
     for (const { candidate } of plan) {
-      const block = offer.disclosures.find((d) => d.merchant === candidate.merchant);
+      // §10a.5. The merchant's standing text is what is required; a product
+      // block sits beside it and never stands in for it.
+      const block = offer.disclosures.find(
+        (d) => d.merchant === candidate.merchant && d.product === null
+      );
       if (!block) {
         throw unprocessable(
           "disclosure_missing",
@@ -811,12 +843,76 @@ export class ValenceEngine {
     return this.commit(offer);
   }
 
-  async settle(offerId: string, now = Date.now()): Promise<Settlement> {
+  /**
+   * §6.5. An earlier physical offer of this household whose collection found
+   * goods used and whose statement nobody has signed, or null.
+   */
+  private unsignedStatementFor(household: string, except: string): string | null {
+    for (const other of this.offers.values()) {
+      if (other.id === except || other.household !== household) continue;
+      if (other.binding !== "physical" || this.settlements.has(other.id)) continue;
+      const recovery = this.recoveries.for(other.id);
+      if (recovery && recovery.collected_at !== null && recovery.consumed.length > 0) {
+        return other.id;
+      }
+    }
+    return null;
+  }
+
+  async settle(
+    offerId: string,
+    now = Date.now(),
+    // §6.5. The household's signature over the statement, and the consumed
+    // lines it disputes. Both are absent for the digital binding and for a
+    // physical box that came back with nothing used.
+    confirmation: { signed?: PersonalSignature; disputed?: string[] } = {}
+  ): Promise<Settlement> {
     const offer = this.mustGet(offerId, now);
     const existing = this.settlements.get(offer.id);
     if (existing) return existing;
     if (offer.state !== "decided" && offer.state !== "expired") {
       throw conflict("bad_state", `cannot settle an offer in ${offer.state}`);
+    }
+    const disputed = confirmation.disputed ?? [];
+    for (const id of disputed) {
+      const candidate = offer.candidates.find((c) => c.id === id);
+      if (!candidate) throw notFound(`no candidate ${id} in this offer`);
+      // A household disputes the collection's verdict and nothing else: a
+      // kept line is one it signed itself at the decision.
+      if (candidate.valence !== "consumed") {
+        throw unprocessable(
+          "not_disputable",
+          `candidate ${id} is ${candidate.valence}; only a consumed line can be disputed`
+        );
+      }
+    }
+    // Question 36, decided 2026-09-12. The collection's record is a proposal,
+    // and the household's signature over the settlement statement is what
+    // makes a consumed line a purchase. A physical box with goods used
+    // settles on that signature or not at all; the household still cannot
+    // choose the verdict (§11.2), only confirm the collection's or dispute a
+    // line of it.
+    let signed: string | null = null;
+    if (needsStatement(offer)) {
+      const householdKey = this.identities.get(offer.mandate);
+      if (!householdKey) {
+        throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
+      }
+      const lines = statementLines(offer, disputed);
+      const bytes = canonicalStatement(offer.id, lines);
+      const sent = confirmation.signed;
+      if (!sent) {
+        throw unprocessable(
+          "statement_unsigned",
+          "a physical box with goods used settles on the household's signature over its statement"
+        );
+      }
+      if (!verifyPersonal(bytes, sent, householdKey, this.config.relyingPartyId)) {
+        throw unprocessable("bad_signature", "the signature does not cover this settlement statement");
+      }
+      signed = "signature" in sent ? sent.signature : sent.assertion.signature;
+    } else if (disputed.length > 0) {
+      throw unprocessable("not_disputable", "nothing in this settlement was recorded by a collection");
     }
     // §16.5 and §16.3. Both refusals name themselves: four refusals in this
     // section share a status code, and a `422` that says only "unprocessable"
@@ -834,6 +930,7 @@ export class ValenceEngine {
 
     let kept = 0;
     let consumed = 0;
+    let disputedAmount = 0;
     let lost = 0;
     const config = this.configs.get(offer.config_version);
     if (!config) {
@@ -845,8 +942,8 @@ export class ValenceEngine {
       );
     }
     const lines: SettlementLine[] = [];
-    const line = (c: Candidate, amount: number) =>
-      lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, maker: c.maker, ships: c.ships, valence: c.valence, amount });
+    const line = (c: Candidate, amount: number, isDisputed = false) =>
+      lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, maker: c.maker, ships: c.ships, valence: c.valence, amount, disputed: isDisputed });
     for (const c of offer.candidates) {
       if (c.valence === "kept" || c.valence === "defaulted") {
         kept += c.unit_price * c.quantity;
@@ -855,8 +952,15 @@ export class ValenceEngine {
         // §6.2. A gift is never billed to the person who received it; anything
         // else used is bought at the merchant's price. No cost basis exists.
         const amount = c.given_by ? 0 : c.unit_price * c.quantity;
-        consumed += amount;
-        line(c, amount);
+        if (disputed.includes(c.id)) {
+          // §6.5. A disputed line leaves the rail: it is not charged, and
+          // what is owed for it is between the merchant and the household.
+          disputedAmount += amount;
+          line(c, amount, true);
+        } else {
+          consumed += amount;
+          line(c, amount);
+        }
       } else if (c.valence === "lost") {
         lost += c.unit_price * c.quantity;
         line(c, c.unit_price * c.quantity);
@@ -893,10 +997,15 @@ export class ValenceEngine {
       settled_at: now,
       kept_amount: kept,
       consumed_amount: consumed,
+      // §6.5. Not charged here; the merchant's to pursue outside the rail.
+      disputed_amount: disputedAmount,
       // §3.2. Reported so the stock holder can see it. Not in `charged`.
       lost_amount: lost,
       charged,
       lines,
+      // §6.5. The household's signature over the statement, where one was
+      // needed. Null for the digital binding and for a box with nothing used.
+      confirmation: signed,
       payer: offer.giver ?? offer.household,
       // Clause 11. The presenter is not the seller; it signs for the
       // merchants named on the lines, as their disclosed agent.

@@ -132,6 +132,7 @@ for (const merchant of ["maker-a", "maker-b"]) {
   });
   const body = {
     merchant,
+    product: null,
     version: "d-1",
     items: [
       { label: "payment", value: "charged when the household confirms" },
@@ -146,6 +147,24 @@ for (const merchant of ["maker-a", "maker-b"]) {
   await post("/_disclosures", block);
   if (merchant === "maker-a") firstDisclosure = JSON.stringify(block);
 }
+// §10a.5. One product of the first merchant carries a block of its own, with
+// the one item that differs for it (question 35, taken 2026-09-12). The probes
+// compare what an offer holding that product carries against this, and check
+// that an offer without it does not carry it.
+const productDisclosure = (() => {
+  const pair = pairFor("merchant:maker-a");
+  const body = {
+    merchant: "maker-a",
+    product: "tea-a",
+    version: "d-1-tea-a",
+    items: [{ label: "returns", value: "eight days from delivery for this product" }],
+  };
+  return {
+    ...body,
+    signature: sign(null, canonicalDisclosure(body), pair.privateKey).toString("base64"),
+  };
+})();
+await post("/_disclosures", productDisclosure);
 
 const postConfig = async (config: Parameters<typeof canonicalConfig>[0] & Record<string, unknown>) =>
   post("/_presenter/configs", {
@@ -452,3 +471,6 @@ console.log(
 console.log(firstDisclosure);
 console.log("undisclosed-a");
 console.log("cfg-conformance-undisclosed");
+// §10a.5. The product block, ninth, for the probes that check it is carried
+// only where its product is.
+console.log(JSON.stringify(productDisclosure));

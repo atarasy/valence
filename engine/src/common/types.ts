@@ -218,6 +218,13 @@ export type Settlement = {
    */
   charged: number;
   /**
+   * §6.5. The consumed lines the household disputed, at the price the
+   * collection's record would have charged. Not in `charged`: a disputed line
+   * leaves the rail, and what is owed for it is the merchant's to pursue
+   * under the framework contract. Question 36, decided 2026-09-12.
+   */
+  disputed_amount: number;
+  /**
    * Clause 11. One line per candidate that was charged or lost, each naming
    * its merchant of record. The presenter signs the receipt as the
    * merchants' disclosed agent, which is what `signed_as` records.
@@ -228,6 +235,13 @@ export type Settlement = {
   signed_by: string;
   signed_as: "agent";
   receipt: string;
+  /**
+   * §6.5. The household's signature over the settlement statement, where the
+   * collection found goods used; null for the digital binding and for a box
+   * that came back with nothing used. It is what makes a consumed line an
+   * application rather than a third party's record.
+   */
+  confirmation: string | null;
 };
 
 export type SettlementLine = {
@@ -239,6 +253,8 @@ export type SettlementLine = {
   ships: string;
   valence: Valence;
   amount: number;
+  /** §6.5. A consumed line the household did not confirm. Not charged. */
+  disputed: boolean;
 };
 
 export type LineageKind = "gift" | "return" | "regift" | "thanks";
