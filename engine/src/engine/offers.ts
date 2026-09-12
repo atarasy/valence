@@ -550,18 +550,21 @@ export class ValenceEngine {
         );
       }
     }
-    // §6.5, §11.2. The next box does not come while the last one's statement
-    // stands unsigned. Question 36: a household whose collection found goods
-    // used owes a signature over that statement before anything is charged,
-    // and the weekly swap is the only pressure this specification puts on it.
-    // Nothing accrues on the rail; what is owed is the merchant's to pursue.
-    if (offer.binding === "physical" && this.hasUnsignedStatement(offer.household, offer.id)) {
-      // The refusal names nothing. Naming the waiting offer told one presenter
-      // another's offer id, and `GET /offers/{id}` then served it: products,
-      // prices, merchant and which lines that household used. Clause 8.
+    // §6.5, §11.2. **This presenter's** next box does not come while its last
+    // one's statement stands unsigned. A household whose collection found
+    // goods used owes a signature over that statement before anything is
+    // charged, and the weekly swap is the only pressure this specification
+    // puts on it. Nothing accrues on the rail.
+    if (
+      offer.binding === "physical" &&
+      this.hasUnsignedStatement(offer.household, offer.presenter, offer.id)
+    ) {
+      // The refusal names nothing. Naming the waiting offer put an id in a
+      // message, and the message is now about this presenter's own offer
+      // anyway, so there is nothing here another party could learn.
       throw unprocessable(
         "statement_unsigned",
-        "an earlier box for this household was collected with goods used and its settlement statement is not signed"
+        "an earlier box this presenter sent was collected with goods used and its settlement statement is not signed"
       );
     }
     // §6.4. The reserve is the upper bound of what this offer can ever settle
@@ -865,25 +868,34 @@ export class ValenceEngine {
   }
 
   /**
-   * §6.5. Whether an earlier physical offer of this household is waiting for
-   * a statement the household could sign now.
+   * §6.5. Whether **this presenter** has an earlier physical offer to this
+   * household that is waiting for a statement the household could sign now.
+   *
+   * **The scope is the presenter's own offers, and that is a constitutional
+   * requirement rather than a convenience.** Clause 8: a merchant holds what
+   * was declined to it and nothing declined elsewhere, and no party but the
+   * person holds the union. A block computed across presenters is an engine
+   * computing that union and answering a merchant out of it, which is the same
+   * objection §16.3 records against the daily ceiling. Suppressing the offer
+   * id in the refusal does not cure it: what leaks is the fact that something
+   * is unsettled elsewhere, and only the narrower scope removes it. It is also
+   * the only version that means the same thing on a split deployment, where
+   * each engine holds its own offers and a cross-presenter block silently
+   * reaches nothing. Narrowed 2026-09-12 on the founder's decision, after a
+   * refutation pass measured the leak.
    *
    * **Only an offer the household can actually settle counts**, which is one
-   * in `decided` or `expired`. A refutation pass on 2026-09-12 measured both
-   * ends of the alternative. An offer still `presented` after a partial
-   * collection refuses `settle` with `409`, so a block that counted it was one
-   * the household was forbidden to cure. And a presenter that withdrew such an
-   * offer left it unsettleable forever, so the block never lifted and that
-   * household could be offered no physical box by anyone, on this engine, for
-   * good.
-   *
-   * It returns a boolean and never an id. The caller is a presenter, and the
-   * id would be another presenter's (clause 8, and §16.3's rule that a refusal
-   * says only that it refused).
+   * in `decided` or `expired`. A refutation pass measured both ends of the
+   * alternative. An offer still `presented` after a partial collection refuses
+   * `settle` with `409`, so a block that counted it was one the household was
+   * forbidden to cure. And a presenter that withdrew such an offer left it
+   * unsettleable forever, so the block never lifted and that household could
+   * be offered no physical box by anyone, on this engine, for good.
    */
-  private hasUnsignedStatement(household: string, except: string): boolean {
+  private hasUnsignedStatement(household: string, presenter: string, except: string): boolean {
     for (const other of this.offers.values()) {
       if (other.id === except || other.household !== household) continue;
+      if (other.presenter !== presenter) continue;
       if (other.binding !== "physical" || this.settlements.has(other.id)) continue;
       if (other.state !== "decided" && other.state !== "expired") continue;
       const recovery = this.recoveries.for(other.id);

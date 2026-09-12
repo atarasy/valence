@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { CONFIG_VERSION, HOUR, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, makeEngine, settleSigned, decideSigned, disclosureFor, signConfig } from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
+import { canonicalConfig } from "../src/engine/offers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import { canonicalDisclosure, verifyDisclosure } from "../src/shared/disclosure.js";
 
@@ -252,7 +253,7 @@ describe("§6.5: the block is a pressure the household can lift, and nobody else
     expect((await engine.present(second.id)).state).toBe("presented");
   });
 
-  test("the refusal names no other offer", async () => {
+  test("the refusal names no offer at all", async () => {
     const { engine } = makeEngine();
     const first = await collected(engine, "house-quiet");
     const second = engine.createOffer(physical("house-quiet", [{ product: "nori-a" }, { product: "coffee-a" }]));
@@ -262,6 +263,40 @@ describe("§6.5: the block is a pressure the household can lift, and nobody else
     } catch (err) {
       expect((err as Error).message).not.toContain(first.id);
     }
+  });
+
+  test("another presenter's box is not blocked (clause 8)", async () => {
+    // The block is the presenter's own view of its own offers, which is what
+    // clause 8 gives a merchant. A block across presenters is an engine
+    // computing the union clause 8 gives the person alone, and answering a
+    // merchant out of it; §16.3 records the same objection against an engine
+    // computing a household's daily total. Narrowed on the founder's decision
+    // of 2026-09-12.
+    const { engine } = makeEngine();
+    await collected(engine, "house-two-shops");
+    // A second presenter, with its own key and its own catalogue.
+    const other = generateKeyPairSync("ed25519");
+    engine.registerIdentity(
+      "merchant-2",
+      other.publicKey.export({ type: "spki", format: "pem" }).toString(),
+      true
+    );
+    const config = {
+      version: "cfg-second-presenter",
+      presenter: "merchant-2",
+      products: {
+        "salt-a": { merchant: "maker-b", maker: "made-by-salt", ships: "carrier-b", price: 500, physical: PHYSICAL },
+        "salt-b": { merchant: "maker-b", maker: "made-by-salt", ships: "carrier-b", price: 600, physical: PHYSICAL },
+      },
+    };
+    engine.registerConfig(config, sign(null, canonicalConfig(config as never), other.privateKey).toString("base64"));
+    engine.registerIdentity("maker-b", MERCHANT_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
+    engine.putDisclosure(disclosureFor("maker-b"));
+    const theirs = engine.createOffer({
+      ...physical("house-two-shops", [{ product: "salt-a" }, { product: "salt-b" }]),
+      config_version: "cfg-second-presenter",
+    });
+    expect((await engine.present(theirs.id)).state).toBe("presented");
   });
 });
 

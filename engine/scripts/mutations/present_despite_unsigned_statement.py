@@ -5,9 +5,10 @@ import pathlib
 # keeps delivering accrues a claim the rail cannot collect and the household
 # never confirmed.
 
-# Re-anchored 2026-09-12 (night), when the scan was renamed and stopped naming the waiting offer.
+# Re-anchored twice on 2026-09-12: when the scan was renamed and stopped naming
+# the waiting offer, and when its scope narrowed to the presenter's own boxes.
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-a = "    if (offer.binding === \"physical\" && this.hasUnsignedStatement(offer.household, offer.id)) {"
+a = "      this.hasUnsignedStatement(offer.household, offer.presenter, offer.id)"
 assert a in s, "offers.ts hasUnsignedStatement anchor has drifted"
-s = s.replace(a, "    if (false) {", 1)
+s = s.replace(a, "      false", 1)
 p.write_text(s)
