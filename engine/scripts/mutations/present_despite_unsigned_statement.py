@@ -5,8 +5,9 @@ import pathlib
 # keeps delivering accrues a claim the rail cannot collect and the household
 # never confirmed.
 
+# Re-anchored 2026-09-12 (night), when the scan was renamed and stopped naming the waiting offer.
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-a = "      const unsigned = this.unsignedStatementFor(offer.household, offer.id);"
-assert a in s, "offers.ts unsignedStatementFor anchor has drifted"
-s = s.replace(a, "      const unsigned = null as string | null;", 1)
+a = "    if (offer.binding === \"physical\" && this.hasUnsignedStatement(offer.household, offer.id)) {"
+assert a in s, "offers.ts hasUnsignedStatement anchor has drifted"
+s = s.replace(a, "    if (false) {", 1)
 p.write_text(s)

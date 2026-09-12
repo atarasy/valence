@@ -17,10 +17,20 @@ import { challengeForBytes } from "./decisions.js";
  * What is signed, in this canonical shape, so a signature made by one hub
  * verifies at any conforming endpoint:
  *
+ *   valence.statement.1
  *   <offer id>
  *   <candidate>:<valence>:<amount>:<"disputed" or empty>   (one line per
  *   kept, defaulted or consumed candidate, ascending candidate id, UTF-8,
  *   "\n" between lines)
+ *
+ * **The first line is a domain tag and it is there on purpose.** A decided
+ * set is signed as `<offer id>` then `<candidate>:<valence>:<kept_as>:<lineage>`
+ * (§10.5), which is the same prefix and the same four-field shape; the two
+ * differ today only because a decision's third field is a word and a
+ * statement's is a number. A future valence, or a numeric `kept_as`, would
+ * make one signature verify as the other. The tag costs one line now and
+ * cannot be added once signatures are in the wild. Added 2026-09-12 by a
+ * refutation pass.
  *
  * The amount is the line's own: `unit_price * quantity`, or 0 for a gift
  * (§6.2). A disputed line is a consumed line the household does not confirm:
@@ -50,11 +60,13 @@ export function statementLines(offer: Offer, disputed: readonly string[]): State
   return lines;
 }
 
+export const STATEMENT_DOMAIN = "valence.statement.1";
+
 export function canonicalStatement(offerId: string, lines: readonly StatementLine[]): Buffer {
   const body = [...lines]
     .sort((a, b) => (a.candidate < b.candidate ? -1 : a.candidate > b.candidate ? 1 : 0))
     .map((l) => `${l.candidate}:${l.valence}:${l.amount}:${l.disputed ? "disputed" : ""}`);
-  return Buffer.from([offerId, ...body].join("\n"), "utf8");
+  return Buffer.from([STATEMENT_DOMAIN, offerId, ...body].join("\n"), "utf8");
 }
 
 /** §10.5's challenge form of the same bytes, for a passkey. */

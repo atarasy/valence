@@ -555,14 +555,14 @@ export class ValenceEngine {
     // used owes a signature over that statement before anything is charged,
     // and the weekly swap is the only pressure this specification puts on it.
     // Nothing accrues on the rail; what is owed is the merchant's to pursue.
-    if (offer.binding === "physical") {
-      const unsigned = this.unsignedStatementFor(offer.household, offer.id);
-      if (unsigned) {
-        throw unprocessable(
-          "statement_unsigned",
-          `offer ${unsigned} was collected with goods used and its settlement statement is not signed`
-        );
-      }
+    if (offer.binding === "physical" && this.hasUnsignedStatement(offer.household, offer.id)) {
+      // The refusal names nothing. Naming the waiting offer told one presenter
+      // another's offer id, and `GET /offers/{id}` then served it: products,
+      // prices, merchant and which lines that household used. Clause 8.
+      throw unprocessable(
+        "statement_unsigned",
+        "an earlier box for this household was collected with goods used and its settlement statement is not signed"
+      );
     }
     // §6.4. The reserve is the upper bound of what this offer can ever settle
     // at: every candidate kept, at the frozen price.
@@ -799,7 +799,20 @@ export class ValenceEngine {
         "the cooling window has closed and the set is final"
       );
     }
+    // §16.5, §11.2. **A cooling window takes back what the person signed, and
+    // nothing else.** A physical offer reaches `decided` when the collection
+    // resolves its last candidate, so this route used to reset the
+    // collection's own verdicts too: `consumed` went back to `offered`, the
+    // household then signed `returned` over goods it had eaten, and `settle`
+    // charged nothing because no candidate said `consumed` any more. The
+    // receipt said the goods came back unopened. §11.2's "the household
+    // cannot name the verdict" was true of `decide` and false of the system.
+    // Found by a refutation pass on 2026-09-12, hours after §6.5 was written
+    // to close the same hole on the other side.
+    const recovery = this.recoveries.for(offer.id);
+    const recorded = new Set([...(recovery?.returned ?? []), ...(recovery?.consumed ?? [])]);
     for (const c of offer.candidates) {
+      if (recorded.has(c.id)) continue;
       c.valence = "offered";
       c.kept_as = null;
       c.lineage = null;
@@ -844,19 +857,33 @@ export class ValenceEngine {
   }
 
   /**
-   * §6.5. An earlier physical offer of this household whose collection found
-   * goods used and whose statement nobody has signed, or null.
+   * §6.5. Whether an earlier physical offer of this household is waiting for
+   * a statement the household could sign now.
+   *
+   * **Only an offer the household can actually settle counts**, which is one
+   * in `decided` or `expired`. A refutation pass on 2026-09-12 measured both
+   * ends of the alternative. An offer still `presented` after a partial
+   * collection refuses `settle` with `409`, so a block that counted it was one
+   * the household was forbidden to cure. And a presenter that withdrew such an
+   * offer left it unsettleable forever, so the block never lifted and that
+   * household could be offered no physical box by anyone, on this engine, for
+   * good.
+   *
+   * It returns a boolean and never an id. The caller is a presenter, and the
+   * id would be another presenter's (clause 8, and §16.3's rule that a refusal
+   * says only that it refused).
    */
-  private unsignedStatementFor(household: string, except: string): string | null {
+  private hasUnsignedStatement(household: string, except: string): boolean {
     for (const other of this.offers.values()) {
       if (other.id === except || other.household !== household) continue;
       if (other.binding !== "physical" || this.settlements.has(other.id)) continue;
+      if (other.state !== "decided" && other.state !== "expired") continue;
       const recovery = this.recoveries.for(other.id);
       if (recovery && recovery.collected_at !== null && recovery.consumed.length > 0) {
-        return other.id;
+        return true;
       }
     }
-    return null;
+    return false;
   }
 
   async settle(

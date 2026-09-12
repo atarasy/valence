@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { CONFIG_VERSION, HOUR, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, makeEngine, settleSigned, disclosureFor, signConfig } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, makeEngine, settleSigned, decideSigned, disclosureFor, signConfig } from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
+import { canonicalDecisions } from "../src/shared/decisions.js";
 import { canonicalDisclosure, verifyDisclosure } from "../src/shared/disclosure.js";
 
 /**
@@ -157,5 +158,123 @@ describe("§10a.5: a block for one product", () => {
     engine.putDisclosure(disclosureFor("maker-b"));
     const again = engine.createOffer({ ...physical("house-b2", [{ product: "salt-a" }]), config_version: "cfg-b" });
     expect((await engine.present(again.id)).state).toBe("presented");
+  });
+});
+
+describe("§16.5 and §11.2: the cooling window takes back what the person signed, and nothing else", () => {
+  /**
+   * The hole this closes was found by a refutation pass on 2026-09-12, hours
+   * after §6.5 was written to close the same hole from the other side. A
+   * physical offer reaches `decided` when the collection resolves its last
+   * candidate, and `withdrawDecisions` reset **every** candidate to `offered`.
+   * The household then signed `returned` over goods it had eaten, `settle`
+   * found no `consumed` line, asked for no statement, and charged nothing. The
+   * receipt said the goods came back unopened.
+   */
+  const cooling = (seconds: number | null) => ({
+    async get() {
+      return {
+        id: "mandate-1",
+        household: "house-s",
+        ceiling_out_of_network: 1_000_000,
+        ceiling_daily: null,
+        cooling_seconds: seconds,
+        co_signers: [],
+        lapses_at: Date.now() + 86_400_000,
+        version: 1,
+      } as never;
+    },
+  });
+
+  test("a candidate the collection resolved is not reset, and cannot be re-signed", async () => {
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(cooling(3600));
+    const offer = await collected(engine);
+    const [coffee, tea, nori] = offer.candidates;
+    const taken = await engine.withdrawDecisions(offer.id);
+    // The collection's two verdicts stand; the third, which the collection
+    // returned, stands too. There is nothing here the household signed.
+    expect(taken.candidates.find((c) => c.id === coffee!.id)!.valence).toBe("consumed");
+    expect(taken.candidates.find((c) => c.id === tea!.id)!.valence).toBe("consumed");
+    expect(taken.candidates.find((c) => c.id === nori!.id)!.valence).toBe("returned");
+    // And the household cannot sign over them: `consumed` and `lost` are
+    // refused as decisions, and `returned` over a consumed candidate would be
+    // the household naming the verdict, which §11.2 forbids.
+    await expect(
+      decideSigned(engine, offer.id, [{ candidate: coffee!.id, valence: "returned" }])
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  test("what the household signed is still taken back", async () => {
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(cooling(3600));
+    const offer = engine.createOffer(physical("house-mix", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    const taken = await engine.withdrawDecisions(offer.id);
+    for (const c of taken.candidates) expect(c.valence).toBe("offered");
+  });
+
+  test("a used box still settles only on the signature after the window", async () => {
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(cooling(null));
+    const offer = await collected(engine);
+    await expect(engine.settle(offer.id)).rejects.toMatchObject({ code: "statement_unsigned" });
+  });
+});
+
+describe("§6.5: the block is a pressure the household can lift, and nobody else can make permanent", () => {
+  test("a withdrawn box does not block the next one", async () => {
+    // A presenter that collects part of a box and then withdraws it leaves an
+    // offer that can never be settled. Counting it blocked that household's
+    // every future physical box, from every presenter, for good.
+    const { engine } = makeEngine();
+    const first = engine.createOffer(physical("house-w", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
+    await engine.present(first.id);
+    engine.recoveries.collect({ offer: first.id, returned: [], consumed: [first.candidates[0]!.id], at: Date.now() });
+    engine.applyRecoveryTo(first.id);
+    await engine.withdraw(first.id);
+    const second = engine.createOffer(physical("house-w", [{ product: "nori-a" }, { product: "coffee-a" }]));
+    expect((await engine.present(second.id)).state).toBe("presented");
+  });
+
+  test("a box the household cannot yet settle does not block the next one", async () => {
+    // A partial collection leaves the offer `presented`, where `settle` is a
+    // 409. A block counting it is one the household is forbidden to cure.
+    const { engine } = makeEngine();
+    const first = engine.createOffer(physical("house-p2", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
+    await engine.present(first.id);
+    engine.recoveries.collect({ offer: first.id, returned: [], consumed: [first.candidates[0]!.id], at: Date.now() });
+    engine.applyRecoveryTo(first.id);
+    expect(engine.mustGet(first.id).state).toBe("presented");
+    await expect(engine.settle(first.id)).rejects.toMatchObject({ status: 409 });
+    const second = engine.createOffer(physical("house-p2", [{ product: "nori-a" }, { product: "coffee-a" }]));
+    expect((await engine.present(second.id)).state).toBe("presented");
+  });
+
+  test("the refusal names no other offer", async () => {
+    const { engine } = makeEngine();
+    const first = await collected(engine, "house-quiet");
+    const second = engine.createOffer(physical("house-quiet", [{ product: "nori-a" }, { product: "coffee-a" }]));
+    await expect(engine.present(second.id)).rejects.toMatchObject({ code: "statement_unsigned" });
+    try {
+      await engine.present(second.id);
+    } catch (err) {
+      expect((err as Error).message).not.toContain(first.id);
+    }
+  });
+});
+
+describe("§6.5: the statement's bytes are its own", () => {
+  test("a decided set's signature does not verify as a statement", async () => {
+    const { engine } = makeEngine();
+    const offer = await collected(engine, "house-tag");
+    const lines = statementLines(engine.mustGet(offer.id), []);
+    const asDecisions = canonicalDecisions(
+      offer.id,
+      lines.map((l) => ({ candidate: l.candidate, valence: l.valence as never }))
+    );
+    expect(canonicalStatement(offer.id, lines).equals(asDecisions)).toBe(false);
+    expect(canonicalStatement(offer.id, lines).toString("utf8").startsWith("valence.statement.1\n")).toBe(true);
   });
 });

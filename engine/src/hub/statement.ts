@@ -16,6 +16,13 @@ import { challengeForStatement, statementLines } from "../shared/statement.js";
 export type Statement = {
   offer: string;
   household: string;
+  /**
+   * §10a.5 lists the offer's expiry among the facts of a sale, and the
+   * approval carries it. The statement did not until a refutation pass on
+   * 2026-09-12 asked what a merchant's stated application period is measured
+   * against on this screen.
+   */
+  expires_at: number;
   lines: {
     candidate: string;
     product: string;
@@ -47,6 +54,7 @@ export function renderStatement(offer: Offer, delivery: Delivery | undefined): S
   return {
     offer: offer.id,
     household: offer.household,
+    expires_at: offer.expires_at,
     lines: proposed.map((l) => {
       const c = offer.candidates.find((x) => x.id === l.candidate)!;
       return {

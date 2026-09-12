@@ -670,6 +670,21 @@ async function route(
             throw badRequest("malformed", `${key} must be an array of candidate ids`);
           }
         }
+        // §11.2. A collection names candidates of this offer. Nothing checked
+        // that until a refutation pass on 2026-09-12: `consumed: ["anything"]`
+        // resolved no candidate and still made the offer look collected with
+        // goods used, which held §6.5's block over that household until the
+        // loss deadline lifted it.
+        const known = new Set(engine.mustGet(id).candidates.map((c) => c.id));
+        const strangers = [...(raw.returned as string[]), ...(raw.consumed as string[])].filter(
+          (candidate) => !known.has(candidate)
+        );
+        if (strangers.length > 0) {
+          throw unprocessable(
+            "unknown_candidate",
+            `not candidates of this offer: ${strangers.join(", ")}`
+          );
+        }
         const collected = engine.recoveries.collect({
           offer: id,
           returned: raw.returned as string[],
