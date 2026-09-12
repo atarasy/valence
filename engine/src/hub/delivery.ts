@@ -49,6 +49,19 @@ export class DeliveryRegister {
     if (!ORDER.includes(input.status)) {
       throw unprocessable("bad_status", `status is one of ${ORDER.join(", ")}`);
     }
+    // §7.5b, 法11条1号. The status moves as the parcel does, and **the carriage
+    // does not move with it**: it is a figure the approval and the statement
+    // put in front of the household before it signed, and a later despatch
+    // update that carried a different one would rewrite what a person read
+    // after they had read it. This was a plain overwrite until 2026-09-12,
+    // so a household that signed under "Carriage: ¥500" had no record of it.
+    const before = this.rows.get(input.offer);
+    if (before && before.carriage !== input.carriage) {
+      throw unprocessable(
+        "carriage_fixed",
+        `this offer's carriage was recorded as ${before.carriage} and is what the household was shown`
+      );
+    }
     const row: Delivery = {
       offer: input.offer,
       carriage: input.carriage,

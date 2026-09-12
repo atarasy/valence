@@ -1,6 +1,6 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import type { ValenceEngine } from "../engine/offers.js";
-import type { Offer } from "../common/types.js";
+import type { Offer, Valence } from "../common/types.js";
 import type { Delivery } from "./delivery.js";
 
 /**
@@ -41,6 +41,20 @@ export type ApprovalCandidate = {
   unit_price: number;
   /** §5.4. Not concealed: a household cannot decline what it cannot see is a guess. */
   is_exploration: boolean;
+  /**
+   * §11. What this line already is. `offered` is a line waiting on the
+   * household; anything else is one the collection or a previous decision has
+   * already resolved, and a screen that asks for a choice on it asks for a
+   * decision the engine will refuse with `already_decided`.
+   *
+   * **A physical box is collected line by line and the offer stays
+   * `presented`**, so an approval routinely carries both kinds at once. Until
+   * 2026-09-12 this surface rendered every candidate identically with nothing
+   * to tell them apart, and a hub that required a choice on each could never
+   * confirm the lines that were still the household's: found by a refutation
+   * pass over the reference hub.
+   */
+  valence: Valence;
   /** Clause 59. What else the agent considered. */
   alternatives: string[];
   /** Clause 59. The argument against taking it. */
@@ -204,6 +218,7 @@ export class ApprovalDesk {
         given_by: c.given_by,
         ships: c.ships,
         is_exploration: c.is_exploration,
+        valence: c.valence,
         alternatives: entry.alternatives,
         argument_against: entry.argument_against,
         disclosure: governing(offer, c.merchant, c.product),

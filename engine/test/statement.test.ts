@@ -514,4 +514,49 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
     const settlement = await engine.settle(offer.id, Date.now());
     expect(settlement.charged).toBe(0);
   });
+
+  /**
+   * §6.5. Two tabs of the same statement. The first confirms everything, the
+   * second disputes a line and signs after it. Settling is idempotent for a
+   * presenter asking for the settlement that stands, and the second tab was
+   * handed that settlement with a 200: the screen read "Signed" and named a
+   * charge that included the line the household had just disputed, while the
+   * dispute was never recorded anywhere. **A household signing is applying,
+   * not asking.** Found by a refutation pass over the reference hub.
+   */
+  test("a signature over a box that already settled is refused rather than answered with the first settlement", async () => {
+    const made = makeEngine();
+    const offer = await collected(made, "house-two-tabs");
+    const first = await settleSigned(made.engine, offer.id);
+    expect(first.charged).toBeGreaterThan(0);
+    expect(first.disputed_amount).toBe(0);
+    // The second tab disputes a consumed line and signs.
+    const consumed = offer.candidates[0]!.id;
+    await expect(settleSigned(made.engine, offer.id, [consumed])).rejects.toMatchObject({
+      code: "already_settled",
+    });
+    // And the settlement that stands is untouched: nothing was recorded as
+    // disputed by a signature the engine refused.
+    expect(made.engine.settlement(offer.id)!.disputed_amount).toBe(0);
+    // A presenter asking again, with no signature, still gets what stands.
+    const again = await made.engine.settle(offer.id);
+    expect(again.receipt).toBe(first.receipt);
+  });
+
+  /**
+   * §7.5b, 法11条1号. The carriage is a figure the household read before it
+   * signed. The register took a plain overwrite, so a despatch update after
+   * the signature could carry a different one and the household had no record
+   * of what it had been shown.
+   */
+  test("a delivery update may move the status and may not move the carriage", async () => {
+    const { deliveries } = makeEngine();
+    deliveries.record({ offer: "o-carriage", carriage: 500, code: "dc-1", status: "placed" });
+    const moved = deliveries.record({ offer: "o-carriage", carriage: 500, code: "dc-1", status: "delivered" });
+    expect(moved.status).toBe("delivered");
+    expect(() =>
+      deliveries.record({ offer: "o-carriage", carriage: 800, code: "dc-1", status: "delivered" })
+    ).toThrow(/carriage/);
+    expect(deliveries.mustGet("o-carriage").carriage).toBe(500);
+  });
 });

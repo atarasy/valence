@@ -960,7 +960,23 @@ export class ValenceEngine {
   ): Promise<Settlement> {
     const offer = this.mustGet(offerId, now);
     const existing = this.settlements.get(offer.id);
-    if (existing) return existing;
+    if (existing) {
+      // §6.5. Settling is idempotent for the party that only asks for it: a
+      // presenter retrying after a timeout gets the settlement that stands.
+      // **A household signing is not asking, it is applying**, and handing it
+      // the first settlement tells it that the set it signed went through.
+      // Two tabs of the same statement, the second disputing a line: the
+      // second signature was discarded, the screen read "Signed" and named
+      // the first settlement's charge, and the dispute was never recorded.
+      // Found by a refutation pass over the reference hub on 2026-09-12.
+      if (confirmation.signed) {
+        throw conflict(
+          "already_settled",
+          "this box has already settled, and this signature was not what settled it"
+        );
+      }
+      return existing;
+    }
     if (offer.state !== "decided" && offer.state !== "expired") {
       throw conflict("bad_state", `cannot settle an offer in ${offer.state}`);
     }
