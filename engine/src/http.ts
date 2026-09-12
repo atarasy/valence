@@ -568,7 +568,7 @@ async function route(
         // Clause 54. Data, never presentation. The hub draws the screen.
         // §10a.5. The sale's own facts sit beside the merchant's block, and
         // carriage is the one the offer does not hold: it is the hub's record.
-        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()), deliveries.find(id));
+        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()), await engine.deliveryFor(id));
         if ("missing" in rendered) {
           throw unprocessable("no_deliberation", rendered.missing);
         }
@@ -729,7 +729,7 @@ async function route(
         // §6.5. The screen a household signs a physical settlement from.
         // Clause 54: data, never presentation. The hub draws it, with the
         // carriage from its own delivery record beside the lines.
-        return json(renderStatement(engine.mustGet(id, Date.now()), deliveries.find(id)));
+        return json(renderStatement(engine.mustGet(id, Date.now()), await engine.deliveryFor(id)));
       }
       if (method === "POST" && action === "settle") {
         // §6.5. Empty for the digital binding and for a box with nothing

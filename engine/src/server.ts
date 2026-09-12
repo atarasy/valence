@@ -6,6 +6,7 @@ import { rolesFrom } from "./common/roles.js";
 import { inMemoryStore, openStore } from "./common/store.js";
 import { RemoteMandates } from "./engine/mandate-source.js";
 import { RemoteDay } from "./engine/day-source.js";
+import { LocalDeliveries, RemoteDeliveries } from "./engine/delivery-source.js";
 import { RecoveryRegister } from "./hub/node.js";
 import { ApprovalDesk } from "./hub/approval.js";
 import { PermissionLedger } from "./hub/permissions.js";
@@ -121,9 +122,16 @@ const roles = rolesFrom(process.env.VALENCE_ROLES);
 // a deployment that runs both roles at a remote hub is allowed and pointless;
 // leaving it unset when the hub is absent is the mistake worth catching, and
 // it is caught here rather than at the first offer.
+// §7.5b, §13.1. The carriage on the approval and on the statement comes from
+// the hub's register. A process that presents the hub reads its own; one that
+// does not asks the hub over the route the specification already gives it.
+engine.readDeliveriesFrom(new LocalDeliveries(hub.deliveries));
 if (process.env.VALENCE_HUB_URL) {
   engine.readMandatesFrom(new RemoteMandates(process.env.VALENCE_HUB_URL));
   engine.readTheDayFrom(new RemoteDay(process.env.VALENCE_HUB_URL));
+  if (!roles.has("hub")) {
+    engine.readDeliveriesFrom(new RemoteDeliveries(process.env.VALENCE_HUB_URL));
+  }
 } else if (!roles.has("hub")) {
   console.error(
     "VALENCE_ROLES presents the engine without the hub, so this process holds no\n" +
