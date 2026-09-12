@@ -659,6 +659,19 @@ export class ValenceEngine {
           `${candidate.merchant} has no disclosure on this offer`
         );
       }
+      // **This second check is not the same check as the one at registration**,
+      // and the difference is §14.2's import. `putDisclosure` verifies against
+      // the merchant's key and an identity cannot be replaced, so a block this
+      // host recorded will always verify again. **An imported offer carries the
+      // blocks the sending host froze onto it**, signed by keys this host may
+      // not hold and may never have held, and nothing on that route verifies
+      // them. So the check fires exactly where it is needed and nowhere else.
+      //
+      // Written down on 2026-09-12 because a refutation pass asked what probe
+      // reaches it, and the answer is that no probe in the conformance suite
+      // can: the suite cannot present a block signed by a key the host lacks
+      // without importing an offer, which `exit/` does and `disclosure/` does
+      // not. It is proven by `engine/test/` instead.
       const pem = this.identities.get(block.merchant);
       let ok = false;
       try {
