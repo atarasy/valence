@@ -1,6 +1,7 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import type { ValenceEngine } from "../engine/offers.js";
 import type { Offer } from "../common/types.js";
+import type { Delivery } from "./delivery.js";
 
 /**
  * The approval surface.
@@ -65,6 +66,14 @@ export type Approval = {
   offer: string;
   presenter: string;
   expires_at: number;
+  /**
+   * §10a.5, §7.5b. What carriage costs, from the delivery the hub recorded
+   * for this offer, or null while none is recorded. The block a merchant
+   * signed is its standing text; the facts of this sale are the candidates'
+   * quantity and unit price beside it, this, and `expires_at`. A screen that
+   * carried the block alone would have shown terms and not a sale.
+   */
+  carriage: number | null;
   /** Clause 33. A boolean, because a count invites a second. */
   reminded: boolean;
   mandate: {
@@ -117,7 +126,11 @@ export class ApprovalDesk {
    * household's tap a formality, and clause 59 exists so that it is not one.
    * The hub will not draw a screen that cannot carry both.
    */
-  render(engine: ValenceEngine, offer: Offer): Approval | { missing: string } {
+  render(
+    engine: ValenceEngine,
+    offer: Offer,
+    delivery: Delivery | undefined
+  ): Approval | { missing: string } {
     const deliberation = this.deliberations.get(offer.id);
     if (!deliberation) {
       return { missing: "no deliberation recorded for this offer (clause 59)" };
@@ -146,6 +159,7 @@ export class ApprovalDesk {
       offer: offer.id,
       presenter: offer.presenter,
       expires_at: offer.expires_at,
+      carriage: delivery ? delivery.carriage : null,
       reminded: offer.reminders_sent > 0,
       mandate: deliberation.mandate,
       // Clause 23. The band the giver chose is never hidden from the recipient,

@@ -564,7 +564,9 @@ async function route(
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
-        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()));
+        // §10a.5. The sale's own facts sit beside the merchant's block, and
+        // carriage is the one the offer does not hold: it is the hub's record.
+        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()), deliveries.find(id));
         if ("missing" in rendered) {
           throw unprocessable("no_deliberation", rendered.missing);
         }
