@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { canonicalConfig } from "../src/engine/offers.js";
 import type { PresenterConfig } from "../src/common/types.js";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { makeEngine, signConfig } from "./helpers.js";
 
 /**
  * The bytes a presenter signs over its catalogue.
@@ -70,5 +72,54 @@ describe("the catalogue's signed bytes", () => {
       products: { "tea-a": { ...base.products["tea-a"]!, merchant: "a", maker: "b:c" } },
     };
     expect(bytes(left)).not.toBe(bytes(right));
+  });
+});
+
+/**
+ * §5.2. A catalogue is accepted only when signed by the key registered for the
+ * presenter it names.
+ *
+ * **Proven here because no probe can reach it.** `POST /_presenter/configs` is
+ * deployment plumbing the specification routes nowhere, so the conformance
+ * suites have no way to publish a catalogue at all, let alone an unsigned one,
+ * and the seed that does publish always signs correctly. The full sweep of
+ * 2026-09-12 measured the consequence: `unsigned_catalogue` removed the
+ * refusal and **survived**, the one survivor in 253 mutations, with nothing in
+ * either suite failing. A rule the implementation map records as enforced was
+ * enforced by code nothing tested.
+ */
+describe("§5.2: a catalogue carries its presenter's signature", () => {
+  const catalogue = (version: string) => ({
+    version,
+    presenter: "merchant-1",
+    products: {
+      "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200 },
+    },
+  });
+
+  test("an unsigned catalogue is refused", () => {
+    const { engine } = makeEngine();
+    expect(() => engine.registerConfig(catalogue("cfg-unsigned") as never)).toThrow(/not signed by/);
+  });
+
+  test("a catalogue signed by another key is refused", () => {
+    const { engine } = makeEngine();
+    const stranger = generateKeyPairSync("ed25519");
+    const config = catalogue("cfg-stranger");
+    const forged = sign(null, canonicalConfig(config as never), stranger.privateKey).toString("base64");
+    expect(() => engine.registerConfig(config as never, forged)).toThrow(/not signed by/);
+  });
+
+  test("a catalogue signed over other bytes is refused", () => {
+    const { engine } = makeEngine();
+    const config = catalogue("cfg-other-bytes");
+    const over = signConfig(catalogue("cfg-something-else") as never);
+    expect(() => engine.registerConfig(config as never, over)).toThrow(/not signed by/);
+  });
+
+  test("the presenter's own signature is accepted", () => {
+    const { engine } = makeEngine();
+    const config = catalogue("cfg-good");
+    expect(engine.registerConfig(config as never, signConfig(config as never)).version).toBe("cfg-good");
   });
 });
