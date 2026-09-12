@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Which refusals the specification names, which the engine emits, and which a
-probe asserts.
+"""Textual occurrences of refusal names, for a manual contract review.
 
 Lands as `valence/engine/scripts/refusals.py`, beside `anchors.py`, and is run
 the same way: in seconds, before any coverage figure is quoted.
@@ -13,11 +12,12 @@ appeared in neither the engine nor the suites, the engine emitting
 and `permissions/permissions.test.ts` asserted `over_ceiling`, so a conformance
 probe was pinning the engine's departure from the section it sits nearest to.
 
-**The mutation corpus cannot find this.** A mutation that stops a refusal
-happening is caught by the probe that expects it. A refusal that answers to the
-wrong word is caught by nothing, because no probe and no sweep compares the set
-of names an engine emits against the set the specification lists. That is what
-this does.
+**This is a presence scan, not a proof of definition or assertion.** A name
+can occur in ordinary specification prose, a test comment or a request value.
+The scan also omits codes constructed outside the helper calls below. A probe
+that asserts the response error can catch a mutation that renames it; a
+status-only probe cannot. Read the actual trigger and assertion before
+interpreting these columns as coverage.
 
     cd engine && python3 scripts/refusals.py
 
@@ -61,7 +61,8 @@ for path in (HERE / "src").rglob("*.ts"):
     ):
         emitted.add(m.group(1))
 
-# What a probe asserts. A name in a suite is a name something checks.
+# Quoted-string occurrences in suite files, including comments and inputs.
+# They are candidates for review, not evidence of response assertions.
 asserted = set()
 if SUITES.exists():
     for path in SUITES.rglob("*.test.ts"):
@@ -70,7 +71,7 @@ else:
     print(f"note: no suites at {SUITES}; the third column is unmeasured\n")
 
 print(f"§16.6 names {len(named)} refusals of a protection\n")
-print(f"{'name':<34} {'engine':<8} {'a probe':<8}")
+print(f"{'name':<34} {'engine':<8} {'suite text':<10}")
 for name in named:
     print(f"{name:<34} {'yes' if name in emitted else 'NO':<8} {'yes' if name in asserted else 'NO':<8}")
 
@@ -89,7 +90,7 @@ for name in named:
 stray = sorted(n for n in emitted if n not in spec and n in asserted)
 unnamed = sum(1 for n in emitted if n not in spec)
 if stray:
-    print("\nasserted by a probe and named nowhere in the specification:")
+    print("\nquoted in suite text and absent from specification text:")
     for n in stray:
         print(f"  {n}")
 # **And the other direction, which the first version could not show.** A name
@@ -99,12 +100,13 @@ if stray:
 # `cooling_over`, when the probe that asserted it was rewritten for question 43.
 unasserted = sorted(n for n in emitted if n in spec and n not in asserted)
 if unasserted:
-    print("\nnamed in the specification and asserted by no probe:")
+    print("\noccurs in specification text, with no quoted suite occurrence:")
     for n in unasserted:
         print(f"  {n}")
 
-print(f"\n{len(emitted)} refusal names in the engine, {unnamed} of them in no section.")
+print(f"\n{len(emitted)} literal helper-call names scanned, {unnamed} absent from specification text.")
 
 print("\nThis judges nothing. A name missing from the engine may be one the")
-print("engine has no occasion to throw; a name missing from a probe is a")
-print("refusal nothing checks the wording of. Read the rows.")
+print("engine has no occasion to throw. A suite occurrence may be a comment")
+print("or request input, and a specification substring may be ordinary prose.")
+print("Read the response assertions and normative definitions before claiming coverage.")

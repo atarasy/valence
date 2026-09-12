@@ -25,20 +25,9 @@ OUT="${1:-}"
 # separately and named here. Found on 2026-09-09 by an adversarial pass.
 EXCLUDE="require_registered_merchant reject_foreign_offer_client disclosure_not_carried"
 
-# Hashing the files rather than asking git what is committed, because a sweep
-# is often run against a working tree that is ahead of HEAD, and a key that
-# said "HEAD" would hand back results measured against different code.
-tree_key() {
-  find "$1" -type f \( -name '*.ts' -o -name '*.py' -o -name '*.sh' -o -name '*.json' \) \
-    -not -path '*/node_modules/*' -not -name coverage.sh -print0 \
-    | sort -z | xargs -0 shasum 2>/dev/null | shasum | cut -c1-12
-}
-# `scripts` whole, not `scripts/mutations`: `seed.ts` builds the catalogue, the
-# mandate and the keys, and `conformance.sh` starts the servers and passes the
-# environment, so either one changes what a probe sees. Only this file is left
-# out, because editing the harness that reads the results should not discard
-# them. Widened 2026-09-11, having been the narrower path for one run.
-KEY="$(tree_key src)-$(tree_key scripts)-$(tree_key "$TESTS")"
+# Includes the harness, engine unit tests, manifests and effective settings.
+# Do not reuse the old incomplete key space.
+KEY="$(python3 scripts/sweep-inputs.py)" || exit 1
 # Results and per-mutation logs used to live under /tmp, and on 2026-09-11 a
 # reboot cleared it: a finished sweep of 192 mutations lost every verdict and
 # every log behind its figures, and the resume directory this script exists for
@@ -56,12 +45,40 @@ mkdir -p "$RESULTS" "$VALENCE_LOG_DIR"
 OUT="${OUT:-$RESULTS/probes-shown-to-fail.txt}"
 echo "results: $RESULTS"
 
+if [ -f "$RESULTS/INVALID" ]; then
+  echo "This result directory contains an invalidated run; archive it before restarting." >&2
+  exit 1
+fi
+same_inputs() {
+  local current
+  current="$(python3 scripts/sweep-inputs.py)" || {
+    echo "Input hashing failed" > "$RESULTS/INVALID"
+    return 1
+  }
+  if [ "$KEY" != "$current" ]; then
+    echo "Inputs changed during measurement; do not reuse these results." > "$RESULTS/INVALID"
+    cat "$RESULTS/INVALID" >&2
+    return 1
+  fi
+}
+
 TOTAL=$(ls scripts/mutations/*.py | wc -l | tr -d ' ')
 DONE=0
 for f in scripts/mutations/*.py; do
   m=$(basename "$f" .py)
   DONE=$((DONE + 1))
-  [ -f "$RESULTS/$m.status" ] && continue
+  same_inputs || exit 1
+  if [ -f "$RESULTS/$m.status" ]; then
+    case "$(cat "$RESULTS/$m.status")" in
+      CAUGHT|SURVIVED|ABORTED|INERT) ;;
+      *) echo "Invalid cached verdict for $m" >&2; exit 1 ;;
+    esac
+    if [ ! -f "$RESULTS/$m.fails" ] || [ ! -f "$RESULTS/$m.suites" ]; then
+      echo "Incomplete cached record for $m" >&2
+      exit 1
+    fi
+    continue
+  fi
   # A mutation left applied by a killed run would be measured as part of the
   # next one, and every mutation after it too. mutate.sh refuses on a dirty
   # src, but it refuses one at a time and the sweep would report the whole
@@ -73,11 +90,14 @@ for f in scripts/mutations/*.py; do
   fi
   printf '[%3d/%d] %s\n' "$DONE" "$TOTAL" "$m"
   RUN="$(./scripts/mutate.sh "$m" python3 "$f" 2>&1)"
-  case "$RUN" in
-    *"INERT:"*)    echo INERT    > "$RESULTS/$m.status" ;;
-    *"SURVIVED:"*) echo SURVIVED > "$RESULTS/$m.status" ;;
-    *"ABORTED:"*)  echo ABORTED  > "$RESULTS/$m.status" ;;
-    *)             echo CAUGHT   > "$RESULTS/$m.status" ;;
+  RUN_STATUS=$?
+  VERDICT="$(printf '%s\n' "$RUN" | sed -n 's/^VERDICT: //p')"
+  case "$VERDICT:$RUN_STATUS" in
+    CAUGHT:0|SURVIVED:0|ABORTED:0|INERT:2) ;;
+    *)
+      printf '%s\n' "$RUN" >&2
+      echo "No trustworthy verdict for $m; sweep stopped without caching it." >&2
+      exit 1 ;;
   esac
   grep -hE '^\(fail\)' "$VALENCE_LOG_DIR/mutation-${m}.log" "$VALENCE_LOG_DIR/mutation-${m}-unit.log" 2>/dev/null \
     | sed -E 's/^\(fail\) //; s/ \[[0-9.]+m?s\]$//' | sort -u > "$RESULTS/$m.fails"
@@ -86,7 +106,13 @@ for f in scripts/mutations/*.py; do
   # those inflates the number against a threshold calibrated on suites.
   grep -hE '^\(fail\)' "$VALENCE_LOG_DIR/mutation-${m}.log" 2>/dev/null \
     | sed -E 's/^\(fail\) //; s/:.*//' | sort -u > "$RESULTS/$m.suites"
+  same_inputs || exit 1
+  # Publish the status last, so an interrupted write is not a cached result.
+  printf '%s\n' "$VERDICT" > "$RESULTS/$m.status.tmp"
+  mv "$RESULTS/$m.status.tmp" "$RESULTS/$m.status"
 done
+
+same_inputs || exit 1
 
 : > "$OUT"
 INERT=""; SURVIVED=""; ABORTED=""; COUNT=0
@@ -102,8 +128,13 @@ for f in scripts/mutations/*.py; do
   cat "$RESULTS/$m.fails" >> "$OUT"
 done
 sort -u -o "$OUT" "$OUT"
-echo "mutations run: $COUNT"
-echo "probes shown to fail: $(wc -l < "$OUT")"
+echo "mutation scripts: $TOTAL"
+echo "mutations run, excluding inert: $COUNT"
+for verdict in CAUGHT SURVIVED INERT ABORTED; do
+  n=$(grep -l "^${verdict}$" "$RESULTS"/*.status | wc -l | tr -d ' ')
+  echo "$verdict: $n"
+done
+echo "distinct failed test names, conformance and unit combined: $(wc -l < "$OUT")"
 echo "mutations excluded from the count (they break the shared fixture):$( for m in $EXCLUDE; do printf ' %s' "$m"; done)"
 if [ -n "$INERT" ]; then
   echo "INERT mutations, anchors drifted, ledger rows unsupported:$INERT"

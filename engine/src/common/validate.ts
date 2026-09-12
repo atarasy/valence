@@ -22,7 +22,7 @@ export function strict(
   const unknown = Object.keys(record).filter((k) => !allowed.includes(k));
   if (unknown.length > 0) {
     throw badRequest(
-      "unknown_field",
+      "malformed",
       `${where}: no such field: ${unknown.sort().join(", ")}`
     );
   }
