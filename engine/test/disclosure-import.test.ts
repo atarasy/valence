@@ -48,7 +48,7 @@ describe("§10a.3: an imported block signed by a key this host lacks", () => {
  * signed for another product or signed by nobody, was rendered unverified.
  * Found by a refutation pass on 2026-09-12, hours after the key was added.
  */
-describe("§10a.5: an imported product block signed by a key this host lacks", () => {
+describe("§10a.5: a product block with an invalid signature on an existing offer", () => {
   test("a decision on the offer is refused", async () => {
     const { engine } = makeEngine();
     const offer = await engine.createOffer({
@@ -64,8 +64,13 @@ describe("§10a.5: an imported product block signed by a key this host lacks", (
     } as never);
     await engine.present(offer.id);
 
-    // The standing text is this host's own and verifies. Beside it, a product
-    // block of the shape a sending host would have frozen on.
+    // The standing text verifies under the registered maker-a key. Replace
+    // the product block directly with an invalid signature; this fixture
+    // neither imports an offer nor removes the merchant's key.
+    // In the completed original 299 mutation log reviewed 2026-09-13,
+    // product_block_signature_unchecked lets this decision resolve, directly
+    // failing the invalid-signature refusal assertion below. This is a unit
+    // verification catch, not an HTTP import or missing-key measurement.
     offer.disclosures = [
       disclosureFor("maker-a"),
       { ...disclosureFor("maker-a", "tea-a"), signature: "AAAA" },
