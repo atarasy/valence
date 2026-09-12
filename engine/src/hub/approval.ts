@@ -1,6 +1,7 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import type { ValenceEngine } from "../engine/offers.js";
 import type { Offer } from "../common/types.js";
+import type { Delivery } from "./delivery.js";
 
 /**
  * The approval surface.
@@ -16,9 +17,24 @@ import type { Offer } from "../common/types.js";
  * it. One such field and the merchant draws the screen after all.
  */
 export type ApprovalCandidate = {
-  /** Clauses 11, 12. The screen the person signs from names the maker and the carrier. */
+  /**
+   * Clauses 11, 12. The screen the person signs from names who sold it, who
+   * made it and who carries it. `maker` reached the candidate, the receipt
+   * line and the lineage edge on 2026-09-12 (question 32) and not this
+   * surface, while this comment said it did: the fourth time a surface was
+   * added without its probe, found by reading the contract in `04b` §2.1
+   * against the type.
+   */
   merchant: string;
+  maker: string;
   ships: string;
+  /**
+   * Clause 10, §6.2. Who gave this candidate, or null when it is bought. A
+   * gift arrives at its price and is never billed, so a screen showing a
+   * unit price and no giver asks a person to sign without telling them which
+   * lines cost money. Missing until 2026-09-12, found by a refutation pass.
+   */
+  given_by: string | null;
   id: string;
   product: string;
   quantity: number;
@@ -58,6 +74,13 @@ export type Approval = {
    */
   disclosures: {
     merchant: string;
+    /**
+     * §10a.5. Null for the merchant's standing text; a product reference for
+     * a block about that product alone, which the hub renders beside that
+     * product's line, its items prevailing over the standing text's where a
+     * label appears in both. Question 35, taken 2026-09-12.
+     */
+    product: string | null;
     version: string;
     items: { label: string; value: string }[];
     signature: string;
@@ -65,6 +88,14 @@ export type Approval = {
   offer: string;
   presenter: string;
   expires_at: number;
+  /**
+   * §10a.5, §7.5b. What carriage costs, from the delivery the hub recorded
+   * for this offer, or null while none is recorded. The block a merchant
+   * signed is its standing text; the facts of this sale are the candidates'
+   * quantity and unit price beside it, this, and `expires_at`. A screen that
+   * carried the block alone would have shown terms and not a sale.
+   */
+  carriage: number | null;
   /** Clause 33. A boolean, because a count invites a second. */
   reminded: boolean;
   mandate: {
@@ -117,7 +148,11 @@ export class ApprovalDesk {
    * household's tap a formality, and clause 59 exists so that it is not one.
    * The hub will not draw a screen that cannot carry both.
    */
-  render(engine: ValenceEngine, offer: Offer): Approval | { missing: string } {
+  render(
+    engine: ValenceEngine,
+    offer: Offer,
+    delivery: Delivery | undefined
+  ): Approval | { missing: string } {
     const deliberation = this.deliberations.get(offer.id);
     if (!deliberation) {
       return { missing: "no deliberation recorded for this offer (clause 59)" };
@@ -136,6 +171,8 @@ export class ApprovalDesk {
         quantity: c.quantity,
         unit_price: c.unit_price,
         merchant: c.merchant,
+        maker: c.maker,
+        given_by: c.given_by,
         ships: c.ships,
         is_exploration: c.is_exploration,
         alternatives: entry.alternatives,
@@ -146,6 +183,7 @@ export class ApprovalDesk {
       offer: offer.id,
       presenter: offer.presenter,
       expires_at: offer.expires_at,
+      carriage: delivery ? delivery.carriage : null,
       reminded: offer.reminders_sent > 0,
       mandate: deliberation.mandate,
       // Clause 23. The band the giver chose is never hidden from the recipient,
@@ -155,6 +193,7 @@ export class ApprovalDesk {
       // order, which is why this copies rather than sorts.
       disclosures: offer.disclosures.map((d) => ({
         merchant: d.merchant,
+        product: d.product,
         version: d.version,
         items: d.items.map((i) => ({ label: i.label, value: i.value })),
         signature: d.signature,

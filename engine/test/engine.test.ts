@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ValenceEngine, explorationFloor } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { ValenceError } from "../src/common/errors.js";
-import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned, signConfig } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned, settleSigned, signConfig } from "./helpers.js";
 
 const baseOffer = (candidates: {
   product: string;
@@ -295,7 +295,8 @@ describe("settlement", () => {
       at: Date.now(),
     });
     engine.applyRecoveryTo(offer.id);
-    const settlement = await engine.settle(offer.id);
+    // §6.5. Goods were used, so the household signs the statement first.
+    const settlement = await settleSigned(engine, offer.id);
     // coffee-a at its price, the gift at nothing.
     expect(settlement.consumed_amount).toBe(1500);
     expect(settlement.charged).toBe(1500);

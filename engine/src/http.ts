@@ -5,7 +5,8 @@ import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/ap
 import type { PermissionLedger } from "./hub/permissions.js";
 import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
-import type { Assertion } from "./shared/decisions.js";
+import type { Assertion, PersonalSignature } from "./shared/decisions.js";
+import { renderStatement } from "./hub/statement.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -122,6 +123,7 @@ function offerView(o: Offer) {
     // items in the merchant's order, with no field added and none dropped.
     disclosures: o.disclosures.map((d) => ({
       merchant: d.merchant,
+      product: d.product,
       version: d.version,
       items: d.items.map((i) => ({ label: i.label, value: i.value })),
       signature: d.signature,
@@ -564,7 +566,9 @@ async function route(
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
-        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()));
+        // §10a.5. The sale's own facts sit beside the merchant's block, and
+        // carriage is the one the offer does not hold: it is the hub's record.
+        const rendered = approvals.render(engine, engine.mustGet(id, Date.now()), deliveries.find(id));
         if ("missing" in rendered) {
           throw unprocessable("no_deliberation", rendered.missing);
         }
@@ -666,6 +670,21 @@ async function route(
             throw badRequest("malformed", `${key} must be an array of candidate ids`);
           }
         }
+        // §11.2. A collection names candidates of this offer. Nothing checked
+        // that until a refutation pass on 2026-09-12: `consumed: ["anything"]`
+        // resolved no candidate and still made the offer look collected with
+        // goods used, which held §6.5's block over that household until the
+        // loss deadline lifted it.
+        const known = new Set(engine.mustGet(id).candidates.map((c) => c.id));
+        const strangers = [...(raw.returned as string[]), ...(raw.consumed as string[])].filter(
+          (candidate) => !known.has(candidate)
+        );
+        if (strangers.length > 0) {
+          throw unprocessable(
+            "unknown_candidate",
+            `not candidates of this offer: ${strangers.join(", ")}`
+          );
+        }
         const collected = engine.recoveries.collect({
           offer: id,
           returned: raw.returned as string[],
@@ -706,9 +725,38 @@ async function route(
         if (!settlement) throw notFound(`offer ${id} has no settlement`);
         return json(settlement);
       }
+      if (method === "GET" && action === "statement") {
+        // §6.5. The screen a household signs a physical settlement from.
+        // Clause 54: data, never presentation. The hub draws it, with the
+        // carriage from its own delivery record beside the lines.
+        return json(renderStatement(engine.mustGet(id, Date.now()), deliveries.find(id)));
+      }
       if (method === "POST" && action === "settle") {
-        strict(await body(request), [], "settle");
-        return json(await engine.settle(id));
+        // §6.5. Empty for the digital binding and for a box with nothing
+        // used. Otherwise the household's signature over the statement, in
+        // either of §10.5's two shapes, and the consumed lines it disputes.
+        const raw = strict(await body(request), ["signature", "assertion", "disputed"], "settle");
+        if (raw.signature !== undefined && raw.assertion !== undefined) {
+          throw badRequest("malformed", "send a signature or an assertion, not both");
+        }
+        let signed: PersonalSignature | undefined;
+        if (raw.signature !== undefined) {
+          signed = { signature: requireString(raw, "signature", "settle") };
+        } else if (raw.assertion !== undefined) {
+          const a = strict(raw.assertion, ["authenticator_data", "client_data_json", "signature"], "assertion");
+          signed = {
+            assertion: {
+              authenticator_data: requireString(a, "authenticator_data", "assertion"),
+              client_data_json: requireString(a, "client_data_json", "assertion"),
+              signature: requireString(a, "signature", "assertion"),
+            },
+          };
+        }
+        const disputedRaw = raw.disputed;
+        if (disputedRaw !== undefined && (!Array.isArray(disputedRaw) || disputedRaw.some((x) => typeof x !== "string"))) {
+          throw badRequest("malformed", "disputed must be an array of candidate ids");
+        }
+        return json(await engine.settle(id, Date.now(), { signed, disputed: disputedRaw as string[] | undefined }));
       }
       if (method === "POST" && action === "withdraw") {
         strict(await body(request), [], "withdraw");
@@ -865,7 +913,7 @@ async function route(
     // §10a. Deployment plumbing, like a catalogue or a key: the specification
     // says who composes a disclosure and what happens when one is missing, and
     // routes none of it. **Nothing here reads an item.**
-    const raw = strict(await body(request), ["merchant", "version", "items", "signature"], "disclosure");
+    const raw = strict(await body(request), ["merchant", "product", "version", "items", "signature"], "disclosure");
     const itemsRaw = raw.items;
     if (!Array.isArray(itemsRaw)) {
       throw badRequest("malformed", "items must be an array of label and value");
@@ -879,6 +927,8 @@ async function route(
     });
     engine.putDisclosure({
       merchant: requireString(raw, "merchant", "disclosure"),
+      // §10a.5. Absent or null is the merchant's standing text.
+      product: raw.product === undefined || raw.product === null ? null : requireString(raw, "product", "disclosure"),
       version: requireString(raw, "version", "disclosure"),
       items,
       signature: requireString(raw, "signature", "disclosure"),

@@ -60,6 +60,11 @@ export class DeliveryRegister {
     return row;
   }
 
+  /** The approval surface reads this: a screen drawn before any delivery is recorded shows no carriage rather than failing. */
+  find(offer: string): Delivery | undefined {
+    return this.rows.get(offer);
+  }
+
   mustGet(offer: string): Delivery {
     const row = this.rows.get(offer);
     if (!row) throw notFound(`no delivery for offer ${offer}`);

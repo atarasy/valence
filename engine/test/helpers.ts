@@ -4,6 +4,7 @@ import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
 import { canonicalDisclosure } from "../src/shared/disclosure.js";
+import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 
 /** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");
@@ -11,6 +12,23 @@ export const MANDATE_PAIR = generateKeyPairSync("ed25519");
 export async function decideSigned(engine: ValenceEngine, offerId: string, decisions: DecisionInput[]) {
   const signature = sign(null, canonicalDecisions(offerId, decisions), MANDATE_PAIR.privateKey).toString("base64");
   return await engine.decide(offerId, decisions, signature);
+}
+
+/**
+ * §6.5. Settle a physical box the household confirms: the statement the
+ * collection's record proposes, with `disputed` lines marked, signed as the
+ * mandate. Question 36.
+ */
+export async function settleSigned(
+  engine: ValenceEngine,
+  offerId: string,
+  disputed: string[] = [],
+  now = Date.now()
+) {
+  const offer = engine.mustGet(offerId, now);
+  const lines = statementLines(offer, disputed);
+  const signature = sign(null, canonicalStatement(offerId, lines), MANDATE_PAIR.privateKey).toString("base64");
+  return await engine.settle(offerId, now, { signed: { signature }, disputed });
 }
 
 export const CONFIG_VERSION = "cfg-1";
@@ -27,10 +45,11 @@ export const MERCHANT_PAIR = generateKeyPairSync("ed25519");
  * disclose is the seller's law, and a fixture that pretended otherwise would
  * assert something this codebase cannot check.
  */
-export function disclosureFor(merchant: string) {
+export function disclosureFor(merchant: string, product: string | null = null) {
   const body = {
     merchant,
-    version: "d-1",
+    product,
+    version: product === null ? "d-1" : `d-1-${product}`,
     items: [
       { label: "payment", value: "charged when the household confirms" },
       { label: "delivery", value: "already placed" },
