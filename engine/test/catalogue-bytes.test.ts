@@ -56,18 +56,19 @@ describe("the catalogue's signed bytes", () => {
     // between who sold it and who made it, and the signature still verified.
     // The mandate's form and the edge's had both been escaped for exactly this
     // reason; the catalogue was the third place with the same defect.
-    const fused: PresenterConfig = {
+    // **The pair has to keep the same number of parts**, which the first
+    // version of this test did not: an empty maker still emits its separator,
+    // so the two forms differed by one colon and the test passed against the
+    // unescaped join it was written to catch. Measured 2026-09-12, by running
+    // `catalogue_form_is_malleable` against it: the mutation survived.
+    const left: PresenterConfig = {
       ...base,
-      products: {
-        "tea-a": { ...base.products["tea-a"]!, merchant: "shop-1", maker: "made-by-tea" },
-      },
+      products: { "tea-a": { ...base.products["tea-a"]!, merchant: "a:b", maker: "c" } },
     };
-    const moved: PresenterConfig = {
+    const right: PresenterConfig = {
       ...base,
-      products: {
-        "tea-a": { ...base.products["tea-a"]!, merchant: "shop-1:made-by-tea", maker: "" },
-      },
+      products: { "tea-a": { ...base.products["tea-a"]!, merchant: "a", maker: "b:c" } },
     };
-    expect(bytes(moved)).not.toBe(bytes(fused));
+    expect(bytes(left)).not.toBe(bytes(right));
   });
 });
