@@ -629,7 +629,16 @@ export class ValenceEngine {
         .reduce((sum, c) => sum + c.unit_price * c.quantity, 0);
       if (outside > mandate.ceiling_out_of_network) {
         throw unprocessable(
-          "over_ceiling",
+          // §16.6 names this refusal `mandate_ceiling_out_of_network`, and the
+          // engine answered to `over_ceiling` from the day the section was
+          // written. **The section's whole subject is that a person must be
+          // able to tell one `422` from another**, and a name it does not list
+          // is one nobody can look up. A conformance probe asserted the wrong
+          // one, so the suites were certifying the departure. Measured and
+          // corrected 2026-09-13 by `scripts/refusals.py`, which exists
+          // because no mutation can find a refusal that answers to the wrong
+          // word: stopping a refusal breaks a probe, renaming it breaks none.
+          "mandate_ceiling_out_of_network",
           `this offer could cost ${outside} at merchants outside the network, above the ceiling of ${mandate.ceiling_out_of_network}`
         );
       }

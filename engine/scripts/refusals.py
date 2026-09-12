@@ -51,7 +51,14 @@ named = sorted(set(re.findall(r"[a-z][a-z_]{3,}", section.group(1))))
 emitted = set()
 for path in (HERE / "src").rglob("*.ts"):
     text = path.read_text()
-    for m in re.finditer(r'(?:unprocessable|conflict|badRequest|notFound)\(\s*"([a-z_]+)"', text):
+    # **The name may not sit on the same line as the call.** A comment between
+    # the two is ordinary, and the first version of this read only the same
+    # line: it reported `mandate_ceiling_out_of_network` as absent from the
+    # engine on the very afternoon it was put there, under a comment saying
+    # why. A detector too narrow is as useless as one too broad.
+    for m in re.finditer(
+        r'(?:unprocessable|conflict|badRequest|notFound)\((?:\s|//[^\n]*\n)*"([a-z_]+)"', text
+    ):
         emitted.add(m.group(1))
 
 # What a probe asserts. A name in a suite is a name something checks.
@@ -85,6 +92,17 @@ if stray:
     print("\nasserted by a probe and named nowhere in the specification:")
     for n in stray:
         print(f"  {n}")
+# **And the other direction, which the first version could not show.** A name
+# the specification uses and no probe asserts is a refusal nothing checks the
+# wording of, and rewriting one probe can take the last assertion of a name
+# away without anything saying so. That happened on 2026-09-13 to
+# `cooling_over`, when the probe that asserted it was rewritten for question 43.
+unasserted = sorted(n for n in emitted if n in spec and n not in asserted)
+if unasserted:
+    print("\nnamed in the specification and asserted by no probe:")
+    for n in unasserted:
+        print(f"  {n}")
+
 print(f"\n{len(emitted)} refusal names in the engine, {unnamed} of them in no section.")
 
 print("\nThis judges nothing. A name missing from the engine may be one the")

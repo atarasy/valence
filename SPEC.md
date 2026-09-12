@@ -883,7 +883,7 @@ the second build starts without the probes and the mutations this one had.
 
 ### 16.5 Cooling
 
-A decided set under a mandate with `cooling_seconds` set does not settle when it is signed. `POST /offers/{id}/settle` MUST refuse with `422` until `cooling_seconds` have passed since the decision, and `DELETE /offers/{id}/decisions` withdraws the set before then, returning the offer to `presented`. Withdrawing is the person's alone and needs no co-signer.
+A decided set under a mandate with `cooling_seconds` set does not settle when it is signed. `POST /offers/{id}/settle` MUST refuse with `422 mandate_cooling` until `cooling_seconds` have passed since the decision, and `DELETE /offers/{id}/decisions` withdraws the set before then, returning the offer to `presented`. Withdrawing is the person's alone and needs no co-signer. **The refusals of this section name themselves too**, as §16.6 requires of its own: `422 no_cooling` where the mandate sets no window, `422 cooling_over` once it has closed, and `409 not_withdrawable` where the state came from a collection rather than from a signed set. **They were unnamed here until 2026-09-13**, and a name the specification does not carry is one no probe has to assert and no second implementation has to produce: `cooling_over` lost its only assertion that day when the probe holding it was rewritten, and nothing could say so.
 
 **Cooling does not make silence into consent** (clause 32). It applies only after the person has confirmed: the set is signed, and the window is time in which a signed decision can be taken back. An unconfirmed offer is still no order.
 
