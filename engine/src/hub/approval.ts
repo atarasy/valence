@@ -28,6 +28,13 @@ export type ApprovalCandidate = {
   merchant: string;
   maker: string;
   ships: string;
+  /**
+   * Clause 10, §6.2. Who gave this candidate, or null when it is bought. A
+   * gift arrives at its price and is never billed, so a screen showing a
+   * unit price and no giver asks a person to sign without telling them which
+   * lines cost money. Missing until 2026-09-12, found by a refutation pass.
+   */
+  given_by: string | null;
   id: string;
   product: string;
   quantity: number;
@@ -158,6 +165,7 @@ export class ApprovalDesk {
         unit_price: c.unit_price,
         merchant: c.merchant,
         maker: c.maker,
+        given_by: c.given_by,
         ships: c.ships,
         is_exploration: c.is_exploration,
         alternatives: entry.alternatives,
