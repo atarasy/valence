@@ -165,11 +165,6 @@ await postConfig({
     "coffee-a": { merchant: "maker-a", maker: "made-by-coffee", ships: "carrier-a", price: 1500, category: "coffee", physical: PHYSICAL },
     "miso-a": { merchant: "maker-a", maker: "made-by-miso", ships: "carrier-a", price: 700, category: "seasoning", physical: PHYSICAL },
     "nori-a": { merchant: "maker-a", maker: "made-by-nori", ships: "carrier-a", price: 1100, category: "seasoning", physical: PHYSICAL },
-    // §10a. Its merchant registers no disclosure, so a decision naming it is
-    // refused. A deployment whose every merchant has one cannot show a probe
-    // what happens when one is missing, which is the requirement that has a
-    // consequence.
-    "undisclosed-a": { merchant: "merchant-without-a-block", maker: "made-by-nobody", ships: "carrier-a", price: 800, physical: PHYSICAL },
   },
 });
 
@@ -212,6 +207,23 @@ await postConfig({
   products: {
     "tea-a": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 1200, physical: PHYSICAL },
     "tea-b": { merchant: "maker-a", maker: "made-by-tea", ships: "carrier-a", price: 900, physical: PHYSICAL },
+  },
+});
+
+// §10a. A catalogue whose one product names a merchant that registers no
+// disclosure, so that the refusal at the decision can be reached.
+//
+// **It is its own version, under the other presenter.** A product nobody has
+// been offered is one the exploration floor counts across every catalogue its
+// presenter registered (§5), so putting it under `reference-merchant` silently
+// made "this household has seen everything" untrue and took a floor probe red
+// with it. Measured twice on 2026-09-12, once in the main catalogue and once in
+// a second catalogue under the same presenter.
+await postConfig({
+  version: "cfg-conformance-undisclosed",
+  presenter: "other-merchant",
+  products: {
+    "undisclosed-a": { merchant: "merchant-without-a-block", maker: "made-by-nobody", ships: "carrier-a", price: 800, physical: PHYSICAL },
   },
 });
 
@@ -439,3 +451,4 @@ console.log(
 // under a merchant this seed deliberately leaves without a block.
 console.log(firstDisclosure);
 console.log("undisclosed-a");
+console.log("cfg-conformance-undisclosed");

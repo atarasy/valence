@@ -109,6 +109,7 @@ UNATTESTED_EDGE="$(printf '%s\n' "$SEED_OUT" | sed -n 4p)"
 MANDATE_STATE="$(printf '%s\n' "$SEED_OUT" | sed -n 5p)"
 DISCLOSURE_JSON="$(printf '%s\n' "$SEED_OUT" | sed -n 6p)"
 UNDISCLOSED_PRODUCT="$(printf '%s\n' "$SEED_OUT" | sed -n 7p)"
+UNDISCLOSED_CONFIG="$(printf '%s\n' "$SEED_OUT" | sed -n 8p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
@@ -134,6 +135,7 @@ VALENCE_MANDATE_STATE="$MANDATE_STATE" \
 VALENCE_PRICES='{"tea-a":1200,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
 VALENCE_MAKERS='{"tea-a":"made-by-tea","tea-b":"made-by-tea","coffee-a":"made-by-coffee","miso-a":"made-by-miso","nori-a":"made-by-nori"}' \
 VALENCE_PRODUCT_UNDISCLOSED="$UNDISCLOSED_PRODUCT" \
+VALENCE_CONFIG_VERSION_UNDISCLOSED="$UNDISCLOSED_CONFIG" \
 VALENCE_DISCLOSURE="$DISCLOSURE_JSON" \
 VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \

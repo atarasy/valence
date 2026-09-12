@@ -11,13 +11,11 @@ import pathlib
 # working, and it is also why the mutation has to change the view.
 
 p = pathlib.Path("src/http.ts"); s = p.read_text()
-a = """    mandate: o.mandate,
-    candidates: o.candidates.map(candidateView),
-  };"""
+# Re-anchored 2026-09-12, when §10a's disclosures were added between the
+# candidates and the closing brace.
+a = """    candidates: o.candidates.map(candidateView),"""
 assert a in s, "http.ts offerView anchor has drifted"
-s = s.replace(a, """    mandate: o.mandate,
-    candidates: o.candidates.map(candidateView),
+s = s.replace(a, """    candidates: o.candidates.map(candidateView),
     code: "dc-probe-2",
-    carriage: 550,
-  };""", 1)
+    carriage: 550,""", 1)
 p.write_text(s)

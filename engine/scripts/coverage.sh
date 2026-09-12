@@ -23,7 +23,7 @@ OUT="${1:-}"
 # Counting those as "shown to fail" would make the headline number mean
 # something other than the rule in tests/README.md, so they are measured
 # separately and named here. Found on 2026-09-09 by an adversarial pass.
-EXCLUDE="require_registered_merchant reject_foreign_offer_client"
+EXCLUDE="require_registered_merchant reject_foreign_offer_client disclosure_not_carried"
 
 # Hashing the files rather than asking git what is committed, because a sweep
 # is often run against a working tree that is ahead of HEAD, and a key that
@@ -121,7 +121,11 @@ fi
 # prints a probe's name whether it failed in its setup or in its assertion.
 # So the spread is reported and judged by a person. Measured 2026-09-10:
 # reject_foreign_offer_client spans twelve suites and is excluded;
-# decide_writes_on_refusal spans nine and is not.
+# decide_writes_on_refusal spans nine and is not. **disclosure_not_carried was
+# added on 2026-09-12**: every decided set names a merchant, so an offer with
+# no disclosure refuses every decision in every suite, and 28 probes fail in
+# their setup. The probe that proves §10a.4 is the one named in its ledger row,
+# and it fails on its assertion; the other 27 prove nothing about it.
 echo ""
 echo "mutations whose failures span four or more suites (check whether they break the fixture):"
 for f in scripts/mutations/*.py; do
