@@ -5,6 +5,7 @@ import type { openMemberAuthority } from '../member-read/authority.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
 type Policy = { environment: string; origin: string; rpID: string; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
+export type PreparedAssertion = AuthenticationResponseJSON;
 type Credential = { id: string; public_key: Uint8Array; counter: number; user_handle: string; revision: number };
 function b64(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 4096 && /^[A-Za-z0-9_-]+$/.test(value) && Buffer.from(value, 'base64url').toString('base64url') === value;
@@ -63,6 +64,25 @@ export function openVerifiedLogin(path: DatabaseTarget, authority: Authority, po
       if (!b64(id)) return;
       const row = db.query('SELECT public_key FROM passkeys WHERE id=? AND active=1').get(id) as { public_key: Uint8Array } | null;
       return row ? new Uint8Array(row.public_key) : undefined;
+    },
+    /** Internal prepared-authorisation verifier; must share the outer local transaction. */
+    async verifyPreparedAssertion(credentialID: string, challenge: string, response: AuthenticationResponseJSON) {
+      if (!shared || !b64(challenge) || challenge.length !== 43 || !b64(credentialID)) throw new Error('Prepared assertion unavailable');
+      const fixed = structuredClone(response);
+      if (!fixed || JSON.stringify(fixed).length > 16384 || fixed.id !== credentialID || fixed.rawId !== credentialID || fixed.type !== 'public-key' || !fixed.response) throw new Error('Prepared assertion unavailable');
+      for (const value of [fixed.response.clientDataJSON, fixed.response.authenticatorData, fixed.response.signature]) if (!b64(value)) throw new Error('Prepared assertion unavailable');
+      const client = JSON.parse(Buffer.from(fixed.response.clientDataJSON, 'base64url').toString('utf8'));
+      if ((client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined) throw new Error('Cross-origin assertion refused');
+      const credential = db.query('SELECT * FROM passkeys WHERE id=? AND active=1').get(credentialID) as Credential | null;
+      if (!credential || (fixed.response.userHandle != null && fixed.response.userHandle !== credential.user_handle)) throw new Error('Prepared assertion unavailable');
+      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
+        credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter } });
+      if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credentialID) throw new Error('Prepared assertion unavailable');
+      const counter = result.authenticationInfo.newCounter; integer(counter);
+      if (counter > 0xffffffff) throw new Error('Invalid authenticator counter');
+      const updated = db.query('UPDATE passkeys SET counter=?,revision=revision+1 WHERE id=? AND revision=? AND active=1').run(counter, credentialID, credential.revision);
+      if (updated.changes !== 1) throw new Error('Credential changed during verification');
+      return { counter };
     },
     begin() {
       const at = now(), expiresAt = at + challengeLifetimeMs; integer(expiresAt);

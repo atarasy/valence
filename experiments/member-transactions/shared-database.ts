@@ -9,6 +9,7 @@ export const sharedTableGroups = [
   ['challenges', 'login_meta', 'passkeys'],
   ['binding_meta', 'bindings'],
   ['operation_meta', 'operations'],
+  ['statement_review_meta', 'statement_reviews'],
 ];
 /** Internal factory owned by the outer local transaction. No raw connection escapes. */
 export function sharedDatabase(db: Database, scope: Scope, check: () => void): SharedDatabase {

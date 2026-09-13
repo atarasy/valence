@@ -26,7 +26,7 @@ export function loginResponse(pair: ReturnType<typeof generateKeyPairSync>, cred
   return { id: credential, rawId: credential, type: 'public-key' as const, clientExtensionResults: {}, response: { clientDataJSON: client.toString('base64url'), authenticatorData: auth.toString('base64url'), signature: sign('sha256', Buffer.concat([auth, digest(client)]), pair.privateKey).toString('base64url'), userHandle: user } };
 }
 export type UnifiedInput = { token: string; credential: string; session: string; statement: FixtureStatement; operation: JournalOperation };
-export async function seedUnified(path: string) {
+export async function seedUnified(path: string, loginCounter = 1) {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }), jwk = pair.publicKey.export({ format: 'jwk' });
   const [statement] = await seedAtomicFixture(path, 1, null, pair), unit = openAtomicStore(path, atomicScope);
   const credential = randomBytes(32).toString('base64url'), user = randomBytes(32).toString('base64url');
@@ -38,7 +38,7 @@ export async function seedUnified(path: string) {
       r.login.provisionVerifiedPasskey(credential, cose, 0, user);
       r.authority.bindResource({ kind: 'mandate', id: 'mandate-1' }, { household: 'house' });
       r.authority.bindResource({ kind: 'offer', id: statement!.offer }, { household: 'house', presenter: 'merchant-1' });
-      const flow = r.login.begin(), session = await r.login.finish(flow.id, loginResponse(pair, credential, user, flow.publicKey.challenge));
+      const flow = r.login.begin(), session = await r.login.finish(flow.id, loginResponse(pair, credential, user, flow.publicKey.challenge, loginCounter));
       r.bindings.bind(session.token, 'mandate-1');
       const canonical = canonicalStatement(statement!.offer, 550, statementLines(r.engine.mustGet(statement!.offer), [])).toString();
       const operation = await r.journal.prepare(session.token, { offer: statement!.offer, mandate: 'mandate-1', presenter: 'merchant-1', canonical, reviewedRevision: hash('fixture-reviewed-revision'), expiresAt: fixtureTime + 4000 });

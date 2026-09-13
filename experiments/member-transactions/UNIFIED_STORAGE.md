@@ -40,3 +40,7 @@ A future offline cutover must stop every old writer, retain immutable backups an
 Before member writes, implement a non-fixture composition with consistent reviewed snapshots and actual transaction assertions, including a shared login/transaction counter/replay policy. Migrate all engine/hub writers and resolve candidate-index/received-lineage reconstruction for fresh runtimes. Credential provisioning and multi-device/rotation policy remain required. Remote payments need stable effect IDs, a durable intent/outcome protocol and authoritative recovery. Holding this database transaction around a network effect would not make that effect reversible.
 
 Cryptographic verification currently holds the local write lock. The Store has no execution-time limit for its callback; lock-duration/throughput measurements and an optimistic verify-then-recheck design may be needed before deployment. Expired history may be inspected only under current authority; a revoked member cannot bypass checks by requesting an old receipt. Admin recovery is a separate trusted surface, not an enabled member endpoint.
+
+## Prepared-authorisation follow-up
+
+[Prepared statement authorisation](STATEMENT_AUTHORISATION.md) now derives a complete local review and verifies a separate contextual member-authorisation profile using the login counter store. That proof is not a legacy engine settlement signature. The new service performs no claim or settlement; protocol integration remains required before dispatch.
