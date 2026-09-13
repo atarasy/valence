@@ -101,3 +101,9 @@ A member authorisation from this profile is not a legacy engine settlement signa
 ## Persistent reconstruction increment, 2026-09-13
 
 Fresh engines rebuild candidate lookup and persist exact bare receipt references under SPEC Appendix B. Duplicate candidate imports and ambiguous stored state are refused. See [engine reconstruction and writer inventory](ENGINE_RECONSTRUCTION.md). This closes the process-local index blocker; full writer adoption and existing-file migration are still required before exposing member writes.
+
+## Internal local HTTP unit
+
+`openLocalHTTP` is a callable Request/Response integration harness with no network listener. Each admitted request uses fresh engine, ledger, registry, recovery, approvals, permissions and delivery registers in one `openAtomicStore.run`. It uses local mandate/day/delivery sources and both reference roles. Unknown configuration fields and provider/callback injection are refused. Request bodies are bounded and read before locking; response bodies are bounded and copied before commit. Only 2xx responses commit. Router error responses are materialised, thrown through the transaction to force rollback, and returned outside it. Unexpected failures return a generic 500. Bounded FIFO admission serialises same-instance work; the database lock serialises other instances and shared member writers.
+
+This harness does not authenticate reference routes or enable member endpoints. Import atomicity does not establish semantic validation of every imported field. Existing-file adoption and native integration remain disabled. See `LOCAL_HTTP.md` for measured behaviour and deployment limits.

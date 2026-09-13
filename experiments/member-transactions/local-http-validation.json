@@ -1,0 +1,53 @@
+{
+  "baseline": "173fef06919208aabd5b39b2baf681754dc5d0d9",
+  "suite": {
+    "passed": 266,
+    "failed": 0,
+    "assertions": 1181,
+    "files": 25,
+    "new_tests": 9,
+    "seconds": 3.14
+  },
+  "strict_types": "passed",
+  "negative_controls": {
+    "rollback": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 2
+    },
+    "response-limit": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 1
+    }
+  },
+  "sources": {
+    "experiments/member-transactions/local-http.ts": "86e6b0c575deb7373614835cc04578cce4d4c7d676c087f7e97686376309c929",
+    "experiments/member-transactions/local-http.test.ts": "909841ae7205e1a5336c34ad713e121fb3a4916851c495ecd4b7cf5bf52200c9"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-http-tests-20260913.log",
+      "sha256": "5b44545318f39d6003c3334771cac38ddb216d78aea681da91e4341e30694d97"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-http-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative-rollback": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-http-negative-rollback-20260913.log",
+      "sha256": "8f44c3d3eef10191bc2ae57dc1453287d00c7de5ad7564ed56beeaba2b6770d7"
+    },
+    "negative-response-limit": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-http-negative-response-limit-20260913.log",
+      "sha256": "3f5e9d621270490411228ac3f8a9852c36fa28e2e1aae88a69c0141d2251827c"
+    }
+  },
+  "limits": [
+    "Internal Request/Response harness; no network listener",
+    "Reference routes are not a secured member API",
+    "No staged semantic import validation or existing-file migration",
+    "No body transport deadline or native ceremony",
+    "No engine source or mutation corpus changes; no new anchor audit required"
+  ]
+}
