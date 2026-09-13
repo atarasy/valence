@@ -135,6 +135,12 @@ export function openMemberAuthority(path: string, options: Options) {
       timestamp(row.expires);
       return { session: row.session, expiresAt: row.expires, credential: row.credential, principal: row.principal, household: row.household, presenters: [...presenters] as string[] };
     },
+    /** Synchronous detached ownership snapshot for the internal journal. */
+    transactionOfferOwner(id: string) {
+      name(id);
+      const row = db.query("SELECT household,presenter FROM ownership WHERE kind='offer' AND id=? AND invalidated=0").get(id) as { household: string; presenter: string } | null;
+      return row ? { household: row.household, presenter: row.presenter } : undefined;
+    },
     bindResource(resource: Resource, owner: Ownership) {
       name(resource.id); name(owner.household);
       if (resource.kind !== 'offer' && resource.kind !== 'mandate') throw new Error('Invalid resource kind');

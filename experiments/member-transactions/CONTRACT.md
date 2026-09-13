@@ -52,7 +52,7 @@ An operation receipt needs the operation ID, kind, resource, principal scope, re
 
 ## Current implementation boundary
 
-The Atarasy core increment prepares physical statement bytes and checks read-back evidence. It neither provisions transaction authority nor dispatches a write. No API in this experiment is exposed by the member handler. Durable operation storage, digital operation receipts and the commit adapter remain required implementation work.
+The Atarasy core increment prepares physical statement bytes and checks read-back evidence. It neither provisions transaction authority nor dispatches a write. No API in this experiment is exposed by the member handler. The internal journal below now supplies durable storage and claims; digital operation receipts, the assertion-verifying dispatcher and external-effect recovery remain required implementation work.
 
 ## Credential bridge increment
 
@@ -61,3 +61,11 @@ The first internal bridge binds only an existing engine mandate identity to the 
 Resolution rechecks live authority, active login key, authoritative mandate ownership and the current engine key. It returns detached scope evidence only, with no assertion ceremony or dispatch privilege. ES256/P-256 uses a closed five-field COSE profile with 32-byte coordinates and no trailing bytes. Unsupported profiles fail closed. This restriction needs real native-device acceptance before widening.
 
 The bridge uses its own scoped SQLite store and synchronous read/compare/write steps. That closes no distributed commit or revocation race: a dispatcher must revalidate at the future atomic effect boundary described above. The member handler remains read-only.
+
+## Durable journal increment
+
+The internal physical-statement journal stores the exact canonical bytes, reviewed revision, bound principal/credential/mandate/key, owned offer/presenter, operation ID, request digest and expiry. Its prepared-to-dispatching transition is atomic in SQLite. Only the caller that changes that row acquires a new claim. Identical repeats return state without permission to dispatch; differing request or assertion fingerprints conflict. A blocking row remains unique per offer through dispatching, uncertain and committed states.
+
+The journal rechecks current binding and offer ownership for member reads, cancellation and claims. A renewed session for the same binding may read its old operation; expiry limits claiming, not authenticated inspection of history. Cancellation and refusal apply only before dispatch. A crash never resets dispatching to prepared. Internal recovery can mark uncertainty or pin an authoritative receipt digest but cannot issue another claim.
+
+Canonical statement construction, consistent reviewed snapshots, transaction assertion verification, revocation at the external effect boundary, effect idempotency and authoritative recovery remain adapter responsibilities. The journal is an internal persistence/claim primitive, not an enabled HTTP operation route or proof of a single provider charge.

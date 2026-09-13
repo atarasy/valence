@@ -42,6 +42,7 @@ export function openMandateBindings(path: string, authority: Authority, login: L
   const stored = (mandate: string) => db.query('SELECT * FROM bindings WHERE mandate=?').get(mandate) as Binding | null;
   function matches(a: Binding, b: Binding) { return a.mandate === b.mandate && a.principal === b.principal && a.credential === b.credential && a.household === b.household && a.fingerprint === b.fingerprint; }
   return {
+    scope: Object.freeze({ environment: authority.scope.environment, audience: authority.scope.audience, rpID: login.scope.rpID }),
     /** Idempotent only for the exact existing binding. No engine identity write. */
     bind(token: string, mandate: string) {
       return db.transaction(() => {
