@@ -1,0 +1,17 @@
+{
+  "name": "@atarasy/member-postgres-experiment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.10"
+  }
+}

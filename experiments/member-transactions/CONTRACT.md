@@ -137,3 +137,17 @@ The Swift consumer binds prepared operation IDs to its environment, session, hou
 ## Native statement review consumer
 
 A native approval follows display of the frozen statement and mandate, with a fresh operation review before requesting an assertion. The platform assertion restricts allowed credentials to the operation's selected credential and requires user verification. Session/selection invalidation between async steps prevents late assertions from being dispatched. Persisted attempted operations are discoverable for exact-session outcome reads and cannot automatically reopen signing. No outcome state authorises an automatic repeat.
+
+## Combined development member composition
+
+Compose existing auth, protected member reads and member statement routes on the same scoped atomic store. Enrolment joins the shared capability; failures consume invitations/challenges while credential activation uses a savepoint. Preserve the optional complete enrolment group with an exact additive snapshot schema, without relaxing legacy schema validation. Derive auth lifetimes from the bound member configuration and require trusted peer admission with bounded bodies/deadlines. Unknown/admin routes never reach the reference handler. Static AASA and iOS settings are generated from explicit app/domain identity and checked separately against a signed build; no identifier by itself establishes provisioning or domain ownership.
+
+The selected development deployment identity is environment `development`, origin `https://api-dev.vox.delivery` and RP ID `api-dev.vox.delivery`. The root `vox.delivery` remains the existing website. These values require a separately initialised database, not an override of an existing runtime binding. iOS development uses Team ID `83W4J65UE6`, Bundle ID `dev.atarasy.prototype` and `webcredentials:api-dev.vox.delivery`; the candidate AASA prefix remains subject to signed-app verification.
+
+### Confirmed hosted persistence target
+
+The user selected Vercel plus Neon PostgreSQL, recorded in Vault decision 57. Railway with local SQLite and Convex are not the selected deployment paths. Keep the member HTTP and native passkey contracts, and replace SQLite-specific persistence with a PostgreSQL transaction boundary. Test shared operation claims, replay consumption, savepoint rollback, revocation races and outcome reconciliation against real PostgreSQL before deployment. Existing local SQLite snapshot/cutover evidence does not validate PostgreSQL migration or Vercel multi-instance behaviour. No hosted migration is complete yet.
+
+### PostgreSQL foundation boundary
+
+Vault decision 58 specifies a pg transaction connection, deployment-wide control-row FOR UPDATE lock, immutable scope plus writer epoch/enabled checks, ordered engine-row snapshot and staged explicit Map writes. Drizzle tracks schema migrations. Persist set-time JSON bytes and insertion order. Bound transactions and snapshot size. Do not retry callbacks or ambiguous commits automatically. This first foundation does not implement the authority/login/enrolment/journal SQL participants or a hosted HTTP service.

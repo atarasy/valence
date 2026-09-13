@@ -14,7 +14,7 @@ export function memberRuntimeIdentity(input:MemberRuntimeConfig) {
  return {profile:'atarasy.member-runtime.1' as const,config:Object.freeze(c),fingerprint:createHash('sha256').update(JSON.stringify(['atarasy.member-runtime.1',ordered])).digest('hex')};
 }
 const json=(value:unknown,status=200)=>Response.json(value,{status,headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}});
-async function inputBody(request:Request,maximum:number,timeout:number) {
+export async function inputBody(request:Request,maximum:number,timeout:number) {
  const reader=request.body?.getReader();if(!reader)return undefined;
  let timer:ReturnType<typeof setTimeout>|undefined;
  try {
@@ -34,6 +34,7 @@ export async function openMemberHTTP(path:string,input:MemberRuntimeConfig) {
   if(!existing)map.set('current',identity);
  });}finally{binding.close();}
  const api=openStatementAuthorisations(selected,{environment:c.environment,origin:c.origin,rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs,maxSessionLifetimeMs:c.maxSessionLifetimeMs,engine:{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID}});
+ try { await api.initialise(); } catch(error) { api.close(); throw error; }
  let closed=false,pending=0,tail:Promise<unknown>=Promise.resolve();const budgets=new Map<string,{until:number;used:number}>();
  return {
   descriptor:Object.freeze({path:selected,fingerprint:identity.fingerprint}),

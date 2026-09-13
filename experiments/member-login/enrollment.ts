@@ -1,21 +1,23 @@
-import { Database } from 'bun:sqlite';
+import { assertParticipants, databaseFor, registerParticipant, type DatabaseTarget } from '../member-transactions/shared-database.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { generateRegistrationOptions, verifyRegistrationResponse, type RegistrationResponseJSON } from '@simplewebauthn/server';
 import type { openMemberAuthority } from '../member-read/authority.ts';
 import type { openVerifiedLogin } from './login.ts';
 type Policy = { environment: string; origin: string; rpID: string; rpName: string; invitationLifetimeMs: number; challengeLifetimeMs: number; now?: () => number };
 function integer(n: number) { if (!Number.isSafeInteger(n) || n < 0) throw new Error('Invalid enrollment time'); }
-export function openEnrollment(path: string, authority: ReturnType<typeof openMemberAuthority>, login: ReturnType<typeof openVerifiedLogin>, policy: Policy) {
+export function openEnrollment(path: DatabaseTarget, authority: ReturnType<typeof openMemberAuthority>, login: ReturnType<typeof openVerifiedLogin>, policy: Policy) {
   const { environment, origin, rpID, rpName, invitationLifetimeMs, challengeLifetimeMs } = policy;
   if (environment !== authority.scope.environment || origin !== authority.scope.audience || environment !== login.scope.environment || origin !== login.scope.origin || rpID !== login.scope.rpID || !rpName) throw new Error('Enrollment scope mismatch');
   for (const lifetime of [invitationLifetimeMs, challengeLifetimeMs]) { integer(lifetime); if (!lifetime) throw new Error('Positive enrollment lifetime required'); }
   const clock = policy.now ?? Date.now, now = () => { const at = clock(); integer(at); return at; };
   const scope = JSON.stringify([1, environment, origin, rpID]);
-  const db = new Database(path, { create: true, strict: true });
+  assertParticipants(path, authority, login);
+  const { db, shared } = databaseFor(path, { environment, audience: origin });
   try {
-    db.run('PRAGMA busy_timeout=1000');
+    if (!shared) db.run('PRAGMA busy_timeout=1000');
     db.transaction(() => {
-      const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      let tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      if (shared) tables = tables.filter(t => ['enrollment_meta','handles','invitations','flows'].includes(t.name));
       if (!tables.length) {
         db.run(`CREATE TABLE enrollment_meta (scope TEXT NOT NULL);
           CREATE TABLE handles (principal TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE);
@@ -28,10 +30,10 @@ export function openEnrollment(path: string, authority: ReturnType<typeof openMe
         if (rows.length !== 1 || rows[0]!.scope !== scope) throw new Error('Enrollment scope mismatch');
       }
     }).immediate();
-    db.run('PRAGMA journal_mode=WAL'); db.run('PRAGMA synchronous=FULL');
+    if (!shared) { db.run('PRAGMA journal_mode=WAL'); db.run('PRAGMA synchronous=FULL'); }
   } catch (error) { db.close(); throw error; }
   const digest = (token: string) => createHash('sha256').update(JSON.stringify(['atarasy.enrollment.1', scope, token])).digest('hex');
-  return {
+  return registerParticipant(path, {
     /** Trusted administration only. The bearer invitation selects the principal. */
     issueInvitation(principal: string) {
       if (!authority.isActivePrincipal(principal)) throw new Error('Principal unavailable');
@@ -76,9 +78,10 @@ export function openEnrollment(path: string, authority: ReturnType<typeof openMe
       if (!verified.verified || !verified.registrationInfo.userVerified || flow.expires <= now() || !authority.isActivePrincipal(flow.principal)) throw new Error('Enrollment unavailable');
       const credential = verified.registrationInfo.credential;
       if (credential.id !== input.id || input.rawId !== input.id) throw new Error('Enrollment unavailable');
-      login.enrolVerifiedPasskey(flow.principal, credential.id, credential.publicKey, credential.counter, flow.handle);
+      const activate = () => login.enrolVerifiedPasskey(flow.principal, credential.id, credential.publicKey, credential.counter, flow.handle);
+      if (shared) db.transaction(activate).immediate(); else activate();
       return { registered: true as const };
     },
     close() { db.close(); },
-  };
+  });
 }

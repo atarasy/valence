@@ -4,8 +4,9 @@ import { mkdirSync, openSync, closeSync, chmodSync, writeFileSync } from 'node:f
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import schema from './operational-schema-v1.json';
+import enrollmentSchema from './operational-schema-v2.json';
 export const operationalNamespaces = 'offers bare_receipts notes settlements member_statement_confirmations configs edges identities disclosures confirmations root_endorsed reservations mandates recoveries household_settled household_offers delivery permissions permission_actions permission_queries recoverers recovery_channels recovery_log deliberations registry_entries registry_keys writer_activation member_runtime'.split(' ');
-const tables = 'atomic_meta atomic_rows authority_meta principals credentials sessions ownership login_meta passkeys challenges binding_meta bindings operation_meta operations statement_review_meta statement_reviews'.split(' ');
+const baseTables = 'atomic_meta atomic_rows authority_meta principals credentials sessions ownership login_meta passkeys challenges binding_meta bindings operation_meta operations statement_review_meta statement_reviews'.split(' ');
 type Scope = { environment: string; origin: string; rpID: string };
 type Snapshot = Record<string, Record<string, any>[]>;
 function stable(v: any): string { if (v instanceof Uint8Array) return JSON.stringify({ blob: Buffer.from(v).toString('base64') }); if (v === null || typeof v !== 'object') return JSON.stringify(v); return Array.isArray(v) ? '[' + v.map(stable).join(',') + ']' : '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}'; }
@@ -24,6 +25,13 @@ function validate(rows: Snapshot, p: Scope) {
   }
   const get = (name: string, key: string) => maps.get(name)?.get(key);
   const principals = new Map(rows.principals!.map(r => [r.id,r])), credentials = new Map(rows.credentials!.map(r => [r.id,r])), passkeys = new Map(rows.passkeys!.map(r => [r.id,r]));
+  if (rows.enrollment_meta) {
+    if (only('enrollment_meta').scope !== JSON.stringify([1,p.environment,p.origin,p.rpID])) refuse();
+    const handles = new Map(rows.handles!.map(r => [r.principal,r.handle]));
+    for (const r of rows.handles!) if (!principals.has(r.principal) || !/^[A-Za-z0-9_-]{43}$/.test(r.handle)) refuse();
+    for (const r of rows.invitations!) if (!principals.has(r.principal) || !/^[a-f0-9]{64}$/.test(r.digest) || !Number.isSafeInteger(r.expires) || r.expires < 0) refuse();
+    for (const r of rows.flows!) if (!principals.has(r.principal) || handles.get(r.principal) !== r.handle || !/^[a-f0-9-]{36}$/.test(r.id) || !/^[A-Za-z0-9_-]{43}$/.test(r.challenge) || !Number.isSafeInteger(r.expires) || r.expires < 0) refuse();
+  }
   for (const r of rows.passkeys!) if (!(r.public_key instanceof Uint8Array) || !Number.isSafeInteger(r.counter) || r.counter < 0 || r.counter > 0xffffffff || !Number.isSafeInteger(r.revision) || r.revision < 0 || (r.active && !credentials.has(r.id))) refuse();
   for (const r of rows.bindings!) if (!principals.has(r.principal) || credentials.get(r.credential)?.principal !== r.principal || !passkeys.has(r.credential) || principals.get(r.principal)?.household !== r.household || get('mandates',r.mandate)?.household !== r.household) refuse();
   const candidates = new Set<string>();
@@ -51,7 +59,9 @@ function validate(rows: Snapshot, p: Scope) {
 }
 function snapshot(db: Database, p: Scope): Snapshot {
   const current = db.query("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name").all();
-  if (stable(current) !== stable(schema)) refuse();
+  const withEnrollment = stable(current) === stable(enrollmentSchema);
+  if (!withEnrollment && stable(current) !== stable(schema)) refuse();
+  const tables = withEnrollment ? [...baseTables, 'enrollment_meta','handles','invitations','flows'] : baseTables;
   const integrity = db.query('PRAGMA integrity_check').all() as Record<string,string>[];
   if (integrity.length !== 1 || Object.values(integrity[0]!)[0] !== 'ok' || db.query('PRAGMA foreign_key_check').all().length) refuse();
   const rows: Snapshot = {};
@@ -69,14 +79,15 @@ export function createOperationalSnapshot(sourcePath: string, newDirectory: stri
   if (Object.keys(p).sort().join(',') !== 'environment,origin,rpID' || typeof p.environment !== 'string' || !p.environment || new URL(p.origin).origin !== p.origin || new URL(p.origin).protocol !== 'https:' || new URL(p.origin).hostname !== p.rpID) refuse();
   const source = new Database(sourcePath,{readonly:true}); let rows: Snapshot;
   try { rows = source.transaction(() => snapshot(source,p))(); } finally { source.close(); }
+  const selectedSchema = rows.enrollment_meta ? enrollmentSchema : schema, tables = Object.keys(rows);
   const digest = contentHash(rows,p); mkdirSync(newDirectory,{mode:0o700});
   const destination = join(newDirectory,'candidate.sqlite'); closeSync(openSync(destination,'wx',0o600));
   const target = new Database(destination); let verified = false;
   try {
     target.run('PRAGMA foreign_keys=ON'); target.run('PRAGMA synchronous=FULL');
     target.transaction(() => {
-      for (const entry of schema.filter(e => e.type === 'table')) target.run(entry.sql);
-      for (const entry of schema.filter(e => e.type === 'index')) target.run(entry.sql);
+      for (const entry of selectedSchema.filter(e => e.type === 'table')) target.run(entry.sql);
+      for (const entry of selectedSchema.filter(e => e.type === 'index')) target.run(entry.sql);
       for (const name of tables) for (const row of rows[name]!) {
         const keys = Object.keys(row); target.query(`INSERT INTO "${name}" (${keys.map(k=>'"'+k+'"').join(',')}) VALUES (${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>row[k]));
       }
@@ -85,7 +96,7 @@ export function createOperationalSnapshot(sourcePath: string, newDirectory: stri
     verified = true;
   } finally {
     target.close(); chmodSync(destination,0o600);
-    writeFileSync(join(newDirectory,'snapshot.json'),JSON.stringify({profile:'atarasy.operational-snapshot.1',scope:p,digest,verified,cutover:false,rows:Object.fromEntries(tables.map(t=>[t,rows[t]!.length]))},null,2)+'\n',{mode:0o600,flag:'wx'});
+    writeFileSync(join(newDirectory,'snapshot.json'),JSON.stringify({profile:rows.enrollment_meta?'atarasy.operational-snapshot.2':'atarasy.operational-snapshot.1',scope:p,digest,verified,cutover:false,rows:Object.fromEntries(tables.map(t=>[t,rows[t]!.length]))},null,2)+'\n',{mode:0o600,flag:'wx'});
   }
   return { destination, digest, verified: true as const, cutover: false as const };
 }

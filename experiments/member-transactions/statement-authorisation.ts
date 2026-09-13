@@ -125,6 +125,7 @@ export function openStatementAuthorisations(path: string, options: Policy) {
       id, principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt, requestDigest };
   }
   return {
+    initialise() { return run(() => null); },
     prepare(token: string, input: { offer: string; disputed: string[] }) {
       const fixed = structuredClone(input);
       if (!fixed || Object.keys(fixed).sort().join(',') !== 'disputed,offer') throw new Error('Invalid statement input'); identifier(fixed.offer);
