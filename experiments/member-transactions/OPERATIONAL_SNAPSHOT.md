@@ -32,3 +32,7 @@ This is fixture-based current-schema migration evidence, not production cutover 
 ## Next gate: one active writer
 
 A running source may advance immediately after the read snapshot. The candidate must never be treated as current merely because its copy passed. Next implement a persistent writer fence understood by every supported composition, drain admitted work, create the final snapshot under that fence, compare the final digest and runtime configuration, and activate exactly one destination. Source retirement must persist across restart. A failed cutover must not leave two active writers or silently discard writes accepted after the original snapshot. Define rollback and explicit operator activation before adding the restricted member HTTP surface and Swift signing.
+
+## Subsequent durable cutover
+
+[Local writer cutover](LOCAL_CUTOVER.md) adds per-unit scope rechecking, durable freeze/retirement, fenced snapshot copying and exact-target activation with a persistent receipt. Table DDL remains unchanged; `writer_activation` is now a recognised namespace. Full deployment adoption and actual runtime fingerprint/path integration remain separate from fixture cutover tests.

@@ -43,6 +43,9 @@ export function openAtomicStore(path: string, scope: { environment: string; audi
             await Bun.sleep(5);
           }
         }
+        // Recheck after the lock: a connection opened before cutover must also stop.
+        const scopeRows = db.query('SELECT scope FROM atomic_meta').all() as { scope: string }[];
+        if (scopeRows.length !== 1 || scopeRows[0]!.scope !== fixedScope) throw new Error('Atomic writer fenced');
         active = true;
         const seen = new Set<string>();
         class ScopedMap<V> extends Map<string, V> {

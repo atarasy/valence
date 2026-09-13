@@ -1,9 +1,10 @@
+import { decodeFence } from './writer-fence.ts';
 import { Database } from 'bun:sqlite';
 import { mkdirSync, openSync, closeSync, chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import schema from './operational-schema-v1.json';
-export const operationalNamespaces = 'offers bare_receipts notes settlements member_statement_confirmations configs edges identities disclosures confirmations root_endorsed reservations mandates recoveries household_settled household_offers delivery permissions permission_actions permission_queries recoverers recovery_channels recovery_log deliberations registry_entries registry_keys'.split(' ');
+export const operationalNamespaces = 'offers bare_receipts notes settlements member_statement_confirmations configs edges identities disclosures confirmations root_endorsed reservations mandates recoveries household_settled household_offers delivery permissions permission_actions permission_queries recoverers recovery_channels recovery_log deliberations registry_entries registry_keys writer_activation'.split(' ');
 const tables = 'atomic_meta atomic_rows authority_meta principals credentials sessions ownership login_meta passkeys challenges binding_meta bindings operation_meta operations statement_review_meta statement_reviews'.split(' ');
 type Scope = { environment: string; origin: string; rpID: string };
 type Snapshot = Record<string, Record<string, any>[]>;
@@ -12,7 +13,8 @@ const hash = (v: unknown) => createHash('sha256').update(stable(v)).digest('hex'
 const refuse = (): never => { throw new Error('Operational snapshot validation failed'); };
 function validate(rows: Snapshot, p: Scope) {
   const only = (table: string) => { if (rows[table]?.length !== 1) refuse(); return rows[table]![0]!; };
-  if (only('atomic_meta').scope !== JSON.stringify(['atarasy.local-engine-unit.1', p.environment, p.origin])) refuse();
+  const base = JSON.stringify(['atarasy.local-engine-unit.1', p.environment, p.origin]);
+  if (only('atomic_meta').scope !== base) decodeFence(only('atomic_meta').scope, base);
   const a = only('authority_meta'); if (a.singleton !== 1 || a.version !== 1 || a.environment !== p.environment || a.audience !== p.origin) refuse();
   for (const [name, expected] of [['login_meta',[2,p.environment,p.origin,p.rpID]],['binding_meta',[1,p.environment,p.origin,p.rpID]],['operation_meta',[1,p.environment,p.origin]],['statement_review_meta',[1,p.environment,p.origin,p.rpID]]] as const) if (only(name).scope !== JSON.stringify(expected)) refuse();
   const maps = new Map<string, Map<string, any>>();
@@ -56,13 +58,18 @@ function snapshot(db: Database, p: Scope): Snapshot {
   for (const name of tables) rows[name] = db.query(`SELECT * FROM "${name}" ORDER BY rowid`).all() as Record<string,any>[];
   validate(rows,p); return rows;
 }
+function contentHash(rows: Snapshot, p: Scope) {
+  const normalised = { ...rows, atomic_meta: [{ scope: JSON.stringify(['atarasy.local-engine-unit.1',p.environment,p.origin]) }] };
+  return hash(normalised);
+}
+export function inspectOperationalDatabase(db: Database, p: Scope): string { return contentHash(snapshot(db,p),p); }
 /** Complete current-schema candidate. Never fences writers or changes a live path. */
 export function createOperationalSnapshot(sourcePath: string, newDirectory: string, scope: Scope) {
   const p = structuredClone(scope);
   if (Object.keys(p).sort().join(',') !== 'environment,origin,rpID' || typeof p.environment !== 'string' || !p.environment || new URL(p.origin).origin !== p.origin || new URL(p.origin).protocol !== 'https:' || new URL(p.origin).hostname !== p.rpID) refuse();
   const source = new Database(sourcePath,{readonly:true}); let rows: Snapshot;
   try { rows = source.transaction(() => snapshot(source,p))(); } finally { source.close(); }
-  const digest = hash(rows); mkdirSync(newDirectory,{mode:0o700});
+  const digest = contentHash(rows,p); mkdirSync(newDirectory,{mode:0o700});
   const destination = join(newDirectory,'candidate.sqlite'); closeSync(openSync(destination,'wx',0o600));
   const target = new Database(destination); let verified = false;
   try {
@@ -73,7 +80,7 @@ export function createOperationalSnapshot(sourcePath: string, newDirectory: stri
       for (const name of tables) for (const row of rows[name]!) {
         const keys = Object.keys(row); target.query(`INSERT INTO "${name}" (${keys.map(k=>'"'+k+'"').join(',')}) VALUES (${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>row[k]));
       }
-      const copied = snapshot(target,p); if (hash(copied) !== digest) throw new Error('Snapshot copy differs');
+      const copied = snapshot(target,p); if (contentHash(copied,p) !== digest) throw new Error('Snapshot copy differs');
     }).immediate();
     verified = true;
   } finally {

@@ -117,3 +117,9 @@ The rehearsal reads a consistent unified-store snapshot without modifying it, va
 ## Operational snapshot v1
 
 Pin the current complete unified SQLite table/index definitions in `operational-schema-v1.json` and explicitly enumerate engine namespaces. Snapshot every row with BLOB fidelity inside a read-only source transaction. Validate scopes, integrity, namespace JSON and critical authority/binding/operation/receipt relationships. Create an exclusive owner-only destination, use the pinned DDL, copy all rows transactionally with foreign keys enabled, and require exact logical equality. No state is renewed/reset. Return only digest/count metadata and a candidate path; never change a live configuration or claim a cutover. See `OPERATIONAL_SNAPSHOT.md` for supported version and verification limits.
+
+## Durable local writer cutover
+
+An updated atomic unit rechecks its exact active scope after BEGIN IMMEDIATE. A versioned fence stored in that row blocks both existing connections and new opens without changing the table schema. The operational snapshot recognises only a well-formed same-scope fence, copies it intact, and normalises it solely for logical content comparison. Snapshot copying never activates a fenced destination.
+
+Administrative cutover freezes under the writer lock, captures the final content digest and supplied runtime fingerprint, copies to the ticket's exclusive destination, validates both copies, retires the source and then enables the target. Retired sources are never automatically reopened. Resumption accepts the exact same ticket and target state only. This guarantee requires every active writer to use the updated atomic unit; old open binaries/direct database writers must be excluded before use.

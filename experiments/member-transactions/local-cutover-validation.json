@@ -1,0 +1,56 @@
+{
+  "baseline": "19ba6de180848b57441e66f2d83ddc7a9a46cc1a",
+  "suite": {
+    "passed": 286,
+    "failed": 0,
+    "assertions": 1284,
+    "files": 28,
+    "new_tests": 7,
+    "seconds": 3.59
+  },
+  "strict_types": "passed",
+  "negative_controls": {
+    "fence": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 1
+    },
+    "candidate-digest": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 3
+    }
+  },
+  "sources": {
+    "experiments/member-transactions/atomic-store.ts": "7af168ee8d4aec4c7b34b0c8f0cd176ca6ebffb956f9ec184a3eb4d76b110365",
+    "experiments/member-transactions/operational-snapshot.ts": "41268c1cdbcc67e194c737d787320558745953f6890702db38a23669ce5cd5fa",
+    "experiments/member-transactions/writer-fence.ts": "92acf498f4c1ea13d097c27ca7c7031e010650592faeb1d016e59dade664f218",
+    "experiments/member-transactions/local-cutover.ts": "53fc5cb1e0711753c4607d2de52a3ae643c05f2794b972a299ef587ea11a162a",
+    "experiments/member-transactions/local-cutover.test.ts": "ea15e4cc3048fd89976a73eade99f19f54675502d3765f6b23a164d745b28ad8"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-cutover-tests-20260913.log",
+      "sha256": "6b8acad79b3373121b25f44ed0e253d2edb82378ded54f3130de49b69b68a095"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-cutover-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative-fence": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-cutover-negative-fence-20260913.log",
+      "sha256": "fb52472631b11fbcc266791d5e387ba60ec867cc01129235c04891eef6b05013"
+    },
+    "negative-candidate-digest": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/local-cutover-negative-candidate-digest-20260913.log",
+      "sha256": "22af88827f028817c07b4b0a8c15d29ecdcfc8e1d3feb028d6b4f62964ba7210"
+    }
+  },
+  "limits": [
+    "Fixture cutovers; no live path/listener change",
+    "Requires all writers to adopt updated atomic unit",
+    "Runtime fingerprint supplied by trusted caller, not introspected",
+    "Same-process lock/fault tests and simulated interruption; no new process-kill evidence",
+    "No external provider cutover"
+  ]
+}
