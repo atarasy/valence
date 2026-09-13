@@ -9,8 +9,10 @@ function identity(input:Identity) {
  return p;
 }
 export function createPool(connectionString:string) {
- // Credentials are supplied by the host; never logged. No TLS verification override.
- return new Pool({connectionString,max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:10000,statement_timeout:5000, idle_in_transaction_session_timeout:10000});
+ // Pin certificate and hostname verification for Neon, including future pg releases.
+ const url=new URL(connectionString);
+ if(url.hostname.endsWith('.neon.tech')){url.searchParams.set('sslmode','verify-full');url.searchParams.delete('uselibpqcompat');}
+ return new Pool({connectionString:url.toString(),max:4,connectionTimeoutMillis:5000,idleTimeoutMillis:10000,statement_timeout:5000, idle_in_transaction_session_timeout:10000});
 }
 /** Explicit trusted bootstrap after migration; never an HTTP operation. */
 export async function initialiseDeployment(pool:Pool,input:Identity) {

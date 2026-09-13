@@ -6,7 +6,7 @@ First implementation stage of Vault decision 58, following the confirmed Vercel 
 
 Install the pinned dependencies with `bun install --frozen-lockfile`. Generate migrations with `bun run generate`. Run `DATABASE_URL_UNPOOLED=... bun migrate.ts` against a dedicated development database using a direct connection. Provisioning identity is an explicit trusted call to `initialiseDeployment`, separate from HTTP and migration execution. Application traffic can use a pooled URL. Neither migration nor bootstrap runs at module import.
 
-For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
+For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts --timeout 30000`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
 
 ## Behaviour and limits
 
@@ -34,3 +34,5 @@ The initial foundation permits at most 10,000 engine rows, 16 MiB encoded state,
 Six real local PostgreSQL integration tests pass: actual engine settlement survives a fresh pool; competing offers respect one daily allowance; a post-settlement exception rolls back; set-time bytes/order/capability lifetime are preserved; stale or disabled writers are refused; and a competing callback waits for the control lock. Removing FOR UPDATE in an isolated copy makes the lock test fail at the early-entry assertion. This is not Neon cloud, Vercel deployment or native-device evidence.
 
 Use Vercel project `voxtech/atarasy-api-dev`, created for this development service, then add Neon through that project's Storage/Marketplace connection. Do not attach one of the five unrelated databases in Vercel: Vox. The API origin remains https://api-dev.vox.delivery. No public API has been deployed yet.
+
+The same six tests subsequently passed on the dedicated Neon branch dev-postgres-foundation-20260913 (br-soft-sound-b3i9xnjm) in project young-pond-73223516, with 20 assertions. The first remote run exceeded Bun's default five-second test timeout in three multi-step fixtures; the rerun used a 30-second test timeout without changing database lock or statement deadlines. Neon connections explicitly use sslmode=verify-full. The default branch was not migrated. This extends database evidence to Neon, not to the unimplemented member API or Vercel runtime.

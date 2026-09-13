@@ -1,7 +1,7 @@
 {
   "profile": "atarasy.postgres-foundation-validation.1",
   "date": "2026-09-13",
-  "scope": "local PostgreSQL, not Neon or Vercel runtime",
+  "scope": "local PostgreSQL and isolated Neon branch, not Vercel runtime",
   "tests": {
     "postgres": {
       "passed": 6,
@@ -14,7 +14,13 @@
       "assertions": 1356,
       "files": 30
     },
-    "strictTypeCheck": "passed"
+    "strictTypeCheck": "passed",
+    "neon": {
+      "passed": 6,
+      "failed": 0,
+      "assertions": 20,
+      "perTestTimeoutMs": 30000
+    }
   },
   "negativeControl": {
     "change": "Remove control-row FOR UPDATE in isolated copy",
@@ -23,9 +29,19 @@
   },
   "notVerified": [
     "PostgreSQL member authority/login/enrolment/journal",
-    "Neon cloud database",
     "Vercel API deployment",
     "DNS and AASA association",
     "physical iPhone/iPad ceremonies"
-  ]
+  ],
+  "neon": {
+    "project": "young-pond-73223516",
+    "branch": "br-soft-sound-b3i9xnjm",
+    "region": "aws-ap-southeast-1",
+    "parentBranchUnmodified": true
+  },
+  "initialNeonRun": {
+    "passed": 3,
+    "failed": 3,
+    "reason": "default 5000 ms test timeout exceeded during remote multi-step fixtures"
+  }
 }
