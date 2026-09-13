@@ -48,3 +48,7 @@ AASA is published with status 200 and application identifier `83W4J65UE6.dev.ata
 Member record references are validated in application code under one PostgreSQL deployment lock. They are not relational foreign keys. The primary key prevents duplicate record identities; a PostgreSQL partial unique index additionally prevents two blocking operations for one offer. Staged savepoints restore both map state and write buffers synchronously. The removed-savepoint negative control leaves a passkey after failed activation and is caught by the public registration test.
 
 Local verification now covers 13 tests and 54 assertions. Neon first ran the original 11 tests (48 assertions); two additional tests cover database-enforced operation uniqueness and expired/wrong-challenge assertions. Keep the separate run logs rather than implying one larger cloud run. Native signing, actual member provisioning, workload capacity and a populated-database rollback rehearsal remain separate acceptance work.
+
+## Physical-device acceptance preparation
+
+[Trusted operator procedure](deployment/DEVICE_ACCEPTANCE.md) prepares a separate authentication-only test account. Its helpers are absent from the deployed HTTP entry. The preparation does not create a real member household, mandate or merchant grant. See `device-acceptance.test.ts` for the isolated public-registration verification.
