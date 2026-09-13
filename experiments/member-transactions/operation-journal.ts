@@ -1,4 +1,4 @@
-import { Database } from 'bun:sqlite';
+import { databaseFor, registerParticipant, assertParticipants, type DatabaseTarget } from './shared-database.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import type { openMemberAuthority } from '../member-read/authority.ts';
 import type { openMandateBindings } from './mandate-binding.ts';
@@ -13,16 +13,18 @@ function identifier(value: string) { if (typeof value !== 'string' || !value.len
 function digest(value: string) { if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Invalid operation digest'); }
 function timestamp(value: number) { if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid operation time'); }
 /** Internal journal only: callers must validate server terms and assertions before claiming. */
-export function openOperationJournal(path: string, authority: Authority, bindings: Bindings, policy: { maximumLifetimeMs: number; now?: () => number }) {
+export function openOperationJournal(path: DatabaseTarget, authority: Authority, bindings: Bindings, policy: { maximumLifetimeMs: number; now?: () => number }) {
   if (authority.scope.environment !== bindings.scope.environment || authority.scope.audience !== bindings.scope.audience) throw new Error('Operation binding scope mismatch');
   timestamp(policy.maximumLifetimeMs); if (!policy.maximumLifetimeMs) throw new Error('Positive operation lifetime required');
   const now = () => { const value = (policy.now ?? Date.now)(); timestamp(value); return value; };
   const scope = JSON.stringify([1, authority.scope.environment, authority.scope.audience]);
-  const db = new Database(path, { create: true, strict: true });
+  assertParticipants(path, authority, bindings);
+  const { db, shared } = databaseFor(path, authority.scope);
   try {
-    db.run('PRAGMA busy_timeout=5000');
+    if (!shared) db.run('PRAGMA busy_timeout=5000');
     db.transaction(() => {
-      const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      let tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      if (shared) tables = tables.filter(t => 'operation_meta,operations'.split(',').includes(t.name));
       if (!tables.length) {
         db.run(`CREATE TABLE operation_meta(scope TEXT NOT NULL);
           CREATE TABLE operations(id TEXT PRIMARY KEY, offer TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','dispatching','uncertain','committed','cancelled','refused')), record TEXT NOT NULL);
@@ -36,7 +38,7 @@ export function openOperationJournal(path: string, authority: Authority, binding
         if (!index || index.sql !== "CREATE UNIQUE INDEX one_blocking_statement ON operations(offer) WHERE state IN ('prepared','dispatching','uncertain','committed')") throw new Error('Operation claim index missing');
       }
     }).immediate();
-    db.run('PRAGMA journal_mode=WAL'); db.run('PRAGMA synchronous=FULL');
+    if (!shared) db.run('PRAGMA journal_mode=WAL'); if (!shared) db.run('PRAGMA synchronous=FULL');
   } catch (error) { db.close(); throw error; }
   function requestHash(value: Pick<JournalOperation, 'principal' | 'credential' | 'household' | 'keyFingerprint' | 'offer' | 'mandate' | 'presenter' | 'canonical' | 'reviewedRevision' | 'expiresAt'>) {
     return hash(JSON.stringify(['atarasy.member-operation.1', scope, value.principal, value.credential, value.household, value.keyFingerprint, value.offer, value.mandate, value.presenter, value.canonical, value.reviewedRevision, value.expiresAt]));
@@ -71,7 +73,7 @@ export function openOperationJournal(path: string, authority: Authority, binding
   function owned(token: string, id: string) {
     const operation = get(id); bound(token, operation, operation); return operation;
   }
-  return {
+  return registerParticipant(path, {
     async prepare(token: string, input: StatementTerms) {
       const terms = structuredClone(input);
       if (Object.keys(terms).sort().join(',') !== 'canonical,expiresAt,mandate,offer,presenter,reviewedRevision') throw new Error('Invalid operation input');
@@ -148,5 +150,5 @@ export function openOperationJournal(path: string, authority: Authority, binding
       }).immediate();
     },
     close() { db.close(); },
-  };
+  });
 }

@@ -38,3 +38,7 @@ The callback is trusted local code, not a plugin or a member-controlled function
 This module has no transaction assertion verifier, current reviewed-revision check, operation-specific effect ID, external outbox or provider recovery. The engine's existing offer ID remains the local reservation idempotency key. It does not share a transaction with the member authority, verified login, mandate binding or operation journal. Revocation racing with settlement therefore remains unresolved for member dispatch.
 
 Next, define the canonical authority/counter/journal storage migration and its ordering with local engine state, including secure provisioning and credential binding. Build consistent server preparation and actual transaction assertion verification. For split roles or external payment effects, use a separate durable intent/outcome protocol with stable effect IDs and retain uncertainty after ambiguous responses. Adopt every competing writer and repair derived-state reconstruction before enabling a member write route or native signing.
+
+## Co-located follow-up
+
+[Unified local member storage](UNIFIED_STORAGE.md) now lets the existing authority, login, binding and journal modules join this unit through scoped database capabilities. Their co-located fixture ordering is measured separately from the earlier local-engine-only results above. Existing standalone deployments and the HTTP composition have not been migrated.

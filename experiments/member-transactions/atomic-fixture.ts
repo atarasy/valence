@@ -17,11 +17,11 @@ export function localRuntime(store: Store) {
   engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
   return { engine, ledger, deliveries };
 }
-export async function seedAtomicFixture(path: string, count = 1, ceiling: number | null = null): Promise<FixtureStatement[]> {
+export async function seedAtomicFixture(path: string, count = 1, ceiling: number | null = null, mandatePair = MANDATE_PAIR): Promise<FixtureStatement[]> {
   const unit = openAtomicStore(path, atomicScope);
   try { return await unit.run(async store => {
     const { engine, deliveries } = localRuntime(store);
-    for (const [id, pair] of [['merchant-1', PRESENTER_PAIR], ['maker-a', MERCHANT_PAIR], ['mandate-1', MANDATE_PAIR]] as const) engine.registerIdentity(id, pair.publicKey.export({ type: 'spki', format: 'pem' }).toString());
+    for (const [id, pair] of [['merchant-1', PRESENTER_PAIR], ['maker-a', MERCHANT_PAIR], ['mandate-1', mandatePair]] as const) engine.registerIdentity(id, pair.publicKey.export({ type: 'spki', format: 'pem' }).toString());
     const config = { version: 'atomic-cfg', presenter: 'merchant-1', products: Object.fromEntries(Array.from({ length: count }, (_, i) => ['tea-' + i, { merchant: 'maker-a', maker: 'made-by-tea', ships: 'carrier-a', price: 1200, physical: { ...PHYSICAL, keeps_for_days: 10000 } }])) };
     engine.registerConfig(config, signConfig(config)); engine.putDisclosure(disclosureFor('maker-a'));
     // Trusted fixture import, not a member provisioning or mandate-change ceremony.
@@ -35,7 +35,7 @@ export async function seedAtomicFixture(path: string, count = 1, ceiling: number
       deliveries.record({ offer: offer.id, carriage: 550, code: 'fixture-delivery', status: 'delivered', now: fixtureTime });
       engine.recoveries.collect({ offer: offer.id, consumed: offer.candidates.map(c => c.id), returned: [], at: fixtureTime }); engine.applyRecoveryTo(offer.id, fixtureTime);
       const bytes = canonicalStatement(offer.id, 550, statementLines(offer, []));
-      return { offer: offer.id, signature: sign(null, bytes, MANDATE_PAIR.privateKey).toString('base64'), disputed: [] };
+      return { offer: offer.id, signature: sign(mandatePair.privateKey.asymmetricKeyType === 'ed25519' ? null : 'sha256', bytes, mandatePair.privateKey).toString('base64'), disputed: [] };
     });
   }); } finally { unit.close(); }
 }

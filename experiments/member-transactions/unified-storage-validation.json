@@ -1,0 +1,107 @@
+{
+  "date": "2026-09-13",
+  "baseline": "d80e556d4358d8cf2eb7dc909e4243617d4ea84f",
+  "tests": {
+    "passed": 98,
+    "failed": 0,
+    "assertions": 677,
+    "files": 10,
+    "prior": 89,
+    "newUnifiedTests": 9
+  },
+  "strictTypes": "Passed all member-read, member-login and member-transactions sources/tests, including imported engine sources; strict, noUncheckedIndexedAccess, noEmit",
+  "toolchain": {
+    "bun": "1.2.19",
+    "typescript": "7.0.2",
+    "bunTypes": "1.4.1",
+    "simpleWebAuthn": "14.0.1"
+  },
+  "processEvidence": {
+    "ordering": [
+      "Revocation owns transaction first: settlement waits, then refuses; operation prepared and no local effect",
+      "Settlement owns transaction first: revocation waits; complete operation/receipt retained, later member access refused"
+    ],
+    "forcedDeath": [
+      {
+        "checkpoint": "claimed",
+        "signal": "SIGKILL",
+        "operation": "prepared",
+        "engine": "decided",
+        "receiptAndDayPresent": false
+      },
+      {
+        "checkpoint": "engine",
+        "signal": "SIGKILL",
+        "operation": "prepared",
+        "engine": "decided",
+        "receiptAndDayPresent": false
+      },
+      {
+        "checkpoint": "outcome",
+        "signal": "SIGKILL",
+        "operation": "prepared",
+        "engine": "decided",
+        "receiptAndDayPresent": false
+      },
+      {
+        "checkpoint": "committed",
+        "signal": "SIGKILL",
+        "operation": "committed",
+        "engine": "settled",
+        "receiptAndDayPresent": true
+      }
+    ]
+  },
+  "loginEvidence": [
+    "Actual SimpleWebAuthn verification with fixture P-256 key also bound to actual engine mandate identity",
+    "Counter and session issuance rollback together on outer failure; uncommitted bearer cannot resolve",
+    "Caught verification failure commits consumed challenge; no counter advance",
+    "Two login flows with same nonzero counter issue one new session"
+  ],
+  "negativeControl": {
+    "target": "failure after actual engine settlement rolls back operation claim and every local outcome",
+    "change": "Commit instead of rollback on callback failure",
+    "exitCode": 1,
+    "failedTests": 1,
+    "failedAssertions": 1,
+    "assertionsExecuted": 2,
+    "originalSHA256": "3b03caddcba92af73cc22d9e1fe3fad851a2a72b0331cd55205c486e84d3a164",
+    "mutatedSHA256": "b5451cd2731fb3aecbbe439de3718d48813d4c4dcfcf32b84b28e962fc680dcf"
+  },
+  "sourceSHA256": {
+    "experiments/member-read/authority.ts": "0ad0bb54f95ee3602cfde76968d81af60dbf47fc8f4b6bea675a93dae64a0798",
+    "experiments/member-login/login.ts": "53da44cd6e597b18a93786c6df513bac58d4c3696e9036841254284f63f2c726",
+    "experiments/member-transactions/atomic-store.ts": "3b03caddcba92af73cc22d9e1fe3fad851a2a72b0331cd55205c486e84d3a164",
+    "experiments/member-transactions/atomic-fixture.ts": "62566d8525bb15813c954ff647356cca9728f8be42d067b205b10baeaaad4c87",
+    "experiments/member-transactions/shared-database.ts": "19213c9d9a9f87517538b8275f087bd77ca3db403c6124907bed8e8438bc7b83",
+    "experiments/member-transactions/mandate-binding.ts": "f857c1eb7c5ba158ef68c02578421a60aed83bc89a5febd373022ee58b292d22",
+    "experiments/member-transactions/operation-journal.ts": "21c21eb3cb3e6747318d8d997360b0f74349a78115ec3bdcb131e3622dee59eb",
+    "experiments/member-transactions/unified-fixture.ts": "d89f0168bb771f71ce99933f8e6115c4586ab527ade1482280d09494699e3a10",
+    "experiments/member-transactions/unified-worker.ts": "2958ee69a3f383f152474a586d2a2edbe608a75ba5d82c155501e0796cbd14fe",
+    "experiments/member-transactions/unified-store.test.ts": "b1ebb8070d129042b0930c6ff6c30da35053f3c31ae77dfdaafb07b9f7d34261",
+    "experiments/member-transactions/CONTRACT.md": "e8818cf76f951d2f08c3c935cb383bf928aa0d2f885182282a6460fd34cb2c12",
+    "experiments/member-transactions/ATOMIC_STORE.md": "c3684c23ee718e5315a0d4b26b8e4812b4c29d18c7db54b2151fab5de7b5d5cc",
+    "experiments/member-transactions/UNIFIED_STORAGE.md": "2aca291311c0beeb66dee3d1b8bc0f8dd138e82d6b05d8bb7853b5eff6b78e18"
+  },
+  "logs": {
+    "/Users/yoichirohara/Documents/atarasy-development/unified-tests-20260913.log": "a6d462ce6995b8c02e814cf56d87e42064006d5aa3aac1f599b323e49de07d49",
+    "/Users/yoichirohara/Documents/atarasy-development/unified-types-20260913.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/Users/yoichirohara/Documents/atarasy-development/unified-negative-20260913.log": "c7db86d066233e9d2a6a3c5698ba8a71fdc49b7c36b3f986733a293aec8a601c"
+  },
+  "notMeasured": [
+    "Actual member transaction assertion verification or current reviewed-snapshot adapter",
+    "Login/transaction combined replay policy beyond the existing login verifier",
+    "Offline migration or live cutover of existing standalone databases",
+    "All competing HTTP/engine/hub writers using the consolidated database",
+    "External provider effects, outbox or distributed recovery",
+    "Derived-state reconstruction for notes and lineage",
+    "Actual native device ceremony, Swift integration or deployment performance"
+  ],
+  "notes": [
+    "Existing authority/login/binding/journal modules can join the outer atomic Store. Standalone regression suites remain passing.",
+    "Tests create actual engine physical offers and use a reference local reservation ledger. No provider payment.",
+    "Transaction acceptance proof and reviewed revision remain trusted fixture values; commitUnified is test-only.",
+    "No token/success is delivered before outer COMMIT. Outer rollback also restores challenge consumption.",
+    "No engine source, original HTTP route, iOS source or package dependency changes."
+  ]
+}

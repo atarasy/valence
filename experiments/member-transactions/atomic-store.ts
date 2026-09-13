@@ -1,20 +1,23 @@
 import { Database } from 'bun:sqlite';
+import { sharedDatabase, sharedTableGroups, type SharedDatabase } from './shared-database.ts';
 import type { Store } from '../../engine/src/common/store.ts';
 
 /** Internal local-only unit of work. Never put remote effects or detached async work inside run. */
 export function openAtomicStore(path: string, scope: { environment: string; audience: string }, lockTimeoutMs = 5000) {
   if (!scope.environment || !scope.audience || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs <= 0) throw new Error('Invalid atomic store policy');
-  const fixedScope = JSON.stringify(['atarasy.local-engine-unit.1', scope.environment, scope.audience]);
+  const pinnedScope = Object.freeze({ environment: scope.environment, audience: scope.audience });
+  const fixedScope = JSON.stringify(['atarasy.local-engine-unit.1', pinnedScope.environment, pinnedScope.audience]);
   const db = new Database(path, { create: true, strict: true });
   try {
-    db.run('PRAGMA busy_timeout=5000');
+    db.run('PRAGMA busy_timeout=5000'); db.run('PRAGMA foreign_keys=ON');
     db.transaction(() => {
       const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
       if (!tables.length) {
         db.run('CREATE TABLE atomic_meta(scope TEXT NOT NULL); CREATE TABLE atomic_rows(namespace TEXT NOT NULL,k TEXT NOT NULL,v TEXT NOT NULL,PRIMARY KEY(namespace,k));');
         db.query('INSERT INTO atomic_meta VALUES (?)').run(fixedScope);
       } else {
-        if (tables.map(t => t.name).sort().join(',') !== 'atomic_meta,atomic_rows') throw new Error('Unknown atomic store schema');
+        const names = new Set(tables.map(t => t.name));
+        if (!names.has('atomic_meta') || !names.has('atomic_rows') || [...names].some(n => !['atomic_meta', 'atomic_rows', ...sharedTableGroups.flat()].includes(n)) || sharedTableGroups.some(group => group.some(n => names.has(n)) && !group.every(n => names.has(n)))) throw new Error('Unknown atomic store schema');
         const rows = db.query('SELECT scope FROM atomic_meta').all() as { scope: string }[];
         if (rows.length !== 1 || rows[0]!.scope !== fixedScope) throw new Error('Atomic store scope mismatch');
       }
@@ -25,7 +28,7 @@ export function openAtomicStore(path: string, scope: { environment: string; audi
   } catch (error) { db.close(); throw error; }
   let running = false, closed = false;
   return {
-    async run<T>(work: (store: Store) => Promise<T> | T): Promise<T> {
+    async run<T>(work: (store: Store, database: SharedDatabase) => Promise<T> | T): Promise<T> {
       if (closed || running) throw new Error('Atomic store unavailable');
       running = true;
       let begun = false, active = false;
@@ -69,7 +72,7 @@ export function openAtomicStore(path: string, scope: { environment: string; audi
           },
           close() { throw new Error('Atomic scope owns store lifetime'); },
         };
-        const result = structuredClone(await work(store));
+        const result = structuredClone(await work(store, sharedDatabase(db, pinnedScope, check)));
         active = false;
         db.run('COMMIT'); begun = false;
         return result;

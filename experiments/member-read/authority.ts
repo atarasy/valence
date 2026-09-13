@@ -1,4 +1,4 @@
-import { Database } from 'bun:sqlite';
+import { databaseFor, registerParticipant, type DatabaseTarget } from '../member-transactions/shared-database.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Ownership, Resource, Session } from './gate.ts';
 
@@ -15,7 +15,7 @@ function grants(values: readonly string[]): string {
   return JSON.stringify([...new Set(values)].sort());
 }
 /** Trusted local capabilities only. None of these methods is a login verifier. */
-export function openMemberAuthority(path: string, options: Options) {
+export function openMemberAuthority(path: DatabaseTarget, options: Options) {
   const { environment, audience, maxSessionLifetimeMs } = options;
   name(environment);
   if (new URL(audience).origin !== audience || !audience.startsWith('https://')) throw new Error('Explicit HTTPS audience required');
@@ -23,12 +23,13 @@ export function openMemberAuthority(path: string, options: Options) {
   if (!maxSessionLifetimeMs) throw new Error('Positive session lifetime required');
   const clock = options.now ?? Date.now;
   const now = () => { const value = clock(); timestamp(value); return value; };
-  const db = new Database(path, { create: true, strict: true });
+  const { db, shared } = databaseFor(path, { environment, audience });
   try {
-    db.run('PRAGMA foreign_keys = ON');
-    db.run('PRAGMA busy_timeout = 1000');
+    if (!shared) db.run('PRAGMA foreign_keys = ON');
+    if (!shared) db.run('PRAGMA busy_timeout = 1000');
     db.transaction(() => {
-      const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      let tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      if (shared) tables = tables.filter(t => 'authority_meta,credentials,ownership,principals,sessions'.split(',').includes(t.name));
       if (!tables.length) {
         db.run(`
           CREATE TABLE authority_meta (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL, environment TEXT NOT NULL, audience TEXT NOT NULL);
@@ -45,8 +46,8 @@ export function openMemberAuthority(path: string, options: Options) {
         if (rows.length !== 1 || rows[0]!.version !== 1 || rows[0]!.environment !== environment || rows[0]!.audience !== audience) throw new Error('Authority schema or scope mismatch');
       }
     }).immediate();
-    db.run('PRAGMA journal_mode = WAL');
-    db.run('PRAGMA synchronous = FULL');
+    if (!shared) db.run('PRAGMA journal_mode = WAL');
+    if (!shared) db.run('PRAGMA synchronous = FULL');
   } catch (error) { db.close(); throw error; }
   const digest = (token: string) => createHash('sha256').update(JSON.stringify(['atarasy.member-session.1', environment, audience, token])).digest('hex');
   function principal(id: string) {
@@ -55,7 +56,7 @@ export function openMemberAuthority(path: string, options: Options) {
   function revokePrincipalSessions(id: string) {
     db.query('UPDATE sessions SET revoked=1 WHERE credential IN (SELECT id FROM credentials WHERE principal=?)').run(id);
   }
-  return {
+  return registerParticipant(path, {
     scope: Object.freeze({ environment, audience }),
     isActivePrincipal(id: string) { name(id); return principal(id)?.disabled === 0; },
     provisionPrincipal(id: string, household: string, presenters: readonly string[]) {
@@ -167,5 +168,5 @@ export function openMemberAuthority(path: string, options: Options) {
       return row.presenter === null ? { household: row.household } : { household: row.household, presenter: row.presenter };
     },
     close() { db.close(); },
-  };
+  });
 }

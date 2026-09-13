@@ -1,4 +1,4 @@
-import { Database } from 'bun:sqlite';
+import { databaseFor, registerParticipant, assertParticipants, type DatabaseTarget } from './shared-database.ts';
 import { createHash, createPublicKey } from 'node:crypto';
 import type { openMemberAuthority } from '../member-read/authority.ts';
 import type { openVerifiedLogin } from '../member-login/login.ts';
@@ -9,14 +9,16 @@ type Authority = ReturnType<typeof openMemberAuthority>;
 type Login = ReturnType<typeof openVerifiedLogin>;
 type Binding = { mandate: string; principal: string; credential: string; household: string; fingerprint: string };
 /** Internal precondition evidence only. Not an assertion verifier or dispatch grant. */
-export function openMandateBindings(path: string, authority: Authority, login: Login, engine: Pick<ValenceEngine, 'publicKeyFor' | 'config'>) {
+export function openMandateBindings(path: DatabaseTarget, authority: Authority, login: Login, engine: Pick<ValenceEngine, 'publicKeyFor' | 'config'>) {
   const scope = [1, authority.scope.environment, authority.scope.audience, login.scope.rpID];
   if (authority.scope.environment !== login.scope.environment || authority.scope.audience !== login.scope.origin || engine.config.relyingPartyId !== login.scope.rpID) throw new Error('Binding scope mismatch');
-  const db = new Database(path, { create: true, strict: true });
+  assertParticipants(path, authority, login);
+  const { db, shared } = databaseFor(path, authority.scope);
   try {
-    db.run('PRAGMA busy_timeout=1000');
+    if (!shared) db.run('PRAGMA busy_timeout=1000');
     db.transaction(() => {
-      const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      let tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[];
+      if (shared) tables = tables.filter(t => 'binding_meta,bindings'.split(',').includes(t.name));
       if (!tables.length) {
         db.run('CREATE TABLE binding_meta(scope TEXT NOT NULL); CREATE TABLE bindings(mandate TEXT PRIMARY KEY, principal TEXT NOT NULL, credential TEXT NOT NULL, household TEXT NOT NULL, fingerprint TEXT NOT NULL);');
         db.query('INSERT INTO binding_meta VALUES (?)').run(JSON.stringify(scope));
@@ -26,7 +28,7 @@ export function openMandateBindings(path: string, authority: Authority, login: L
         if (rows.length !== 1 || rows[0]!.scope !== JSON.stringify(scope)) throw new Error('Binding scope mismatch');
       }
     }).immediate();
-    db.run('PRAGMA journal_mode=WAL'); db.run('PRAGMA synchronous=FULL');
+    if (!shared) db.run('PRAGMA journal_mode=WAL'); if (!shared) db.run('PRAGMA synchronous=FULL');
   } catch (error) { db.close(); throw error; }
   function current(token: string, mandate: string) {
     if (engine.config.relyingPartyId !== login.scope.rpID) throw new Error('Binding scope mismatch');
@@ -41,7 +43,7 @@ export function openMandateBindings(path: string, authority: Authority, login: L
   }
   const stored = (mandate: string) => db.query('SELECT * FROM bindings WHERE mandate=?').get(mandate) as Binding | null;
   function matches(a: Binding, b: Binding) { return a.mandate === b.mandate && a.principal === b.principal && a.credential === b.credential && a.household === b.household && a.fingerprint === b.fingerprint; }
-  return {
+  return registerParticipant(path, {
     scope: Object.freeze({ environment: authority.scope.environment, audience: authority.scope.audience, rpID: login.scope.rpID }),
     /** Idempotent only for the exact existing binding. No engine identity write. */
     bind(token: string, mandate: string) {
@@ -61,5 +63,5 @@ export function openMandateBindings(path: string, authority: Authority, login: L
       return evidence;
     },
     close() { db.close(); },
-  };
+  });
 }
