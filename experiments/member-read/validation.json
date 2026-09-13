@@ -1,0 +1,42 @@
+{
+  "date": "2026-09-13",
+  "baseline_commit": "0039bd17ec238d43ebf34e77c89ec51b4105cf5e",
+  "scope": "Opt-in member read boundary, not wired into the reference server",
+  "source_hashes": {
+    "experiments/member-read/CONTRACT.md": "238361d103ceb930829822d2438bf2678ba59088bccc63130a921008a3064d42",
+    "experiments/member-read/gate.test.ts": "671c51e97c48042f8d1b8a1612c0c4bf4560889a5070cd2e87719900e1cdeff6",
+    "experiments/member-read/gate.ts": "20fbf31d2bcc996372d940016de9f35490f08b7752578559dd80ab920cdde16b",
+    "experiments/member-read/projection.ts": "f4d7953e3bb34eaeb2be1d499b3f4cebbdae482236e3c9639193e9342848a225",
+    "experiments/member-read/reference-fixtures.json": "324afe7ab2f906c48e2235105303110586db4b1308f8d367829b28c7a8f38a28",
+    "experiments/member-read/response-schemas.json": "559a73d040c80ad9967728af637c5071a0ea373ca094c1a393338bf2d2d04621",
+    "experiments/member-read/schema-sources.json": "c23ea3525dc4cc657aff7edc97fcb575ecb571395a19cf6a9553bf387dbf00af"
+  },
+  "results": {
+    "bun_tests": 15,
+    "failures": 0,
+    "typecheck": "passed",
+    "actual_reference_handler": "in-process own/foreign/list reads",
+    "server_started": false
+  },
+  "toolchain": {
+    "bun": "1.2.19",
+    "typescript": "Version 7.0.2"
+  },
+  "logs": {
+    "member-read-tests-20260913.log": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-read-tests-20260913.log",
+      "sha256": "809186d8ff93d39776d343a714a2f6cfc5a7ab2b41f9e708d6fd84a38d7818b6"
+    },
+    "member-read-types-20260913.log": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-read-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limits": [
+    "Trusted in-memory session resolver and ownership fixtures, not a production login service",
+    "No authentication cryptography, persistent revocation, HTTP transport or hardware measured",
+    "Reference engine source and server wiring unchanged",
+    "No write routes or provider calls exposed",
+    "Timing side channels and post-final-check revocation race not solved"
+  ]
+}
