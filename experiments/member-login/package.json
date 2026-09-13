@@ -1,0 +1,7 @@
+{
+  "name": "@atarasy/member-login-experiment",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "bun test" },
+  "dependencies": { "@simplewebauthn/server": "14.0.1" }
+}

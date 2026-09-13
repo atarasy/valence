@@ -115,3 +115,14 @@ describe('member read boundary',()=>{
   const list=await get('/offers?household=fixture-own&presenter=merchant-1');expect(list.status).toBe(200);expect((await list.json()).offers.map((o:any)=>o.id)).toEqual([own.id]);
  });
 });
+
+
+test('list rows require authoritative ownership and session revalidation after lookups', async () => {
+ for (const owner of [undefined, {household:'other',presenter:offer.presenter}, {household:offer.household,presenter:'other'}]) {
+  const {state,read}=setup(); state.body={offers:[offer]};state.owner=owner;
+  const result=await read('/offers?household='+offer.household+'&presenter='+offer.presenter);
+  expect(result.status).toBe(503);expect(await result.text()).not.toContain(offer.id);
+ }
+ const {state,read}=setup();state.body={offers:[offer]};state.onOwner=()=>{state.session!.revoked=true;};
+ expect((await read('/offers?household='+offer.household+'&presenter='+offer.presenter)).status).toBe(404);
+});

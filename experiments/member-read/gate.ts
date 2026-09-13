@@ -96,6 +96,14 @@ export function memberReadBoundary(deps: Dependencies): (request: Request) => Pr
       if (upstream.status !== 200) return fail(503, 'read_unavailable');
       const schema = selected.kind === 'list' ? 'list' : selected.resource.kind === 'mandate' ? 'mandate' : (selected.action ?? 'offer') as 'offer' | 'approval' | 'statement' | 'settlement';
       if (!validProjection(schema, body) || !projection(body, selected, ownerSnapshot)) return fail(503, 'read_unavailable');
+      if (selected.kind === 'list') {
+        // Lists must not bypass the authoritative resource source used by detail reads.
+        for (const offer of body.offers) {
+          const owner = await deps.ownerOf({ kind: 'offer', id: offer.id });
+          if (!owner || owner.household !== selected.household || owner.presenter !== selected.presenter) return fail(503, 'read_unavailable');
+        }
+        if (!await stillPermitted()) return fail(404, 'resource_unavailable');
+      }
       return new Response(JSON.stringify(body), { status: 200, headers });
     } catch { return fail(503, 'read_unavailable'); }
   };

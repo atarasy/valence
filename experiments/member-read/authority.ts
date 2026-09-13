@@ -56,6 +56,7 @@ export function openMemberAuthority(path: string, options: Options) {
     db.query('UPDATE sessions SET revoked=1 WHERE credential IN (SELECT id FROM credentials WHERE principal=?)').run(id);
   }
   return {
+    scope: Object.freeze({ environment, audience }),
     provisionPrincipal(id: string, household: string, presenters: readonly string[]) {
       name(id); name(household); const encoded = grants(presenters);
       // INSERT only: no rebind, revive or silent overwrite of an existing principal.

@@ -1,0 +1,55 @@
+{
+  "date": "2026-09-13",
+  "baseline_commit": "6486dbd16eb40fcd83deb80dce0f4850e1ec2c78",
+  "runtime": "1.2.19",
+  "dependency": {
+    "name": "@simplewebauthn/server",
+    "version": "14.0.1",
+    "install_scripts": false,
+    "frozen_lockfile_check": "passed; 25 installs across 26 packages, no changes"
+  },
+  "source_sha256": {
+    "experiments/member-read/authority.ts": "f2dbc17c60508b0ae41ab27e935c3e8805cc7b678146305e6a22a0a9ef375c11",
+    "experiments/member-read/gate.ts": "607c5a12c70c1d2937470a032add318ba45ba877a3f95e512a770998d90ce12f",
+    "experiments/member-read/gate.test.ts": "1f5a95542de6ae11bc453ff19dd659f786722e869f868d13dda1d91335a78dc4",
+    "experiments/member-read/durable-ownership.ts": "6bf925cf8527b723c670b2da79a2a642a351a693db490e5230264da1f6d70dd7",
+    "experiments/member-read/durable-ownership.test.ts": "233f3e48c4a4ee9e64f25c541648cc1d2021665f7ebdb7819d829542a64a3377",
+    "experiments/member-read/AUTHORITY.md": "92f4663bc94a39536004df25f8e30ad91283f735bf38f3fc3275f4705e7fe861",
+    "experiments/member-read/CONTRACT.md": "e639a6ef9fd3b08be80a6cb74b5f7097ae23412c50011bfdd7d4c197efe15d7b",
+    "experiments/member-login/login.ts": "0a080196b574b00866e638b328a77fad47d0432971a84837a926db4f60e06bb5",
+    "experiments/member-login/login.test.ts": "c16fe51598d29399f06b0bfa0a745301cba707ec7a776f059bf6a5cba33ef31d",
+    "experiments/member-login/CONTRACT.md": "3eb34a2d8a5c5f7de9077ea54479554ccd96c3952ea7a5113a5d1ce7b8213cb3",
+    "experiments/member-login/package.json": "ad1079d1ade543a92aa9af6706eba90d32775b3a8e1ff759e3f8e9c3771e65a7",
+    "experiments/member-login/bun.lock": "40c8067175ddafb53145d3d6d191abc2b217766d2773ea4058b6039ac8830614"
+  },
+  "checks": {
+    "command": "bun test experiments/member-login experiments/member-read",
+    "pass": 44,
+    "fail": 0,
+    "assertions": 288,
+    "files": 4,
+    "login_tests": 10,
+    "durable_ownership_tests": 5,
+    "authority_tests": 13,
+    "gate_tests": 16,
+    "strict_types_exit_code": 0
+  },
+  "logs": {
+    "combined": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/verified-login-combined-20260913.log",
+      "sha256": "b0637107eda3f42c3d4551e7943d109b3b0f7dd8e37da0a154439e12b44fcf2c"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/verified-login-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limits": [
+    "Synthetic generated ES256 assertions, not authenticator hardware or native UX evidence",
+    "Passkeys are administratively provisioned after an assumed verified enrollment; enrollment itself is not implemented",
+    "No public HTTP login transport, listener or production deployment",
+    "Separate login/authority files; consumed failed attempts require a new ceremony",
+    "Ownership reconciliation is not atomic dual-database creation; trusted engine store path required",
+    "No conformance or mutation score update"
+  ]
+}
