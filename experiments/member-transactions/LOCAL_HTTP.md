@@ -21,3 +21,7 @@ This harness is not a secured member API. It preserves reference routes, includi
 Atomic import is not semantic import validation. The reference import still needs full staged schema, ownership, collision and cross-record checks before it is suitable for adopting existing data. The existing standalone server has not switched stores. This increment does not enable remote sources, mutate old files, migrate member credentials or connect Swift signing.
 
 Next: specify and implement a strict staged local import contract; test namespace/scope conflicts, cross-record mismatches, unknown fields, duplicate IDs and exact exported receipt history. Rehearse migration into a newly created isolated file, verify source/destination exports and a failed-import rollback, and only then define explicit cutover. The member prepare/submit/outcome surface and Swift integration follow those checks. Android remains a later phase.
+
+## Subsequent validated import
+
+The subsequent [node import/rehearsal increment](NODE_IMPORT.md) adds exact archive-schema preflight and destination dependency checks. Atomicity remains unchanged. The operational snapshot contract and live-file migration are still pending; archive equality does not establish operational readiness.

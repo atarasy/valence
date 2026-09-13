@@ -27,7 +27,8 @@ test('HTTP writes and fresh reads share persistent candidate lookup', async () =
 });
 test('router error rolls back an earlier successful import prefix', async () => {
   const s = await setup(), other = structuredClone(s.offer); other.id = 'import-prefix'; other.candidates[0]!.id = 'imported-candidate';
-  const response = await s.app.fetch(s.request('/households/house/import', { format: EXPORT_FORMAT_VERSION, offers: [other, s.offer] }));
+  const archive = await (await s.app.fetch(s.request('/households/house/export'))).json();
+  const response = await s.app.fetch(s.request('/households/house/import', { ...archive, offers: [other, s.offer], collections: [{ ...archive.collections[0], offer: other.id, consumed: [other.candidates[0]!.id] }, ...archive.collections] }));
   expect(response.status).toBe(409);
   expect(await s.unit.run(store => { try { localRuntime(store).engine.mustGet(other.id, fixtureTime); return true; } catch { return false; } })).toBe(false);
 });

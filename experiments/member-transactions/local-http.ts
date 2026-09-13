@@ -1,3 +1,4 @@
+import { validateNodeImport, validateArchiveDependencies } from './node-import.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { ValenceEngine } from '../../engine/src/engine/offers.ts';
 import { InMemoryLedger } from '../../engine/src/engine/ledger.ts';
@@ -46,6 +47,12 @@ export function openLocalHTTP(path: string, options: Policy) {
         let body: Uint8Array;
         try { body = await bounded(request.body, p.maximumBodyBytes); } catch { return error(413, 'body_unavailable'); }
         if (request.signal.aborted) return error(400, 'request_aborted');
+        let archive: ReturnType<typeof validateNodeImport> | undefined;
+        const parts = new URL(request.url).pathname.split('/').filter(Boolean);
+        if (request.method === 'POST' && parts.length === 3 && parts[0] === 'households' && parts[2] === 'import') {
+          try { archive = validateNodeImport(JSON.parse(new TextDecoder().decode(body)), decodeURIComponent(parts[1]!)); }
+          catch { return error(400, 'invalid_node_archive'); }
+        }
         const fixed = new Request(request.url, { method: request.method, headers: request.headers, ...(request.method === 'GET' || request.method === 'HEAD' ? {} : { body: body.slice().buffer }) });
         const work = tail.then(async () => {
           try {
@@ -54,6 +61,7 @@ export function openLocalHTTP(path: string, options: Policy) {
               const engine = new ValenceEngine(ledger, { explorationRate: p.explorationRate, reminderLimit: p.reminderLimit, recoveryGraceDays: p.recoveryGraceDays, relyingPartyId: p.rpID, isInNetwork: merchant => { try { registry.resolve(merchant); return true; } catch { return false; } } }, store);
               const hub = { registry, recovery: new RecoveryRegister(store), approvals: new ApprovalDesk(store), permissions: new PermissionLedger(store), deliveries: new DeliveryRegister(store) };
               engine.readDeliveriesFrom(new LocalDeliveries(hub.deliveries));
+              if (archive) validateArchiveDependencies(archive, engine);
               const response = await createApp(engine, hub)(fixed);
               const result: Materialised = { status: response.status, headers: [...response.headers.entries()], body: await bounded(response.body, p.maximumResponseBytes) };
               if (!response.ok) throw new RollbackResponse(result);
