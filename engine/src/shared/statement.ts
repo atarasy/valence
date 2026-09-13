@@ -19,6 +19,7 @@ import { challengeForBytes } from "./decisions.js";
  *
  *   valence.statement.1
  *   <offer id>
+ *   <carriage>
  *   <candidate>:<valence>:<amount>:<"disputed" or empty>   (one line per
  *   kept, defaulted or consumed candidate, ascending candidate id, UTF-8,
  *   "\n" between lines)

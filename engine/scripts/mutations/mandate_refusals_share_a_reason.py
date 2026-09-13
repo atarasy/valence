@@ -1,8 +1,8 @@
 import pathlib
 
-# §16.6. Give every mandate refusal the same name, which is the defect
-# novelty_from_this_catalogue was: two different refusals sharing a status
-# code and nothing else, so no probe and no person could tell them apart.
+# §16.6. Rename the three refusals below to unprocessable. The out-of-network
+# ceiling refusal is unchanged. As novelty_from_this_catalogue showed, a shared
+# status alone cannot distinguish the reasons; probes must inspect the name.
 
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 # Re-anchored 2026-09-12: `mandate_co_sign_required` left with §16.4.

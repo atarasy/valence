@@ -1,0 +1,157 @@
+# Member transaction boundary: implementation contract
+
+Status: proposed integration contract, no routes implemented or enabled. Baseline engine and read/login boundary: `5254b7cc74f993062a72d762b4f9dd4236278e45`. This document does not amend protocol canonical formats or claim conformance for an unbuilt adapter.
+
+## Existing boundary and blockers
+
+The member gate exposes authenticated reads, not `POST /offers/{id}/decisions` or `/settle`. The login database verifies a registered credential and issues an authority session. The engine separately resolves the identity registered under `offer.mandate`. The internal credential bridge below now checks equality against an existing engine mandate key; secure initial engine identity provisioning remains separate. Never register or replace that identity from a client-supplied household/mandate name, forward a bearer as transaction proof, or sign on the member's behalf.
+
+Physical settlement exposes the submitted public signature as `confirmation`. Its lines and amounts support read-back comparison with a frozen statement. The receipt excludes carriage and does not establish provider payment. Digital offer detail does not expose the consumed confirmation tokens; equal choices do not identify the operation that recorded them.
+
+`engine.decide` and `engine.settle` await external day, mandate, delivery and ledger work. Adding pre/post session checks to an HTTP proxy does not close concurrent state changes or the crash interval after a ledger effect. Engine state, the operation journal and external effect idempotency must share an explicit commit/recovery design before dispatch is enabled.
+
+## Proposed operation lifecycle
+
+| Phase | Durable fact | Permitted action |
+|---|---|---|
+| prepared | Owned offer, principal/credential binding, environment, operation kind, canonical challenge, reviewed term fingerprint, expiry | Request a system-authenticator assertion for these bytes |
+| cancelled | No dispatch claim was made | Leave review; retain no assertion |
+| dispatching | Operation claimed exactly once before effects, assertion fingerprint and request digest fixed | Execute through a commit adapter with checked expected state |
+| committed | Authoritative engine operation receipt and effect references persisted | Return the same receipt to scoped reads |
+| refused | Commit adapter proves refusal before any effect | Present refusal; create a fresh review if appropriate |
+| uncertain | Dispatch may have produced an effect or durable completion cannot be proven | Read/recover the same operation; never create a fresh charge automatically |
+
+An operation ID is opaque, random and server issued, scoped to environment and principal. Duplicate submission with identical digest returns the same operation state; different bytes under the same ID conflict. A timed-out request is not `refused`. A 404 read is not proof that dispatch had no effect. A session replacement may resume an owned operation only through a newly authenticated server ownership check, never by matching a locally typed household.
+
+## Preparation and dispatch requirements
+
+1. Resolve a live session and credential from trusted storage. Bind engine mandate identity to that verified credential using a provisioning record that cannot rebind an existing identity.
+2. Read owned offer, governing disclosure versions, delivery and mandate version under a consistent revision. Fingerprint all displayed terms, not only fields currently covered by the protocol challenge. Never change existing canonical bytes silently.
+3. Digital decisions include every still-offered candidate exactly once. Physical statements contain every eligible kept/defaulted/consumed line. Only consumed lines may be disputed. Unknown carriage blocks a physical statement operation.
+4. Bind the system assertion to the expected RP, allowed origin, UV, credential and exact challenge. Enforce replay/counter policy centrally across login and transaction ceremonies. Retain public verification material only as required for recovery; no private signing key belongs in the hub.
+5. Atomically claim the operation and verify current authority, reviewed revision, grant and resource ownership at the effect boundary. Define whether a revocation racing with an already claimed operation precedes or follows that boundary.
+6. Serialise conflicting decisions, collections, withdrawals and settlements for the same offer. An in-process mutex cannot establish this across service instances or restarts.
+7. Use stable external effect IDs. Persist dispatch before effects and persist/read authoritative outcome after effects. Test process death at each boundary, including after ledger commit and before the response.
+
+## Proposed member HTTP contract
+
+Route names and exact schemas are not enabled until the commit adapter exists. Intended operations are prepare, submit the same operation, and read that owned operation. Each response must be bounded no-store JSON and exclude internal exception messages, credentials, delivery codes and other households. Redirects are not followed. The existing read gate remains unchanged.
+
+An operation receipt needs the operation ID, kind, resource, principal scope, request/challenge fingerprint, reviewed revision, authoritative status, and exact effect/confirmation reference. A digital status cannot be implemented by polling candidate valences. A physical status may use the existing confirmation plus complete line/amount comparison, but must not label it a provider charge confirmation.
+
+## Acceptance matrix before enabling writes
+
+- Wrong principal, resource, environment, credential, mandate binding and revoked grants refused before dispatch.
+- Missing/changed carriage, altered disclosure version, recovery or mandate revision invalidates preparation.
+- UV/RP/origin/challenge mismatch and reused assertions rejected; credential counter races handled across ceremonies.
+- Two tabs with different disputes cannot receive the other's success; identical duplicate dispatch produces one effect.
+- Separate service instances and restart tests prove operation claiming and recovery, not only in-memory state transitions.
+- Lost response, 404, 401, malformed read-back and unavailable provider retain uncertainty without an automatic retry.
+- Read-back rejects a different confirmation, same total with different lines, gift charges, disputed-line inclusion and foreign payer/presenter.
+- Native device evidence uses an actual configured system authenticator. Fixture private-key signing proves the engine contract only.
+
+## Current implementation boundary
+
+The Atarasy core increment prepares physical statement bytes and checks read-back evidence. It neither provisions transaction authority nor dispatches a write. No API in this experiment is exposed by the member handler. The internal journal below now supplies durable storage and claims; digital operation receipts, the assertion-verifying dispatcher and external-effect recovery remain required implementation work.
+
+## Credential bridge increment
+
+The first internal bridge binds only an existing engine mandate identity to the exact ES256/P-256 public key of a live verified-login credential. The authority store must already own the mandate for the session household. No bridge call registers an engine identity or changes one. A persisted mandate binding is immutable across principal, credential, household and key fingerprint; additional authenticators require a separate rotation/multi-device design.
+
+Resolution rechecks live authority, active login key, authoritative mandate ownership and the current engine key. It returns detached scope evidence only, with no assertion ceremony or dispatch privilege. ES256/P-256 uses a closed five-field COSE profile with 32-byte coordinates and no trailing bytes. Unsupported profiles fail closed. This restriction needs real native-device acceptance before widening.
+
+The bridge uses its own scoped SQLite store and synchronous read/compare/write steps. That closes no distributed commit or revocation race: a dispatcher must revalidate at the future atomic effect boundary described above. The member handler remains read-only.
+
+## Durable journal increment
+
+The internal physical-statement journal stores the exact canonical bytes, reviewed revision, bound principal/credential/mandate/key, owned offer/presenter, operation ID, request digest and expiry. Its prepared-to-dispatching transition is atomic in SQLite. Only the caller that changes that row acquires a new claim. Identical repeats return state without permission to dispatch; differing request or assertion fingerprints conflict. A blocking row remains unique per offer through dispatching, uncertain and committed states.
+
+The journal rechecks current binding and offer ownership for member reads, cancellation and claims. A renewed session for the same binding may read its old operation; expiry limits claiming, not authenticated inspection of history. Cancellation and refusal apply only before dispatch. A crash never resets dispatching to prepared. Internal recovery can mark uncertainty or pin an authoritative receipt digest but cannot issue another claim.
+
+Canonical statement construction, consistent reviewed snapshots, transaction assertion verification, revocation at the external effect boundary, effect idempotency and authoritative recovery remain adapter responsibilities. The journal is an internal persistence/claim primitive, not an enabled HTTP operation route or proof of a single provider charge.
+
+## Local unit of work increment
+
+An experimental atomic Store runs existing local engine calls within one SQLite transaction, with fresh maps loaded only after acquiring the write lock. A database-wide lock covers shared household daily totals as well as individual offers. Every reservation, receipt, household-day and offer-state write must commit together or roll back together. An escaped runtime cannot persist later writes. Only detached results leave the scope.
+
+This primitive is internal and accepts trusted local code only. It must not wrap remote adapters or unawaited work. All competing writes, including authority revocation, credential counters, recovery, withdrawal, imports and read-triggered expiry, must join the boundary before member dispatch is enabled. The existing HTTP composition and separate authority/login/binding/journal stores are not migrated by this increment. External effects need a durable outbox, stable effect identifiers and authoritative recovery; a SQLite rollback cannot undo a network payment.
+
+## Co-located authority increment
+
+The authority, verified-login, immutable binding and operation journal constructors can now join the atomic engine Store through its scoped database capability. Nested module transactions become savepoints under the outer transaction. Shared participants must come from that same capability; mixed standalone/shared composition is refused. Standalone file formats continue to work but cannot open the consolidated schema.
+
+For this co-located local path, acquiring the database write lock orders revocation and commit. A revocation committed first prevents claiming. A settlement which owns the lock first may commit before a waiting revocation; that revocation then prevents further access without erasing the outcome. Claim, local effects and the pinned operation receipt are one transaction. A process death before COMMIT leaves the operation prepared with no local effect. This is different from an uncertain external dispatch, which must never be reset merely because an answer is missing.
+
+Verified login also shares this connection, so counter/revision updates and session issuance commit together. No token or success may leave the callback before outer COMMIT. If a failed verification must consume its challenge, catch that failure inside the unit and commit a bounded failure result. A thrown outer callback or process death rolls back challenge consumption as well as counters/sessions. The standalone login path retains its previous consume-before-verification behaviour.
+
+Tests exercise the existing login verifier and an actual local physical settlement with fixture P-256 keys. The settlement proof and reviewed revision remain trusted fixture inputs; this increment does not add a transaction assertion verifier or reviewed-snapshot adapter. No production composition, old-file migration/cutover, external adapter or member HTTP route is enabled.
+
+## Prepared member authorisation profile
+
+The internal statement-authorisation service now derives an owned physical review from the co-located engine, validates consumed-line disputes and disclosures, and persists the exact canonical statement plus a revision covering the offer, stamped catalogue, delivery, mandate, recovery and displayed review. It verifies a versioned member-authorisation WebAuthn challenge covering scope, operation ID, request digest and reviewed revision. That challenge deliberately differs from the existing Valence canonical-statement challenge.
+
+The existing login credential counter/revision is used for both ceremonies. An exact repeated accepted proof returns the recorded authorisation without another counter update. A new preparation after cancellation receives a new operation ID and challenge even if the canonical statement is unchanged, protecting zero-counter credentials from old-assertion reuse across preparations. Current ownership, revocation, revision and expiry are rechecked before authorisation. No journal claim, engine settlement or external effect is performed.
+
+A member authorisation from this profile is not a legacy engine settlement signature. The existing engine correctly refuses it as such. Define an explicit protocol integration and conformance evidence before enabling dispatch; do not strip context, manufacture a substitute household signature or silently add a second native ceremony. The current iOS client and HTTP handlers remain unchanged.
+
+## Contextual local settlement increment, 2026-09-13
+
+`openStatementAuthorisations.settle(token, operationID, originalAssertion)` now performs current authority/review validation, pinned credential verification, journal claim, explicit Appendix A engine acceptance and committed receipt digest recording within the unified local transaction. It accepts the existing prepared challenge without a substitute signature or another ceremony. Exact committed retries return the stored receipt after checking current access, accepted assertion fingerprint and receipt digest. All other states/proofs fail closed. See [contextual settlement](CONTEXTUAL_SETTLEMENT.md) for the tested boundary. No member HTTP route is enabled.
+
+## Persistent reconstruction increment, 2026-09-13
+
+Fresh engines rebuild candidate lookup and persist exact bare receipt references under SPEC Appendix B. Duplicate candidate imports and ambiguous stored state are refused. See [engine reconstruction and writer inventory](ENGINE_RECONSTRUCTION.md). This closes the process-local index blocker; full writer adoption and existing-file migration are still required before exposing member writes.
+
+## Internal local HTTP unit
+
+`openLocalHTTP` is a callable Request/Response integration harness with no network listener. Each admitted request uses fresh engine, ledger, registry, recovery, approvals, permissions and delivery registers in one `openAtomicStore.run`. It uses local mandate/day/delivery sources and both reference roles. Unknown configuration fields and provider/callback injection are refused. Request bodies are bounded and read before locking; response bodies are bounded and copied before commit. Only 2xx responses commit. Router error responses are materialised, thrown through the transaction to force rollback, and returned outside it. Unexpected failures return a generic 500. Bounded FIFO admission serialises same-instance work; the database lock serialises other instances and shared member writers.
+
+This harness does not authenticate reference routes or enable member endpoints. Import atomicity does not establish semantic validation of every imported field. Existing-file adoption and native integration remain disabled. See `LOCAL_HTTP.md` for measured behaviour and deployment limits.
+
+## Validated node archive import
+
+Before the internal local HTTP node-import handler executes, validate the complete `valence-node/4` document with exact nested schemas, configured destination household, unique identifiers and cross-record consistency. Unknown or incomplete fields are refused. Do not infer trust from schema validation: source authentication and operational migration remain separate requirements.
+
+The rehearsal reads a consistent unified-store snapshot without modifying it, validates the selected household export, creates a fresh destination directory, restores public verification/catalogue dependencies and imports the node atomically. Re-export equality proves the selected archive content survived, not that an operational database was migrated. Member credentials, operation journals, reservations and contextual receipt identities are not carried by this format. The destination is archive-only and is never selected as a live store.
+
+## Operational snapshot v1
+
+Pin the current complete unified SQLite table/index definitions in `operational-schema-v1.json` and explicitly enumerate engine namespaces. Snapshot every row with BLOB fidelity inside a read-only source transaction. Validate scopes, integrity, namespace JSON and critical authority/binding/operation/receipt relationships. Create an exclusive owner-only destination, use the pinned DDL, copy all rows transactionally with foreign keys enabled, and require exact logical equality. No state is renewed/reset. Return only digest/count metadata and a candidate path; never change a live configuration or claim a cutover. See `OPERATIONAL_SNAPSHOT.md` for supported version and verification limits.
+
+## Durable local writer cutover
+
+An updated atomic unit rechecks its exact active scope after BEGIN IMMEDIATE. A versioned fence stored in that row blocks both existing connections and new opens without changing the table schema. The operational snapshot recognises only a well-formed same-scope fence, copies it intact, and normalises it solely for logical content comparison. Snapshot copying never activates a fenced destination.
+
+Administrative cutover freezes under the writer lock, captures the final content digest and supplied runtime fingerprint, copies to the ticket's exclusive destination, validates both copies, retires the source and then enables the target. Retired sources are never automatically reopened. Resumption accepts the exact same ticket and target state only. This guarantee requires every active writer to use the updated atomic unit; old open binaries/direct database writers must be excluded before use.
+
+## Authenticated member runtime
+
+Bind a deterministic fingerprint of the exact immutable runtime configuration to the chosen canonical DB under the unified unit. Match any cutover activation receipt to that fingerprint before serving member requests. Cutover wrappers use this same computed fingerprint; configuration changes are not silently accepted.
+
+Member-only routes: POST `/member/statements/prepare`, GET `/member/operations/:id`, POST `/member/operations/:id/submit`, GET `/member/operations/:id/outcome`, POST `/member/operations/:id/cancel`. Existing bearer sessions select authority; household/credential/key terms are never taken from request bodies. Outcomes return owned stored state and a digest-checked committed receipt, without another signature or dispatch. Unknown routes never reach the reference administrative router. This is a callable internal composition, not a listener or a newly enabled enrolment/login flow.
+
+## Swift operation checkpoint consumer
+
+The Swift consumer binds prepared operation IDs to its environment, session, household, presenter and locally reviewed canonical statement. It independently derives the contextual challenge from profile, scope, operation ID, request digest and reviewed revision. It saves the operation before returning preparation and saves an attempted marker before dispatch. A saved attempted operation is read back through the outcome GET, never automatically submitted again. Local persistence stores neither bearer nor assertion; generic transport/refusal results do not authorise another effect. Native ceremony and UI integration remain separate.
+
+## Native statement review consumer
+
+A native approval follows display of the frozen statement and mandate, with a fresh operation review before requesting an assertion. The platform assertion restricts allowed credentials to the operation's selected credential and requires user verification. Session/selection invalidation between async steps prevents late assertions from being dispatched. Persisted attempted operations are discoverable for exact-session outcome reads and cannot automatically reopen signing. No outcome state authorises an automatic repeat.
+
+## Combined development member composition
+
+Compose existing auth, protected member reads and member statement routes on the same scoped atomic store. Enrolment joins the shared capability; failures consume invitations/challenges while credential activation uses a savepoint. Preserve the optional complete enrolment group with an exact additive snapshot schema, without relaxing legacy schema validation. Derive auth lifetimes from the bound member configuration and require trusted peer admission with bounded bodies/deadlines. Unknown/admin routes never reach the reference handler. Static AASA and iOS settings are generated from explicit app/domain identity and checked separately against a signed build; no identifier by itself establishes provisioning or domain ownership.
+
+The selected development deployment identity is environment `development`, origin `https://api-dev.vox.delivery` and RP ID `api-dev.vox.delivery`. The root `vox.delivery` remains the existing website. These values require a separately initialised database, not an override of an existing runtime binding. iOS development uses Team ID `83W4J65UE6`, Bundle ID `dev.atarasy.prototype` and `webcredentials:api-dev.vox.delivery`; the candidate AASA prefix remains subject to signed-app verification.
+
+### Confirmed hosted persistence target
+
+The user selected Vercel plus Neon PostgreSQL, recorded in Vault decision 57. Railway with local SQLite and Convex are not the selected deployment paths. Keep the member HTTP and native passkey contracts, and replace SQLite-specific persistence with a PostgreSQL transaction boundary. Test shared operation claims, replay consumption, savepoint rollback, revocation races and outcome reconciliation against real PostgreSQL before deployment. Existing local SQLite snapshot/cutover evidence does not validate PostgreSQL migration or Vercel multi-instance behaviour. No hosted migration is complete yet.
+
+### PostgreSQL foundation boundary
+
+Vault decision 58 specifies a pg transaction connection, deployment-wide control-row FOR UPDATE lock, immutable scope plus writer epoch/enabled checks, ordered engine-row snapshot and staged explicit Map writes. Drizzle tracks schema migrations. Persist set-time JSON bytes and insertion order. Bound transactions and snapshot size. Do not retry callbacks or ambiguous commits automatically. This first foundation does not implement the authority/login/enrolment/journal SQL participants or a hosted HTTP service.
+
+### PostgreSQL member record composition
+
+Decision 59 selects versioned member record namespaces within the same PostgreSQL transaction snapshot as the engine. No SQLite runs in a hosted request. Participants share one scoped Store; insert-only identity records and reference validation preserve business constraints. Staged synchronous savepoints discard new writes and restore maps on failure. Async cryptographic verification is outside those savepoints. Blocking operations retain a database unique index by deployment/offer. Record references are not represented as relational foreign keys. The initial whole-deployment lock and bounded snapshot remain development constraints.

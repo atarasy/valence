@@ -1,0 +1,44 @@
+{
+  "profile": "atarasy.postgres-member-runtime-validation.1",
+  "date": "2026-09-13",
+  "local": {
+    "passed": 13,
+    "failed": 0,
+    "assertions": 54
+  },
+  "neonRuns": [
+    {
+      "passed": 11,
+      "failed": 0,
+      "assertions": 48
+    },
+    {
+      "passed": 2,
+      "failed": 0,
+      "assertions": 6
+    }
+  ],
+  "neonVerificationBranch": "br-soft-sound-b3i9xnjm",
+  "negativeControl": {
+    "removed": "Staged savepoint rollback",
+    "expectedFailure": "Registration activation leaves passkey=true while flow=false"
+  },
+  "vercelBuild": "passed, Bun 1.x, arm64, Singapore",
+  "notVerified": [
+    "native passkey ceremony",
+    "populated database rollback rehearsal",
+    "production workload capacity",
+    "physical-device Associated Domains resolution"
+  ],
+  "signing": {
+    "applicationIdentifier": "83W4J65UE6.dev.atarasy.prototype",
+    "signatureAndProfileVerified": true
+  },
+  "deployment": {
+    "id": "dpl_9oU1qoMB3y82ET7dGxdZYdBWRrZK",
+    "origin": "https://api-dev.vox.delivery",
+    "aasaStatus": 200,
+    "aasaRedirect": false,
+    "unauthenticatedSessionStatus": 401
+  }
+}

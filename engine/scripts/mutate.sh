@@ -1,80 +1,72 @@
 #!/usr/bin/env bash
-# Apply one mutation to the reference implementation, run the conformance
-# suites, and restore. A test that stays green under its mutation is not a
-# test, and this is how that is found out rather than assumed.
+# Apply one break and report an explicit verdict. An infrastructure failure
+# is not a test catching the break. The source must be clean before we own it.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
-# Restoring with `git checkout -- src` discards whatever is in the working
-# tree, mutation or not. On 2026-09-08 that silently reverted a correction to
-# ledger.ts that had been written minutes earlier and not yet committed, and
-# nothing said so: the suite went green against the older text. Refuse to run
-# unless src is clean, so the only thing a restore can throw away is the
-# mutation this script applied.
-# An untracked file under src is the same hazard by another route: the
-# restore is `git checkout -- src`, which does not touch what git does not
-# track, so a mutation applied to a new file survives the restore and every
-# run afterwards is measuring the mutated engine. Measured 2026-09-08 on
-# meter-ledger.ts before it was committed.
-if [ -n "$(git ls-files --others --exclude-standard -- src)" ]; then
-  echo "src has untracked files; commit them first." >&2
-  echo "The restore is 'git checkout -- src', which would leave them mutated." >&2
-  git ls-files --others --exclude-standard -- src >&2
-  exit 1
+if [ -n "$(git ls-files --others --exclude-standard -- src)" ] ||
+   ! git diff --quiet -- src || ! git diff --cached --quiet -- src; then
+  echo "ERROR: src must be tracked and clean before a mutation" >&2
+  exit 3
 fi
-
-if ! git diff --quiet -- src || ! git diff --cached --quiet -- src; then
-  echo "src has uncommitted changes; commit or stash them first." >&2
-  echo "This script restores with 'git checkout -- src' and would discard them." >&2
-  git status --short -- src >&2
-  exit 1
-fi
-
-# Where the per-mutation logs go. The default was /tmp, and a reboot on
-# 2026-09-11 took a finished sweep's logs with it, which is the evidence for
-# every figure the run produced. `coverage.sh` sets this for a sweep; a single
-# mutation run by hand still lands in /tmp, which is the right place for one
-# that nothing will be quoted from.
+NAME="$1"; shift
 LOGS="${VALENCE_LOG_DIR:-/tmp}"
 mkdir -p "$LOGS"
-
-NAME="$1"; shift
-echo "=== mutation: $NAME"
-"$@"
-# A mutation that changed nothing is not a mutation, and the suite that stays
-# green under it is measuring an unmutated engine. This happened silently on
-# 2026-09-09: `list_total` anchored on a line that had moved, its replace did
-# nothing, and the run reported a clean pass for months of ledger entries.
-# Sixty of the scripts assert their own anchors and the rest do not, so the
-# check belongs here, where it covers every one of them.
+EXITS="$LOGS/mutation-${NAME}.exits"
+: > "$EXITS"
+# This trap is installed only after proving there were no user source edits.
+restore() { git checkout -- src; }
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+"$@" > "$LOGS/mutation-${NAME}-apply.log" 2>&1
+APPLIED=$?
+echo "mutation $APPLIED" >> "$EXITS"
+if [ "$APPLIED" -ne 0 ]; then
+  echo "ERROR: $NAME failed to apply completely" >&2
+  exit 3
+fi
 if git diff --quiet -- src; then
-  echo "INERT: $NAME changed nothing in src. Its anchor has drifted." >&2
-  echo "The ledger row for it is unsupported until the script is repaired." >&2
+  echo "VERDICT: INERT"
   exit 2
 fi
-# Both suites, because they reach different code. The conformance probes talk
-# HTTP and never see the ledger adapters; the engine's own tests do. A harness
-# that ran only the first reported "0 fail" for a mutation that removed the
-# reserve ceiling from the Meter adapter, which is the requirement the adapter
-# exists to satisfy.
 bun test > "$LOGS/mutation-${NAME}-unit.log" 2>&1
 UNIT=$?
+echo "unit $UNIT" >> "$EXITS"
 ./scripts/conformance.sh > "$LOGS/mutation-${NAME}.log" 2>&1
-STATUS=$?
-echo -n "unit: "
-grep -E '^ *[0-9]+ (pass|fail)' "$LOGS/mutation-${NAME}-unit.log" | tr '\n' ' '
-echo -n "  conformance: "
-grep -E '^ *[0-9]+ (pass|fail)' "$LOGS/mutation-${NAME}.log" | tr '\n' ' '
-echo ""
-grep -hE '^\(fail\)' "$LOGS/mutation-${NAME}-unit.log" "$LOGS/mutation-${NAME}.log" | head -12
-if ! grep -q 'bun test v' "$LOGS/mutation-${NAME}.log" 2>/dev/null; then
-  # The run never reached a probe. A mutation that breaks the setup proves
-  # nothing about the probes, and its log looks identical to a clean pass to
-  # anything that greps for failures.
-  echo "ABORTED: the suite never started. The mutation broke the setup, not a probe."
-elif [ "$UNIT" -eq 0 ] && [ "$STATUS" -eq 0 ]; then
-  echo "SURVIVED: no test failed under this mutation"
+CONF=$?
+echo "conformance $CONF" >> "$EXITS"
+# Validate each population independently. A failure in one cannot hide an
+# infrastructure error in the other, and a fully skipped run proves nothing.
+validate_log() {
+  local log="$1" status="$2" passes fails lines
+  passes=$(sed -nE 's/^ *([0-9]+) pass *$/\1/p' "$log" | tail -n 1)
+  fails=$(sed -nE 's/^ *([0-9]+) fail *$/\1/p' "$log" | tail -n 1)
+  lines=$(grep -Ec '^\(fail\)' "$log" || true)
+  if ! grep -Eq 'Ran [0-9]+ tests? across [0-9]+ files?' "$log" ||
+     [ -z "$passes" ] || [ -z "$fails" ] ||
+     [ "$(( ${passes:-0} + ${fails:-0} ))" -eq 0 ]; then
+    echo "ERROR: $NAME has an incomplete or unexercised test log: $log" >&2
+    return 1
+  fi
+  if [ "$status" -eq 0 ] && [ "$fails" -eq 0 ] && [ "$lines" -eq 0 ]; then return 0; fi
+  if [ "$status" -eq 1 ] && [ "$fails" -gt 0 ] && [ "$lines" -gt 0 ]; then return 0; fi
+  echo "ERROR: $NAME has inconsistent exits and failures: $log" >&2
+  return 1
+}
+validate_log "$LOGS/mutation-${NAME}-unit.log" "$UNIT" || exit 3
+# A seed failure is recorded separately, never as a failed conformance probe.
+if ! grep -q 'bun test v' "$LOGS/mutation-${NAME}.log"; then
+  if [ "$CONF" -eq 0 ]; then
+    echo "ERROR: conformance returned success without starting tests" >&2
+    exit 3
+  fi
+  echo "VERDICT: ABORTED"
+  exit 0
 fi
-git checkout -- src
-echo "=== restored (suite exit ${STATUS})"
-echo ""
+validate_log "$LOGS/mutation-${NAME}.log" "$CONF" || exit 3
+if [ "$UNIT" -eq 0 ] && [ "$CONF" -eq 0 ]; then
+  echo "VERDICT: SURVIVED"
+else
+  echo "VERDICT: CAUGHT"
+fi

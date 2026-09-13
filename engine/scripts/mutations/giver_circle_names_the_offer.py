@@ -1,14 +1,11 @@
 import pathlib
 
-# §7.2, clause 16. The circle names the offer each edge came from. Second break
-# beside `giver_surface_names_the_offer`, which does the same to `/lineage/acts`.
-#
-# **Written 2026-09-13 because the probe asserts over two surfaces and only one
-# of them had ever been shown to fail.** §7.2's rule is about every
-# giver-facing surface, and the circle is the other one a giver reads: an edge
-# there carries the merchant and the product already, so an offer id beside
-# them hands over exactly the reference the statement and approval reads are
-# keyed on. A rule proven on one of its two surfaces is proven on one of them.
+# §7.2, clause 16. Add an offer field to /lineage/circle. The value is
+# candidateIndex.get(edge.product) with an empty-string fallback. In the
+# completed original 299 mutation log reviewed 2026-09-13, the observed value
+# is empty: the actual-offer-id exclusion passes and the forbidden-field
+# assertion fails. This is a response-shape catch, not evidence that a usable
+# offer reference leaked or enabled statement/approval reads.
 
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 a = """        // §7.1, clause 2. Shown rather than filtered: a viewer sees which of

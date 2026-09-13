@@ -1,0 +1,1343 @@
+{
+  "list": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "OfferListResponse",
+    "description": "Pinned reference projection. Safe-integer limits and closed fields are native contract checks, not authenticated service guarantees.",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "offers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "binding": {
+              "enum": [
+                "physical",
+                "digital"
+              ]
+            },
+            "household": {
+              "type": "string"
+            },
+            "presenter": {
+              "type": "string"
+            },
+            "presenter_attested": {
+              "type": "boolean"
+            },
+            "purpose": {
+              "enum": [
+                "gift",
+                "replenish",
+                "trial",
+                "ceremonial",
+                "assortment"
+              ]
+            },
+            "price_band": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "min": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "min",
+                    "max"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "giver": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "config_version": {
+              "type": "string"
+            },
+            "presented_at": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expires_at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "state": {
+              "enum": [
+                "drafted",
+                "presented",
+                "decided",
+                "expired",
+                "withdrawn",
+                "settled"
+              ]
+            },
+            "exploration_floor_met": {
+              "type": "boolean"
+            },
+            "mandate": {
+              "type": "string"
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "product": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "unit_price": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "merchant": {
+                    "type": "string"
+                  },
+                  "maker": {
+                    "type": "string"
+                  },
+                  "ships": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "predicted_conversion": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "is_exploration": {
+                    "type": "boolean"
+                  },
+                  "given_by": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "valence": {
+                    "enum": [
+                      "offered",
+                      "kept",
+                      "returned",
+                      "consumed",
+                      "defaulted",
+                      "lost"
+                    ]
+                  },
+                  "decided_at": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "kept_as": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "self",
+                          "gift",
+                          "order"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "lineage": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "product",
+                  "quantity",
+                  "unit_price",
+                  "merchant",
+                  "maker",
+                  "ships",
+                  "category",
+                  "predicted_conversion",
+                  "is_exploration",
+                  "given_by",
+                  "valence",
+                  "decided_at",
+                  "kept_as",
+                  "lineage"
+                ]
+              }
+            },
+            "disclosures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "merchant": {
+                    "type": "string"
+                  },
+                  "product": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "value"
+                      ]
+                    }
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "merchant",
+                  "product",
+                  "version",
+                  "items",
+                  "signature"
+                ]
+              }
+            }
+          },
+          "required": [
+            "id",
+            "binding",
+            "household",
+            "presenter",
+            "presenter_attested",
+            "purpose",
+            "price_band",
+            "giver",
+            "config_version",
+            "presented_at",
+            "expires_at",
+            "state",
+            "exploration_floor_met",
+            "mandate",
+            "candidates",
+            "disclosures"
+          ]
+        }
+      }
+    },
+    "required": [
+      "offers"
+    ]
+  },
+  "offer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "OfferResponse",
+    "description": "Pinned reference projection. Safe-integer limits and closed fields are native contract checks, not authenticated service guarantees.",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "binding": {
+        "enum": [
+          "physical",
+          "digital"
+        ]
+      },
+      "household": {
+        "type": "string"
+      },
+      "presenter": {
+        "type": "string"
+      },
+      "presenter_attested": {
+        "type": "boolean"
+      },
+      "purpose": {
+        "enum": [
+          "gift",
+          "replenish",
+          "trial",
+          "ceremonial",
+          "assortment"
+        ]
+      },
+      "price_band": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "min",
+              "max"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "giver": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "config_version": {
+        "type": "string"
+      },
+      "presented_at": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "expires_at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "state": {
+        "enum": [
+          "drafted",
+          "presented",
+          "decided",
+          "expired",
+          "withdrawn",
+          "settled"
+        ]
+      },
+      "exploration_floor_met": {
+        "type": "boolean"
+      },
+      "mandate": {
+        "type": "string"
+      },
+      "candidates": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "product": {
+              "type": "string"
+            },
+            "quantity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "unit_price": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "merchant": {
+              "type": "string"
+            },
+            "maker": {
+              "type": "string"
+            },
+            "ships": {
+              "type": "string"
+            },
+            "category": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "predicted_conversion": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "is_exploration": {
+              "type": "boolean"
+            },
+            "given_by": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "valence": {
+              "enum": [
+                "offered",
+                "kept",
+                "returned",
+                "consumed",
+                "defaulted",
+                "lost"
+              ]
+            },
+            "decided_at": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kept_as": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "self",
+                    "gift",
+                    "order"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lineage": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "product",
+            "quantity",
+            "unit_price",
+            "merchant",
+            "maker",
+            "ships",
+            "category",
+            "predicted_conversion",
+            "is_exploration",
+            "given_by",
+            "valence",
+            "decided_at",
+            "kept_as",
+            "lineage"
+          ]
+        }
+      },
+      "disclosures": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "merchant": {
+              "type": "string"
+            },
+            "product": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "version": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ]
+              }
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "merchant",
+            "product",
+            "version",
+            "items",
+            "signature"
+          ]
+        }
+      }
+    },
+    "required": [
+      "id",
+      "binding",
+      "household",
+      "presenter",
+      "presenter_attested",
+      "purpose",
+      "price_band",
+      "giver",
+      "config_version",
+      "presented_at",
+      "expires_at",
+      "state",
+      "exploration_floor_met",
+      "mandate",
+      "candidates",
+      "disclosures"
+    ]
+  },
+  "approval": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ApprovalResponse",
+    "description": "Pinned reference projection. Safe-integer limits and closed fields are native contract checks, not authenticated service guarantees.",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "price_band": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "min",
+              "max"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "disclosures": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "merchant": {
+              "type": "string"
+            },
+            "product": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "version": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ]
+              }
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "merchant",
+            "product",
+            "version",
+            "items",
+            "signature"
+          ]
+        }
+      },
+      "offer": {
+        "type": "string"
+      },
+      "presenter": {
+        "type": "string"
+      },
+      "expires_at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "carriage": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reminded": {
+        "type": "boolean"
+      },
+      "mandate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "standing",
+              "individual"
+            ]
+          },
+          "scope": {
+            "type": "string"
+          },
+          "lapses_at": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "scope",
+          "lapses_at"
+        ]
+      },
+      "candidates": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "merchant": {
+              "type": "string"
+            },
+            "maker": {
+              "type": "string"
+            },
+            "ships": {
+              "type": "string"
+            },
+            "given_by": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "product": {
+              "type": "string"
+            },
+            "quantity": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "unit_price": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "is_exploration": {
+              "type": "boolean"
+            },
+            "valence": {
+              "enum": [
+                "offered",
+                "kept",
+                "returned",
+                "consumed",
+                "defaulted",
+                "lost"
+              ]
+            },
+            "alternatives": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "argument_against": {
+              "type": "string"
+            },
+            "disclosure": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "merchant": {
+                  "type": "string"
+                },
+                "product": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "merchant",
+                "product"
+              ]
+            }
+          },
+          "required": [
+            "merchant",
+            "maker",
+            "ships",
+            "given_by",
+            "id",
+            "product",
+            "quantity",
+            "unit_price",
+            "is_exploration",
+            "valence",
+            "alternatives",
+            "argument_against",
+            "disclosure"
+          ]
+        }
+      },
+      "excluded": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "auto_renewal",
+                "obstructed_cancellation",
+                "manufactured_scarcity",
+                "late_price",
+                "outside_mandate",
+                "declined_before"
+              ]
+            }
+          },
+          "required": [
+            "product",
+            "reason"
+          ]
+        }
+      }
+    },
+    "required": [
+      "price_band",
+      "disclosures",
+      "offer",
+      "presenter",
+      "expires_at",
+      "carriage",
+      "reminded",
+      "mandate",
+      "candidates",
+      "excluded"
+    ]
+  },
+  "statement": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "StatementResponse",
+    "description": "Pinned native-client subset; schema validation is not authority verification or complete server conformance.",
+    "type": "object",
+    "properties": {
+      "offer": {
+        "type": "string",
+        "minLength": 1
+      },
+      "household": {
+        "type": "string",
+        "minLength": 1
+      },
+      "expires_at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "lines": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "candidate": {
+              "type": "string",
+              "minLength": 1
+            },
+            "product": {
+              "type": "string",
+              "minLength": 1
+            },
+            "merchant": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ships": {
+              "type": "string",
+              "minLength": 1
+            },
+            "given_by": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "valence": {
+              "type": "string",
+              "enum": [
+                "kept",
+                "defaulted",
+                "consumed"
+              ]
+            },
+            "quantity": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "unit_price": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "disclosure": {
+              "type": "object",
+              "properties": {
+                "merchant": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "product": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "merchant",
+                "product"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "candidate",
+            "product",
+            "merchant",
+            "maker",
+            "ships",
+            "given_by",
+            "valence",
+            "quantity",
+            "unit_price",
+            "amount",
+            "disclosure"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "disclosures": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "merchant": {
+              "type": "string",
+              "minLength": 1
+            },
+            "product": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "merchant",
+            "product",
+            "version",
+            "items",
+            "signature"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "carriage": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "challenge": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "offer",
+      "household",
+      "expires_at",
+      "lines",
+      "disclosures",
+      "carriage",
+      "challenge"
+    ],
+    "additionalProperties": false
+  },
+  "settlement": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SettlementResponse",
+    "description": "Pinned reference projection. Safe-integer limits and closed fields are native contract checks, not authenticated service guarantees.",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "offer": {
+        "type": "string"
+      },
+      "settled_at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "kept_amount": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "consumed_amount": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "lost_amount": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "charged": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "disputed_amount": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "lines": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "candidate": {
+              "type": "string"
+            },
+            "product": {
+              "type": "string"
+            },
+            "merchant": {
+              "type": "string"
+            },
+            "maker": {
+              "type": "string"
+            },
+            "ships": {
+              "type": "string"
+            },
+            "valence": {
+              "enum": [
+                "offered",
+                "kept",
+                "returned",
+                "consumed",
+                "defaulted",
+                "lost"
+              ]
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "disputed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "candidate",
+            "product",
+            "merchant",
+            "maker",
+            "ships",
+            "valence",
+            "amount",
+            "disputed"
+          ]
+        }
+      },
+      "payer": {
+        "type": "string"
+      },
+      "signed_by": {
+        "type": "string"
+      },
+      "signed_as": {
+        "enum": [
+          "agent"
+        ]
+      },
+      "receipt": {
+        "type": "string"
+      },
+      "confirmation": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "offer",
+      "settled_at",
+      "kept_amount",
+      "consumed_amount",
+      "lost_amount",
+      "charged",
+      "disputed_amount",
+      "lines",
+      "payer",
+      "signed_by",
+      "signed_as",
+      "receipt",
+      "confirmation"
+    ]
+  },
+  "mandate": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "MandateResponse",
+    "description": "Pinned client contract. Signatures, actor scope and semantic constraints require server verification; safe integers and required config signature are client constraints.",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "household": {
+        "type": "string",
+        "minLength": 1
+      },
+      "ceiling_out_of_network": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "ceiling_daily": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "cooling_seconds": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "co_signers": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "lapses_at": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      },
+      "version": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": [
+      "id",
+      "household",
+      "ceiling_out_of_network",
+      "ceiling_daily",
+      "cooling_seconds",
+      "co_signers",
+      "lapses_at",
+      "version"
+    ],
+    "additionalProperties": false
+  }
+}

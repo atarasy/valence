@@ -1,0 +1,15 @@
+# Verified login experiment
+
+This package connects already enrolled passkeys to the member authority adapter. Administrative enrollment supplies a credential ID, COSE public key, counter and immutable user handle only after a separate verified enrollment/account ceremony. It has no public enrollment or login transport and never accepts principal claims from a login response.
+
+SimpleWebAuthn 14.0.1 verifies assertions with an exact expected origin, RP ID, random challenge, login type and required user verification. The [server documentation](https://simplewebauthn.dev/docs/packages/server) describes the verifier interface. The lockfile fixes transitive dependencies. This package does not alter the reference engine's dependencies.
+
+A dedicated SQLite store is bound to a schema, environment, origin and RP. Challenges have configured lifetimes and are single-attempt: they are deleted atomically before verification, so failed assertions and process interruption consume the attempt. The client receives an unpredictable flow ID and challenge. Neither conveys account authority. Counters use a monotonically increasing local revision for compare-and-swap, including authenticators whose counter stays zero. Duplicate or concurrent completion cannot issue two sessions from one challenge.
+
+Session creation is called only after library verification, user-handle binding, expiry revalidation and committed counter advancement. The separate authority store checks current principal/credential revocation before issuance. There is no cross-file transaction: interruption can consume a challenge or advance a counter without delivering a session. Restart with a new ceremony is required. No automatic replay or refresh is provided.
+
+The ownership adapter reads only persisted reference-engine offer and mandate records. It reconciles immutable authority bindings on each lookup and returns no owner for missing rows. Conflicting persisted ownership invalidates the binding and refuses reuse. Corrupt/unavailable input throws into the gate's neutral unavailable response. The adapter has no arbitrary SQL or database path supplied by an HTTP caller. The gate resolves ownership for each returned list row too, matches household/presenter, and rechecks the session after these awaited lookups. An unresolved row makes the whole list unavailable.
+
+Production origin/RP configuration, enrollment/credential lifecycle, trusted path and file permissions, restore/revocation policy, rate limits, HTTP anti-CSRF/transport design, native association and real-device evidence remain required. Synthetic signatures exercise cryptographic verification, not device UX. The reference server remains unmodified and no listener is opened by these experiments.
+
+Follow-up: [enrollment and transport](ENROLLMENT.md) adds invitation-bound registration and an opt-in Request/Response handler. It migrates recognised login schema 1 to 2 with inactive enrollment keys. Historical verification records remain bound to their original revisions. Production listener/TLS, invitation delivery, rate limiting and native device acceptance are still separate.

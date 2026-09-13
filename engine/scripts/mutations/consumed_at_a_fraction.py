@@ -1,8 +1,11 @@
 import pathlib
-# Clause 10, §6.2: two bases and no third. Settle used goods at a fraction of
-# the price, which is a cost basis under another name.
-p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-old = "        const amount = c.given_by ? 0 : c.unit_price * c.quantity;"
-assert old in s
-s = s.replace(old, "        const amount = c.given_by ? 0 : Math.floor(c.unit_price * c.quantity * 0.35);", 1)
-p.write_text(s)
+# Clause 10, §6.2: change the consumed branch, not the identical kept price.
+p = pathlib.Path("src/engine/offers.ts")
+s = p.read_text()
+start = s.index('} else if (c.valence === "consumed") {', s.index('kept += amount;'))
+end = s.index('} else if (c.valence === "lost") {', start)
+old = "const amount = c.given_by ? 0 : c.unit_price * c.quantity;"
+branch = s[start:end]
+assert branch.count(old) == 1, "consumed pricing anchor drifted"
+branch = branch.replace(old, "const amount = c.given_by ? 0 : Math.floor(c.unit_price * c.quantity * 0.35);", 1)
+p.write_text(s[:start] + branch + s[end:])

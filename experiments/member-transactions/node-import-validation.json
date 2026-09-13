@@ -1,0 +1,56 @@
+{
+  "baseline": "c6fa47f32d98133feb96698c0a007a84970d2da2",
+  "suite": {
+    "passed": 273,
+    "failed": 0,
+    "assertions": 1228,
+    "files": 26,
+    "new_tests": 7,
+    "seconds": 11.62
+  },
+  "strict_types": "passed",
+  "negative_controls": {
+    "schema": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 2
+    },
+    "archive-marker": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 7
+    }
+  },
+  "sources": {
+    "experiments/member-transactions/node-import.ts": "48ab764b66d46f8efe3c5b6626ee8f0ac1be535e4ab953f014f7ecca77e0e300",
+    "experiments/member-transactions/node-rehearsal.ts": "865556d052833ae76ec659936e981000d046c46e448a27fbe1f5ee5af87b52de",
+    "experiments/member-transactions/node-import.test.ts": "1dc8c58669ab2a643fd40bce33034cc41d480f3fec55058ad8f39ac2ced11f0d",
+    "experiments/member-transactions/local-http.ts": "728a92316fcb1bfc0713256b223003d980ff59d7e6dc07f9eb214a6025f166cc",
+    "experiments/member-transactions/local-http.test.ts": "c1791f2c4c76cdf95cc50b46f7ae187f8891823f9a036f52a49368b661ef1b2c"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/node-import-tests-20260913.log",
+      "sha256": "062c1cfc862ef911c34233c8b48fe6609ddaa7b15032de3e926d3f9a20182e84"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/node-import-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative-schema": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/node-import-negative-schema-20260913.log",
+      "sha256": "5ad8c7731f9b7999fed9aabb2cbe30801b01f0772240cb4e91789fd20af14c92"
+    },
+    "negative-archive-marker": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/node-import-negative-archive-marker-20260913.log",
+      "sha256": "e54ed0077310d6c0d9d70f909dd1d5b8be124cf789909c9bab64cd36f2ab556c"
+    }
+  },
+  "limits": [
+    "Archive-only new-file rehearsal; no operational cutover",
+    "Source fixtures use current unified schema, not legacy split files",
+    "Node format omits member authority, operation proofs and ledger state",
+    "No historical source attestation proof",
+    "No engine source changes or new process-kill evidence"
+  ]
+}

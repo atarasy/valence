@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-13",
+  "baseline_commit": "be2495707b588f10681c9f04214eb9e023e2ccc6",
+  "runtime": "1.2.19",
+  "source_sha256": {
+    "experiments/member-read/authority.ts": "73d6f7a4a3d47d626bc1a373134265d1cb68ac750c299000d037e00fe260476f",
+    "experiments/member-read/authority.test.ts": "af66315e5c8df24f607fceb440eb3fa8753accf0765699fa250af5bab0b2d8c0",
+    "experiments/member-read/AUTHORITY.md": "2bf9f6efbea7d4eef1c2541973ccd9df52656b68dc3e794f27a72a057204b096",
+    "experiments/member-read/CONTRACT.md": "5544f6399701a640a01d184f2e42d8abe2a91bec16880581b28ca561a36a989d",
+    "experiments/member-read/gate.ts": "20fbf31d2bcc996372d940016de9f35490f08b7752578559dd80ab920cdde16b",
+    "experiments/member-read/gate.test.ts": "5df8f21bf3505f6badf0dcce1a8f914c0fd143df897421373adb170d3151ce0e"
+  },
+  "validation": {
+    "command": "bun test experiments/member-read",
+    "tests_passed": 28,
+    "tests_failed": 0,
+    "authority_tests": 13,
+    "existing_gate_tests": 15,
+    "strict_types_exit_code": 0,
+    "evidence": [
+      "actual SQLite close/reopen",
+      "second connection observes committed revocation",
+      "suspended reads reject session/credential/principal/grant/ownership changes",
+      "injected SQL failure rolls back grant update and revocation",
+      "raw issued secrets absent from retained database files",
+      "actual reference handler own/list success and foreign denial",
+      "credential-specific revocation preserves other credentials; principal grant change revokes principal sessions"
+    ]
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-authority-tests-20260913.log",
+      "sha256": "908f0304cd0b9322c9705d4e9476f345317063baba16f3aaafc8abf7438211ce"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-authority-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limits": [
+    "Trusted local administrative API only; no login verifier or public session issuer",
+    "Ownership provisioning not atomically integrated with engine persistence",
+    "No production deployment, native credential storage, encryption or backup recovery policy",
+    "Final check to delivery race and backup rollback remain unresolved",
+    "Ordinary boundary tests, not conformance or mutation coverage"
+  ]
+}

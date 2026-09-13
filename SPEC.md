@@ -192,6 +192,23 @@ Exploration candidates MUST NOT be concealed. The presentation surface SHOULD in
 
 ----
 
+#### Catalogue publication signature revision 2
+
+For revised catalogue publication, the presenter **MUST** sign the UTF-8 bytes of compact JSON with this exact array shape and no trailing newline:
+
+```text
+["valence.catalogue.2",version,presenter,[productRow,...]]
+productRow = [reference,merchant,maker,ships,price,categoryOrNull,physicalOrNull]
+physicalOrNull = null | [ambient,keeps_for_days,fits_ten_per_container,regulated]
+```
+
+Product references **MUST** sort by UTF-16 code units without Unicode normalisation. Strings use ECMAScript compact JSON escaping and **MUST** be well-formed Unicode. Required names and an explicitly provided category **MUST** be nonempty. Price and shelf-life days **MUST** be nonnegative integers no greater than 9007199254740991. Eligibility flags **MUST** be booleans. Absent category/physical metadata becomes null. Unknown publication fields **MUST** be refused rather than excluded from signed bytes.
+
+This domain replaces the earlier unversioned catalogue form, which omitted physical eligibility. A revised publisher/verifier **MUST NOT** fall back to that form for a new publication. The request shape need not add a signature-format field: the signed domain fixes the format. Publish the service/client revision together; a signature refusal does not authorise an unsigned retry.
+
+The reference stores its verification-format marker with the catalogue row. A legacy row without that evidence **MUST NOT** be used to create a new offer and **MUST NOT** be silently marked as revision 2. Republish a fresh catalogue version after reviewing eligibility. Already-created offers and historical exports remain readable without rewriting their signed content. A local marker is not an exported authority claim or a replacement for verification on another host.
+
+
 ## 6. Settlement
 
 ```
@@ -294,7 +311,7 @@ valence.statement.1
 
   **Only a box the household can settle now counts**, which is one in `decided` or `expired`. A refutation pass on 2026-09-12 measured both ends of the alternative and both are worse than the block is worth. An offer still `presented` after a partial collection refuses `settle` with `409`, so counting it makes a block the household is forbidden to cure. And an offer a presenter withdrew after a partial collection can never be settled at all, so counting it made that household unofferable, by every presenter on that engine, permanently.
 
-  **The refusal names nothing.** The caller is a presenter and the waiting box is usually another presenter's; naming it hands one merchant another's offer id, which `GET /offers/{id}` then serves. §16.3 already sets the shape a refusal takes here, which is that a presenter learns only that it was refused (clauses 8 and 38).
+  **The refusal names its rule, not a waiting offer.** It carries `statement_unsigned` and does not disclose an offer id. The block applies only to this presenter's own earlier boxes, as specified above; it does not report another presenter's outstanding statement.
 
 - **A physical box with goods used does not settle without a delivery recorded.** `POST /offers/{id}/settle` MUST refuse, with `422 delivery_missing`, where the statement is required and the hub holds no delivery for the offer. The statement is the screen this application is made on and 法11条1号 asks for the carriage beside the price 「販売価格に商品の送料が含まれない場合には」: **a merchant whose price includes carriage owes no separate figure and records `0`, and `null` is an implementation that never recorded what it did.** The two are the same picture on a screen and different facts, and for a statement the goods have by definition been delivered and collected, so there is a delivery to record. A box that came back with nothing used settles without one, because nothing is charged and no application is made at settlement.
 
@@ -701,7 +718,7 @@ Added 2026-09-10. **An implementation may present the engine's surface, the hub'
 
 **An engine that does not hold the delivery asks the hub for it over `GET /offers/{id}/delivery`**, which this table already puts on the hub. Added 2026-09-12, and it is the fourth thing on this interface. The register is the hub's because a carrier's code resolves to an address (§7.5b, clause 49), and **the two screens that render the carriage are answered under an offer's path, which is the engine's**: the approval (§10a.5) and the settlement statement (§6.5). Until the engine asked, a split deployment rendered `carriage: null` on both while the hub held a delivery, and a screen with no carriage is either a merchant whose price includes it (法11条1号's own parenthesis) or an implementation that never looked. **A hub that cannot be reached is not a hub holding no delivery**, and an engine MUST refuse rather than render null: reading a transport failure as an absent record takes a statutory item off the screen the moment the network goes, which is the same direction the mandate rule refuses.
 
-**An engine that does not hold the mandate asks the hub for it over these endpoints and not by reading its store.** What it asks for is a protection rather than data about a person: the ceiling, the categories that need a second signature, the length of the cooling window. Clause 52 makes the host replaceable and blind, and a boundary that a conformance probe cannot see is a boundary the specification cannot hold anyone to, which is the reason this is stated here rather than left to an implementation.
+**An engine that does not hold the mandate asks the hub for it over these endpoints and not by reading its store.** What it asks for is a protection rather than data about a person: the ceilings, the co-signers needed for a loosening, the lapse and the length of the cooling window. Clause 52 makes the host replaceable and blind, and a boundary that a conformance probe cannot see is a boundary the specification cannot hold anyone to, which is the reason this is stated here rather than left to an implementation.
 
 **A deployment that runs both roles in one process is conformant**, and it is what the reference does. What it may not do is answer for a surface it does not implement.
 
@@ -869,11 +886,9 @@ At settlement, an implementation that holds a mandate for the offer MUST refuse 
 
 **A ceiling refuses, and a household can be left with a box it cannot settle at all.** Question 39, decided 2026-09-13, and the answer is that the refusal stands and the screen says so. Since §6.5 the party pressing the button is the household, so this refusal lands on the person rather than on a presenter's retry, and where a box's own consumed total is above the ceiling it can never be signed at that ceiling on any day: the sum does not change, and the cure is to raise the ceiling, which is a loosening. **What a loosening needs depends on whom the mandate names**, and this sentence said it needs "the people the person named" as though there always were some: §16.1 requires every co-signer the previous version named, so a mandate naming none is loosened by the person alone, and clause 47 was amended on 2026-09-13 to say so. Measured the same day: a household with no co-signers raised its daily ceiling and then removed it, signing alone, and the engine accepted both. **So a household that named nobody is never permanently stuck**, and one that named somebody is stuck until they sign. The first version of this paragraph, written 2026-09-13, had it the other way round for every household. **The two alternatives were both worse.** Exempting a statement settlement gives up the one protection that spans presenters at exactly the moment money moves. Letting the box settle across days needs a partial settlement this specification does not have, and a partial settlement of a document the household signed whole is a different signature. So a surface MUST say, where it offers a daily ceiling, that a ceiling can stop a box settling until it is raised, and MUST NOT tell a household that naming nobody leaves it no way to raise one; **a screen that renders this refusal as a wait is telling the household to come back tomorrow for something that may never become possible.**
 
-**Where the sum is kept is not settled, and the reference keeps it in the wrong place.** Found on 2026-09-11 by an adversarial pass over §13.1's own work. The reference sums the settlements it holds, which was the household's whole union while one process held everything. It is not, once the roles are split: **an engine sums its own settlements, so a household served by two engines has two ceilings and can settle twice the amount it set.** The paragraph above says the union crosses presenters, and the code makes it cross nothing but one deployment's own offers.
+**The sum is kept by the hub.** Section 13.2 defines the household's settlement copy and the interface through which engines report settlements and ask for the day's total. The reference implements this with its household ledger and local or remote day source. The previous version of this paragraph described the earlier engine-local sum and said neither interface was built, contradicting §13.2 and the implementation.
 
-It is worse than a gap. The union of a person's settlements is the person's, and an engine that computes it is a merchant computing the household's union, which is the thing clauses 8 and 9 keep away from a merchant, and §7.4 from a response. **The place the sum belongs is the hub**, beside the mandate that carries the ceiling.
-
-What that needs is one more thing on the interface of §13.1: either the engine asks the hub whether an amount may settle today, or it reports each settlement to the hub and the hub answers with the total. **Neither is built.** Until one is, `ceiling_daily` binds within a deployment and an implementation MUST NOT claim more for it than that.
+An engine counts the household's total reported to that hub, rather than only its own settlements. This does not establish an atomic reservation across concurrent engines: reading a total and reporting a settlement are separate operations. Nor does the reference authenticate access to these routes; the deferred authentication boundary is described in §7.2. Neither limitation is removed by locating the ledger on the correct side.
 
 ### 16.4 Withdrawn on 2026-09-12
 
@@ -915,7 +930,7 @@ A decided set under a mandate with `cooling_seconds` set does not settle when it
 
 ### 16.6 A refusal names the threshold that refused it
 
-Refusals in this section share a status code, and a person MUST be able to tell them apart. The body carries a `reason` of
+Refusals in this section share a status code, and a person MUST be able to tell them apart. The body carries an `error` of
 
 ```
 mandate_ceiling_out_of_network | mandate_ceiling_daily |
@@ -931,7 +946,7 @@ These name refusals of a request. They are not the deliberation reasons of §10,
 
 **The discipline is not this section's alone, decided 2026-09-13 as question 45.** Every refusal this specification names anywhere carries that name in the `error` of its response, and a conforming implementation is read against the names here rather than against a reference's own vocabulary. **The measurement that prompted it**: of the four names above, one appeared in neither the reference nor the suites while the reference threw `over_ceiling` instead, one was asserted by nothing, and a conformance probe pinned the wrong word, so the suites were certifying a departure from this section. Five further names the specification used were asserted by no probe, and two the suites required appeared in no section, which means **an implementation built from this document alone would have failed those probes while conforming to every word**, the opposite of what a conformance suite is for.
 
-**No mutation can find this class**, which is why it survived: a mutation that stops a refusal happening is caught by the probe expecting it, and one that answers to the wrong word is caught by nothing. What finds it is comparing the two lists, which `scripts/refusals.py` in the reference's repository does in seconds.
+**A status-only probe does not check the refusal name.** A mutation that changes the word is caught only where a probe asserts that word. Comparing the specification's defined names with actual response assertions is therefore a separate check. `scripts/refusals.py` is an aid to that review, but its substring and quoted-string searches can mistake prose, comments and request values for definitions or assertions; a reported match is not proof of either.
 
 ----
 
@@ -979,3 +994,21 @@ An implementation of the registry is conformant when it:
 5. lists an entry that carries no mark
 
 ----
+
+## Appendix A. Experimental contextual member statements
+
+This opt-in internal deployment profile leaves §6.5 and §10.5 legacy canonical signatures unchanged. It adds no HTTP request field and no §13 conformance claim. Its identifier is `atarasy.member-statement-authorisation.1`.
+
+The envelope contains `profile`, `environment`, `origin`, `rpID`, `id`, `principal`, `credential`, `household`, `keyFingerprint`, `offer`, `mandate`, `presenter`, `canonical`, `reviewedRevision`, `expiresAt` and `requestDigest`. Digests are lowercase SHA-256 hex; key fingerprint hashes the mandate key's SPKI DER. Request digest hashes UTF-8 JSON of `['atarasy.member-operation.1', JSON.stringify([1, environment, origin]), principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt]`. The WebAuthn challenge is unpadded base64url SHA-256 of UTF-8 JSON of `[profile, JSON.stringify([1, environment, origin, rpID]), id, requestDigest, reviewedRevision]`.
+
+The engine **MUST** explicitly configure environment and HTTPS origin, match RP, recompute both digests, compare canonical bytes to current lines and carriage, and verify the assertion with the registered mandate key. It **MUST** require the configured origin, `webauthn.get`, user presence and verification, and refuse cross-origin/top-origin assertions and expired envelopes. It **MUST NOT** accept a caller-supplied expected challenge or a verification boolean. A receipt for this profile **MUST** retain exact envelope/assertion identity so a different operation cannot receive success through legacy signature-only replay.
+
+The trusted local adapter **MUST** validate current member authority, credential binding/counter, the complete reviewed snapshot and operation claim under the same database transaction as local ledger, daily report, engine receipt and committed outcome. The engine's cryptographic envelope verification alone does not establish current authority or a fresh review. The adapter **MUST NOT** expose this path until every writer shares that boundary. External ledgers require a separately specified uncertainty/reconciliation boundary. Exact committed read-back may return the stored receipt after operation expiry, under current access authority, without executing settlement again.
+
+## Appendix B. Local engine reconstruction
+
+A persistent deployment **MUST** reconstruct candidate lookup from stored offers when creating a fresh engine. Candidate identifiers **MUST** be unique within and across offers; ambiguous stored state **MUST** be refused, and an import **MUST NOT** introduce ambiguity into existing candidate references.
+
+The bare receipt records of §7.6 contain opaque references and timestamps, not edge identifiers. A persistent deployment **MUST** preserve those exact records independently of lineage edges. Reconstruction **MUST NOT** mint replacement references or derive references from edge identifiers. Receipt imports preserve supplied reference/time records; reading them **MUST NOT** grant mutation of persisted engine state. A legacy store without receipt rows cannot reconstruct lost random references from edges and requires an explicit export or a declared history gap at migration.
+
+Under the unified local boundary, accepting a lineage edge and writing its bare receipt **MUST** commit or roll back together. Ordinary write-through storage alone does not provide that multi-record guarantee. These are internal persistence requirements, not additional §13 external conformance probes.

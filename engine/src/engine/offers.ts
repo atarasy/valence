@@ -1,3 +1,4 @@
+import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
@@ -76,6 +77,8 @@ export type EngineConfig = {
    * deployment the name is the hub's and the engine is told it.
    */
   relyingPartyId: string;
+  /** Appendix A: internal contextual statement opt-in; no HTTP route. */
+  memberStatementScope?: MemberStatementScope;
   /**
    * §16.3. Where the deployment puts the start of a household's day, for the
    * daily ceiling. The specification does not name one: a household's day
@@ -93,34 +96,11 @@ function utcMidnight(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-/**
- * §5.4. What a presenter signs when it publishes a catalogue: the version,
- * the presenter's name, and each product with its merchant, carrier and
- * price, in key order.
- */
-export function canonicalConfig(config: PresenterConfig): Buffer {
-  const products = Object.keys(config.products)
-    .sort()
-    .map((ref) => {
-      const e = config.products[ref]!;
-      // The maker and the category are signed with the price. Left out of the
-      // bytes, whoever relays a catalogue could change who made a product or
-      // strip what the merchant said it was, under a signature that still
-      // verifies, and clause 12 is answered by whatever the relay chose.
-      // **Each part is escaped before the join.** A plain ":" join is
-      // malleable: a merchant named "a:b" with a maker of "c" produces the
-      // same bytes as a merchant "a" with a maker "b:c", so whoever relays a
-      // catalogue can move the boundary between who sold it and who made it
-      // under a signature that still verifies. Found 2026-09-12 while writing
-      // the unit test for the maker being in these bytes at all; the mandate's
-      // form (§16.1) and the edge's (§7.1) had both already been escaped for
-      // the same reason, and this was the third place with the same defect.
-      return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""]
-        .map(encodeURIComponent)
-        .join(":");
-    });
-  return Buffer.from([config.version, config.presenter, ...products].join("\n"), "utf8");
-}
+import { canonicalConfig } from "../shared/catalogue.js";
+export { canonicalConfig } from "../shared/catalogue.js";
+
+/** Local verification provenance, never accepted from a publication payload. */
+type StoredPresenterConfig = PresenterConfig & { __catalogueSignatureFormat?: 2 };
 
 export function explorationFloor(candidateCount: number, rate: number): number {
   return Math.max(1, Math.ceil(candidateCount * rate));
@@ -130,7 +110,8 @@ export class ValenceEngine {
   private readonly offers: Map<string, Offer>;
   private readonly notes: Map<string, Note[]>;
   private readonly settlements: Map<string, Settlement>;
-  private readonly configs: Map<string, PresenterConfig>;
+  private readonly memberStatementConfirmations: Map<string, string>;
+  private readonly configs: Map<string, StoredPresenterConfig>;
   private readonly edges: Map<string, LineageEdge>;
   private readonly identities: Map<string, string>;
   /** §10a. Each merchant's own disclosure, as that merchant signed it. */
@@ -154,7 +135,7 @@ export class ValenceEngine {
    * moment any route resolves the identifier the record stops being the bare
    * fact. Nothing resolves this token, and no route accepts it.
    */
-  private readonly receipts = new Map<string, { ref: string; at: number }[]>();
+  private readonly receipts: Map<string, { ref: string; at: number }[]>;
   private readonly candidateIndex = new Map<string, string>();
 
   /**
@@ -213,8 +194,16 @@ export class ValenceEngine {
     store: Store = inMemoryStore()
   ) {
     this.offers = store.map("offers");
+    this.receipts = store.map("bare_receipts");
+    // Appendix B: candidate lookup is derived; opaque receipt references are not.
+    for (const [id, offer] of this.offers) {
+      if (id !== offer.id) throw new Error('Stored offer identity mismatch');
+      this.assertCandidateIdentifiers(offer);
+      for (const candidate of offer.candidates) this.candidateIndex.set(candidate.id, id);
+    }
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
+    this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
     this.edges = store.map("edges");
     this.identities = store.map("identities");
@@ -253,7 +242,14 @@ export class ValenceEngine {
     if (!Number.isInteger(config.recoveryGraceDays) || config.recoveryGraceDays < 0) {
       throw new Error("recoveryGraceDays must be an integer of at least zero");
     }
-    this.config = { ...config };
+    const memberScope = config.memberStatementScope;
+    if (memberScope !== undefined) {
+      const origin = new URL(memberScope.origin);
+      if (Object.keys(memberScope).sort().join(',') !== 'environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
+        throw new Error('Invalid member statement deployment scope');
+      }
+    }
+    this.config = { ...config, ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }) };
     Object.freeze(this.config);
   }
 
@@ -321,8 +317,11 @@ export class ValenceEngine {
         `this catalogue is not signed by ${config.presenter}`
       );
     }
-    this.configs.set(config.version, config);
-    return config;
+    // One persisted row contains the payload and its local verification marker.
+    // Separate snapshots prevent callers or exports from changing verified data.
+    const frozen = structuredClone(config);
+    this.configs.set(config.version, { ...frozen, __catalogueSignatureFormat: 2 });
+    return structuredClone(frozen);
   }
 
   registerIdentity(key: string, publicKeyPem: string, attested = false): void {
@@ -364,6 +363,9 @@ export class ValenceEngine {
     if (!config) {
       throw notFound(`no presenter config ${input.config_version}`);
     }
+    if (config.__catalogueSignatureFormat !== 2) {
+      throw conflict("catalogue_republication_required", "republish a fresh catalogue version using valence.catalogue.2 before creating an offer");
+    }
     if (input.candidates.length < 1) {
       throw badRequest("malformed", "an offer needs at least one candidate");
     }
@@ -378,7 +380,7 @@ export class ValenceEngine {
     }
 
     const candidates: Candidate[] = input.candidates.map((c) => {
-      const entry = config.products[c.product];
+      const entry = Object.hasOwn(config.products, c.product) ? config.products[c.product] : undefined;
       if (!entry) {
         throw notFound(`no product ${c.product} in config ${config.version}`);
       }
@@ -555,6 +557,7 @@ export class ValenceEngine {
       reminders_sent: 0,
       decided_at: null,
     };
+    this.assertCandidateIdentifiers(offer);
     this.offers.set(offer.id, offer);
     for (const c of candidates) this.candidateIndex.set(c.id, offer.id);
     return offer;
@@ -976,17 +979,42 @@ export class ValenceEngine {
     return false;
   }
 
-  async settle(
+  async settleMemberStatement(envelope: MemberStatementEnvelope, assertion: Assertion, disputed: string[] = [], now = Date.now()): Promise<Settlement> {
+    const fixed = structuredClone(envelope), proof = structuredClone(assertion);
+    return this.settleInternal(fixed.offer, now, { signed: { assertion: proof }, disputed: [...disputed] }, fixed);
+  }
+
+  async settle(offerId: string, now = Date.now(), confirmation: { signed?: PersonalSignature; disputed?: string[] } = {}): Promise<Settlement> {
+    return this.settleInternal(offerId, now, confirmation);
+  }
+
+  private async settleInternal(
     offerId: string,
     now = Date.now(),
     // §6.5. The household's signature over the statement, and the consumed
     // lines it disputes. Both are absent for the digital binding and for a
     // physical box that came back with nothing used.
-    confirmation: { signed?: PersonalSignature; disputed?: string[] } = {}
+    confirmation: { signed?: PersonalSignature; disputed?: string[] } = {},
+    memberEnvelope?: MemberStatementEnvelope
   ): Promise<Settlement> {
     const offer = this.mustGet(offerId, now);
+    let memberIdentity: string | undefined;
+    if (memberEnvelope) {
+      const delivery = await this.deliverySource.find(offer.id), key = this.identities.get(offer.mandate), sent = confirmation.signed;
+      if (!needsStatement(offer) || !delivery || !key || !sent || !("assertion" in sent) ||
+          !verifyMemberStatement(memberEnvelope, sent.assertion, key, this.config.memberStatementScope, this.config.relyingPartyId,
+            canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [])).toString(), offer, now)) {
+        throw unprocessable("bad_signature", "Invalid contextual member statement.");
+      }
+      memberIdentity = memberStatementIdentity(memberEnvelope, sent.assertion);
+    }
     const existing = this.settlements.get(offer.id);
     if (existing) {
+      const recorded = this.memberStatementConfirmations.get(offer.id);
+      if (memberIdentity !== undefined || (recorded !== undefined && confirmation.signed)) {
+        if (memberIdentity !== undefined && recorded === memberIdentity) return existing;
+        throw conflict("already_settled", "A different operation settled this offer.");
+      }
       // §6.5. Settling is idempotent for the party that only asks for it: a
       // presenter retrying after a timeout gets the settlement that stands.
       // **A household signing is not asking, it is applying**, and handing it
@@ -1071,8 +1099,12 @@ export class ValenceEngine {
           "a physical box with goods used settles on the household's signature over its statement"
         );
       }
-      if (!verifyPersonal(bytes, sent, householdKey, this.config.relyingPartyId)) {
-        throw unprocessable("bad_signature", "the signature does not cover this settlement statement");
+      if (memberEnvelope) {
+        if (memberEnvelope.canonical !== bytes.toString()) throw unprocessable("bad_signature", "Statement changed during verification.");
+      } else {
+        if (!verifyPersonal(bytes, sent, householdKey, this.config.relyingPartyId)) {
+          throw unprocessable("bad_signature", "the signature does not cover this settlement statement");
+        }
       }
       signed = "signature" in sent ? sent.signature : sent.assertion.signature;
     } else if (disputed.length > 0) {
@@ -1220,6 +1252,7 @@ export class ValenceEngine {
         .digest("hex"),
     };
     this.settlements.set(offer.id, settlement);
+    if (memberIdentity !== undefined) this.memberStatementConfirmations.set(offer.id, memberIdentity);
     // §16.3. The person's own copy, written as the settlement is made. It
     // carries an amount and a date and nothing about what was in the offer: a
     // copy that carried products would be a second vertical ledger on the
@@ -1438,7 +1471,7 @@ export class ValenceEngine {
   }
 
   receiptsFor(household: string): { ref: string; at: number }[] {
-    return this.receipts.get(household) ?? [];
+    return structuredClone(this.receipts.get(household) ?? []);
   }
 
   /**
@@ -1565,8 +1598,19 @@ export class ValenceEngine {
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
     }
+    this.assertCandidateIdentifiers(offer);
     this.offers.set(offer.id, offer);
     for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);
+  }
+
+  private assertCandidateIdentifiers(offer: Offer): void {
+    const seen = new Set<string>();
+    for (const candidate of offer.candidates) {
+      if (typeof candidate.id !== 'string' || !candidate.id || seen.has(candidate.id) || this.candidateIndex.has(candidate.id)) {
+        throw conflict('candidate_conflict', 'Candidate identifiers must have one unambiguous owner.');
+      }
+      seen.add(candidate.id);
+    }
   }
 
   importSettlement(settlement: Settlement): void {
@@ -1594,7 +1638,7 @@ export class ValenceEngine {
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {
-    this.receipts.set(household, [...rows]);
+    this.receipts.set(household, structuredClone(rows));
   }
 
   // ---- reads ---------------------------------------------------------------
@@ -1623,7 +1667,8 @@ export class ValenceEngine {
 
   /** Clauses 5 and 43. Every catalogue version this presenter registered. */
   configsForPresenter(presenter: string): PresenterConfig[] {
-    return [...this.configs.values()].filter((c) => c.presenter === presenter);
+    return [...this.configs.values()].filter((c) => c.presenter === presenter)
+      .map(({ version, presenter, products }) => structuredClone({ version, presenter, products }));
   }
 
   /** Clauses 5 and 43. Every offer this presenter made, whatever its state. */

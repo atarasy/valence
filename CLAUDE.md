@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repository.
 
 The **Valence Protocol**: a specification for offering goods to a person and recording what they declined, and the reference engine that implements it. `atarasy/valence`, public, MIT.
 
-`SPEC.md` is the specification, fourteen sections, and it is the normative half. `engine/` is a reference implementation of the digital binding, written so the Ataraxia conformance suites have a subject. It is not the hub: a member opens Atarasy, and this is the engine underneath an offer.
+`SPEC.md` is the specification and the normative half. `engine/` is a reference implementation of the digital and physical bindings, written so the Ataraxia conformance suites have a subject. It is not the hub: a member opens Atarasy, and this is the engine underneath an offer.
 
 **The two halves are not equal.** The specification is what an implementer reads and what the mark is granted against. The engine is one reading of it, and where they disagree the specification wins. A change to `engine/` that would make the specification false is a change to `SPEC.md` that has not been written yet.
 
@@ -15,7 +15,7 @@ The **Valence Protocol**: a specification for offering goods to a person and rec
 | Related | What |
 |---|---|
 | `~/Documents/GitHub/ataraxia` | the constitution this specification enforces, and the conformance tests |
-| `~/Documents/GitHub/hacci/Projects/Atarasy/` | the private Japanese strategy documents. `03_Spec_Valence_Engine.md` is the working copy of this specification |
+| `~/Documents/GitHub/hacci/Projects/Atarasy/` | the private English strategy documents. `03_Spec_Valence_Engine.md` is the working copy of this specification |
 | `~/Documents/GitHub/meter` | the ledger this specification's §6.4 maps onto. `reserveCredits` → work → `commitReservedUsage` / `releaseCreditReservation` |
 | `engine/` | the reference implementation, in this repository since 2026-09-08. Read `engine/CLAUDE.md` before changing it |
 
@@ -43,7 +43,7 @@ This specification is where several constitutional clauses become structural. We
 | 22 lineage is not gated | A well-formed, correctly signed edge is accepted regardless of which client produced it (§7.1) |
 | 25 no unredeemed revenue | Ceremonial offers ship a default; nothing is earned from a recipient who does not choose (§12) |
 
-§13 lists the eight conditions an implementation must meet. Anything added to the specification that cannot be checked from outside the implementation does not belong in §13.
+§13 lists the conditions an implementation must meet. Anything added to the specification that cannot be checked from outside the implementation does not belong in §13.
 
 ## Things that will be tempting and are wrong
 

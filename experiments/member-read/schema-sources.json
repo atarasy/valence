@@ -1,0 +1,22 @@
+{
+  "source_repository": "atarasy/atarasy",
+  "source_branch": "dev/ios-first-20260913",
+  "files": {
+    "OfferListResponse.schema.json": "f614f6320211e89ed410dea85b6f9cd4f5780655cf5e1c3199567d637056d52b",
+    "OfferResponse.schema.json": "d28d140b1ba5607736930c208915ffa721420fa0de606fa1fe1e47c7f755e023",
+    "ApprovalResponse.schema.json": "9f22859e495032364f45052038d5fab54d3aae4a7d355794a56b2934327c2a9b",
+    "StatementResponse.schema.json": "1b3870aa15189a27f4e0a69ec0b40b0c44fb4e038d97ca51a9b1b114f364d6e5",
+    "SettlementResponse.schema.json": "ed31e6e1cb378d0bccd08f4f29f851e69649c171646e20d6524a2094cc4dae3d",
+    "MandateResponse.schema.json": "362d8f63851a51873127cc1bb4c2a2f7e4f07af51e9225507cc54eb69b964322"
+  },
+  "source_commit": "2600a2cc84725ad0a0a5b3d15688d6224506db4c",
+  "response_capture_sha256": "be432ecdc91abf7396cfaa7af9c84e3dd200c1ccb5b51a2001c5d84f8a60f3fb",
+  "selected_fixture_ids": [
+    "digital-offer",
+    "digital-approval",
+    "physical-statement",
+    "physical-settled",
+    "mandate-created",
+    "house-a-list"
+  ]
+}

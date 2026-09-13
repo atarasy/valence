@@ -1,0 +1,91 @@
+{
+  "date": "2026-09-13",
+  "baseline": "751d70a86357c43bb28c583de4b2b3d6322ee3e1",
+  "tests": {
+    "passed": 89,
+    "failed": 0,
+    "assertions": 592,
+    "files": 9,
+    "prior": 79,
+    "newAtomicTests": 10
+  },
+  "strictTypes": "Passed all member-read, member-login and member-transactions sources/tests, including imported engine sources; strict, noUncheckedIndexedAccess, noEmit",
+  "toolchain": {
+    "bun": "1.2.19",
+    "typescript": "7.0.2",
+    "bunTypes": "1.4.1",
+    "simpleWebAuthn": "14.0.1"
+  },
+  "processEvidence": {
+    "sameOffer": "Two independent workers synchronised at a start barrier return the same actual engine receipt; one household-day row",
+    "sharedDay": "Two independent workers with different offers and a household daily ceiling of 1500: one actual local settlement of 1200, one mandate_ceiling_daily refusal",
+    "forcedDeath": [
+      {
+        "checkpoint": "reservations",
+        "signal": "SIGKILL",
+        "reopenedState": "decided",
+        "reservation": "held",
+        "receiptAndDayPresent": false
+      },
+      {
+        "checkpoint": "settlements",
+        "signal": "SIGKILL",
+        "reopenedState": "decided",
+        "reservation": "held",
+        "receiptAndDayPresent": false
+      },
+      {
+        "checkpoint": "household_settled",
+        "signal": "SIGKILL",
+        "reopenedState": "decided",
+        "reservation": "held",
+        "receiptAndDayPresent": false
+      },
+      {
+        "checkpoint": "committed",
+        "signal": "SIGKILL",
+        "reopenedState": "settled",
+        "reservation": "committed",
+        "receiptAndDayPresent": true
+      }
+    ]
+  },
+  "negativeControl": {
+    "target": "local failure after ledger or receipt or day write rolls back all engine records",
+    "change": "Commit instead of rollback on callback failure",
+    "exitCode": 1,
+    "failedTests": 1,
+    "failedAssertions": 1,
+    "assertionsExecuted": 2,
+    "originalSHA256": "36594ee668ddb85e54ace6d3aeeeb0d03f00aac731577927bc6e1415428611da",
+    "mutatedSHA256": "c3637da7a13b3207366f6d0d937f023d9633628cfe0663bc83e48de3a5c955cb"
+  },
+  "sourceSHA256": {
+    "experiments/member-transactions/atomic-store.ts": "36594ee668ddb85e54ace6d3aeeeb0d03f00aac731577927bc6e1415428611da",
+    "experiments/member-transactions/atomic-store.test.ts": "b7a9a87527820f6e9e42092bf248a26a92a153020ed35b0664cdd1d8d8b9b3d9",
+    "experiments/member-transactions/atomic-fixture.ts": "5599e83cd6a2c23bc2de94dd774236e2b1eacd878e99c3bc2c4a417117ab582b",
+    "experiments/member-transactions/atomic-worker.ts": "2b5550f89b156b8733e10490d58ef5939e86dde01f1c58866830925314cdfcd1",
+    "experiments/member-transactions/ATOMIC_STORE.md": "5250621ce0190325c8f35141176dab6b5beb12ab9b0c74190d1c89ac4c9e3225",
+    "experiments/member-transactions/CONTRACT.md": "a1d76e4ce3b895fe1df04b6ad4734345dde1f7706d9e782074c9539fce5cf198"
+  },
+  "logs": {
+    "/Users/yoichirohara/Documents/atarasy-development/atomic-store-tests-20260913.log": "c84799c5906c5e383098fe98809357b3b1184e3de824d4634a275c680774807e",
+    "/Users/yoichirohara/Documents/atarasy-development/atomic-store-types-20260913.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/Users/yoichirohara/Documents/atarasy-development/atomic-store-negative-20260913.log": "933dff91bf3aa951f0412c73d54c27e0a196a0fe3390fe271e56fc9ad236e2f6"
+  },
+  "notMeasured": [
+    "Member authority, credential counter, binding or operation-journal atomicity with this store",
+    "Transaction assertion verification and consistent reviewed snapshot preparation",
+    "External payment provider or outbox effects",
+    "Adoption by existing HTTP routes or every competing writer",
+    "Derived candidate index and received-lineage reconstruction for fresh engine runtimes",
+    "Actual native device ceremony or Swift integration",
+    "Deployment throughput or remote/multi-host filesystem behaviour"
+  ],
+  "notes": [
+    "Actual engine physical offer creation, presentation, delivery, collection and settlement, with trusted fixture mandate import and fixture Ed25519 signatures.",
+    "Effects are the reference local reservation ledger, engine receipt, household day and offer state; no payment provider.",
+    "A local rolled-back transaction may be rerun; this does not permit resetting the separate journal claim after uncertain external effects.",
+    "Engine source, original HTTP composition, authority/login/binding/journal implementation and iOS source unchanged."
+  ]
+}

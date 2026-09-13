@@ -1,0 +1,83 @@
+{
+  "date": "2026-09-13",
+  "baseline": "a6d1e3e516aeb56a538918b7a5f9ba6c5a79e0ff",
+  "tests": {
+    "passed": 112,
+    "failed": 0,
+    "assertions": 756,
+    "files": 11,
+    "prior": 98,
+    "newAuthorisationTests": 14
+  },
+  "strictTypes": "Passed all member-read, member-login and member-transactions sources/tests, including imported engine sources; strict, noUncheckedIndexedAccess, noEmit",
+  "toolchain": {
+    "bun": "1.2.19",
+    "typescript": "7.0.2",
+    "bunTypes": "1.4.1",
+    "simpleWebAuthn": "14.0.1"
+  },
+  "profile": "atarasy.member-statement-authorisation.1",
+  "evidence": [
+    "Actual physical offer, frozen catalogue/disclosures, delivery, recovery and owned current mandate used for server preparation",
+    "Actual pinned WebAuthn verifier checks fixture P-256 authorisations against contextual operation challenge",
+    "Exact repeat and two service instances update credential revision once, including zero-counter credentials",
+    "Old assertion refused after cancellation and identical-canonical re-preparation",
+    "Login and authorisation share counter/revision state; concurrent same-counter ceremonies accept only one",
+    "Snapshot change, invalid assertion, expiry, revocation and stored-review corruption refused",
+    "Database-triggered review-write failure rolls back accepted-proof record and credential counter together",
+    "Existing engine rejects contextual assertion as a legacy statement signature; journal stays prepared and local ledger stays held"
+  ],
+  "negativeControls": [
+    {
+      "target": "changed displayed mandate invalidates the review even with unchanged canonical bytes",
+      "change": "Remove current-review comparison",
+      "exitCode": 1,
+      "failedTests": 1,
+      "failedAssertions": 1,
+      "assertionsExecuted": 1,
+      "originalSHA256": "53cd40c726ae1f123cd38945c939b08e8218aab95f719b90162a1971b9d40525",
+      "mutatedSHA256": "c3ac492491ad8368a1d20d64d0c178e0161ae19bac10ffb67a2d4fdb626ea2ff"
+    },
+    {
+      "target": "zero-counter credential still cannot reuse an assertion across preparations",
+      "change": "Replace contextual challenge with legacy canonical challenge",
+      "exitCode": 1,
+      "failedTests": 1,
+      "failedAssertions": 1,
+      "assertionsExecuted": 2,
+      "originalSHA256": "53cd40c726ae1f123cd38945c939b08e8218aab95f719b90162a1971b9d40525",
+      "mutatedSHA256": "c63f375008584960b98f7c5c96060973e1621e417462f7e13c9efde95be0105d"
+    }
+  ],
+  "sourceSHA256": {
+    "experiments/member-login/login.ts": "b7b41594f349c1ef20ab1a08ff55d8086e7169c158b9b01a9101121016f9c971",
+    "experiments/member-transactions/shared-database.ts": "0447b733d2f4f1ef74de4640abe958d4a68d352823dbdd96ae0b5505b19c5939",
+    "experiments/member-transactions/unified-fixture.ts": "14fbffacd6283a2b60bbbcceccc4db8136a7020ed3abf39ca936754c11463ed7",
+    "experiments/member-transactions/statement-authorisation.ts": "53cd40c726ae1f123cd38945c939b08e8218aab95f719b90162a1971b9d40525",
+    "experiments/member-transactions/statement-authorisation.test.ts": "e002fc56650cda890e564ccfd1f380f5ba3cd6c93743720c13078da9d58d346b",
+    "experiments/member-transactions/STATEMENT_AUTHORISATION.md": "baf77f6b8e767da6d201dc8f63c96a4ad88fe711be2de4ba959482c3c9d69b2a",
+    "experiments/member-transactions/UNIFIED_STORAGE.md": "cf75649c99e1195317082bedf3cbbe4d26dc8e1d3fabb6e3ef35baef0e129a66",
+    "experiments/member-transactions/CONTRACT.md": "5f63c9b9815dc7a49c76684008db7c5ca4ab289a394f3488f421274a9665e378"
+  },
+  "logs": {
+    "/Users/yoichirohara/Documents/atarasy-development/statement-authorisation-tests-20260913.log": "b23ce57c4da5646e9080b771490cb8e4802f50e0890606b87c8456459aa836a1",
+    "/Users/yoichirohara/Documents/atarasy-development/statement-authorisation-types-20260913.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/Users/yoichirohara/Documents/atarasy-development/statement-authorisation-negative-review-20260913.log": "c419bba466744d24f1a25f235e0089976f1887b5ba1575e946830cc360b88095",
+    "/Users/yoichirohara/Documents/atarasy-development/statement-authorisation-negative-challenge-20260913.log": "5989335d9e5b485eb0a8aa9a0e03484ded86a2bfc6d455b7745ec4b61d8973f4"
+  },
+  "notMeasured": [
+    "Engine/protocol acceptance of the contextual profile as a settlement authorisation",
+    "Member HTTP schemas or Swift/native UI integration",
+    "Actual device RP/origin acceptance",
+    "Provider payment or external intent/outcome recovery",
+    "Old-file migration, live cutover or full writer adoption",
+    "New separate-process authorisation tests or new authorisation SIGKILL checkpoints",
+    "Large-data throughput or lock-duration limits"
+  ],
+  "notes": [
+    "This increment adds authorisation only. No claim, engine settlement or external effect is executed by the service.",
+    "Full suite includes prior independent process tests; new authorisation contention tests use separate service connections in one process.",
+    "Some frozen-offer/recovery changes are explicit stored-fixture fault injection, not public update routes.",
+    "Existing Valence canonical form and engine verification remain unchanged; the contextual challenge is intentionally distinct."
+  ]
+}

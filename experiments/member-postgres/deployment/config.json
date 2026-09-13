@@ -1,0 +1,6 @@
+{
+  "environment":"development","origin":"https://api-dev.vox.delivery","rpID":"api-dev.vox.delivery",
+  "explorationRate":0.2,"reminderLimit":1,"recoveryGraceDays":3,"dayBoundary":"UTC",
+  "maximumLifetimeMs":300000,"maxSessionLifetimeMs":3600000,"maximumBodyBytes":20000,
+  "bodyTimeoutMs":3000,"maximumPending":8,"budgetWindowMs":60000,"maximumRequests":60,"maximumTrackedTokens":500
+}

@@ -241,6 +241,35 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     for (const c of taken.candidates) expect(c.valence).toBe("offered");
   });
 
+  test("taking back a signed line preserves the collection on the same box", async () => {
+    // NOTE (mutation check, 2026-09-13): withdraw_resets_the_collection
+    // survived the pure signed and pure collected fixtures. On this mixed
+    // box it reset consumed and returned to offered; the valence assertion
+    // below failed. The cooling window takes back only what was signed.
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(cooling(3600));
+    const offer = engine.createOffer(physical("house-mixed-withdrawal", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
+    await engine.present(offer.id);
+    const [used, returned, kept] = offer.candidates;
+    engine.recoveries.collect({
+      offer: offer.id,
+      consumed: [used!.id],
+      returned: [returned!.id],
+      at: Date.now(),
+    });
+    engine.applyRecoveryTo(offer.id);
+    await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
+
+    const taken = await engine.withdrawDecisions(offer.id);
+    expect(taken.candidates.map((c) => ({ id: c.id, valence: c.valence }))).toEqual([
+      { id: used!.id, valence: "consumed" },
+      { id: returned!.id, valence: "returned" },
+      { id: kept!.id, valence: "offered" },
+    ]);
+    expect(taken.state).toBe("presented");
+    expect(taken.candidates.find((c) => c.id === kept!.id)!.kept_as).toBeNull();
+  });
+
   test("a used box still settles only on the signature after the window", async () => {
     const made = makeEngine();
     const { engine } = made;
@@ -330,6 +359,9 @@ describe("§6.5: the block is a pressure the household can lift, and nobody else
 
 describe("§6.5: the statement's bytes are its own", () => {
   test("a decided set's signature does not verify as a statement", async () => {
+    // Measured 2026-09-13: the domain-only statement_domain_dropped mutation
+    // fails the prefix assertion below. Carriage remains in the bytes, so
+    // this catch does not demonstrate a collision with a decided set.
     const made = makeEngine();
     const { engine } = made;
     const offer = await collected(made, "house-tag");

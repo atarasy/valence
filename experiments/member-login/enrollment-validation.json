@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-13",
+  "baseline_commit": "0b32cee4033445156b7eb5ee73f8f13a61cb12b6",
+  "runtime": "1.2.19",
+  "dependency": "@simplewebauthn/server 14.0.1; unchanged lockfile",
+  "source_sha256": {
+    "experiments/member-read/authority.ts": "792f37fb7a88e26de07494254ba830eb13b7a7f5e983972e699dcea0202d256f",
+    "experiments/member-login/login.ts": "565fc9da8079d32b16bf2b765ae2c60419052d608b34fd80004c25f744c99a46",
+    "experiments/member-login/enrollment.ts": "79bd6dc65e3d04541547346c6224c1e1701f21eb8b9155d7cfd775e4965afeea",
+    "experiments/member-login/enrollment.test.ts": "d359a19922042879bdce6fe57b145155e54cb74a460f8b8a52e90ecfb10dbb9e",
+    "experiments/member-login/transport.ts": "3e1f8c3d887c5745bec45a93462e9f3cf9395bd372f5f46448c7629a38f99376",
+    "experiments/member-login/transport.test.ts": "f209fb5a882bd52e7b281e3f3a8dde67cedf79ae633eafea147cf3e6152954ca",
+    "experiments/member-login/fixtures/authenticator.ts": "95be4ea54ee88f6e755c12f16ae90af6590dc680b8f87e1ced82b08864926e8f",
+    "experiments/member-login/ENROLLMENT.md": "4b50036953e497407dc8c570a0b9a107d4e5165f4065198159a2d6668cb21061",
+    "experiments/member-login/CONTRACT.md": "7f3a18d0607cb822af469b2d34c13608b1112d7f4785c5ec2b16976137685af2",
+    "experiments/member-login/package.json": "ad1079d1ade543a92aa9af6706eba90d32775b3a8e1ff759e3f8e9c3771e65a7",
+    "experiments/member-login/bun.lock": "40c8067175ddafb53145d3d6d191abc2b217766d2773ea4058b6039ac8830614"
+  },
+  "checks": {
+    "command": "bun test ../member-login ../member-read",
+    "cwd": "experiments/member-login",
+    "pass": 58,
+    "fail": 0,
+    "assertions": 388,
+    "files": 6,
+    "new_enrollment_tests": 8,
+    "new_transport_tests": 6,
+    "prior_tests": 44,
+    "strict_types_exit_code": 0,
+    "typecheck_note": "Final test-only explicit header-array type annotation after the combined run; no runtime behaviour changed."
+  },
+  "logs": {
+    "combined": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/enrollment-transport-combined-20260913.log",
+      "sha256": "c730fee8d788fa2f7c500ad4a00d14d6d8145073fa506e1362bd4b9425f19c1c"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/enrollment-transport-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "evidence": [
+    "Registration checked by pinned library followed by a real synthetic ES256 login signature",
+    "Request/Response journey through actual engine and durable ownership: enrollment, login, session, own/list reads, foreign denial, logout",
+    "Activation SQL failure leaves inactive key after authority reference persists; no login possible",
+    "Invitation, flow and user-handle persistence plus one-attempt concurrency",
+    "Recognised schema-1 migration preserves existing trusted keys",
+    "Streamed request size enforced and oversized stream cancelled; origin/cookie/admission failures denied"
+  ],
+  "limits": [
+    "Synthetic authenticator data; no device or hardware attestation evidence",
+    "Request/Response integration only, not a listening TLS service",
+    "Invitation delivery and principal approval remain trusted administration",
+    "Production admission limiter is required but not implemented; tests use deterministic callbacks",
+    "Stop schema-1 readers before schema-2 migration; no mixed-version deployment",
+    "Separate-file failure may leave inert rows; operator repair and backup rollback policy unresolved",
+    "No protocol/conformance/mutation change or production deployment"
+  ]
+}

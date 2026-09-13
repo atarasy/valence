@@ -1,0 +1,57 @@
+{
+  "baseline": "4003c19a74687aa986a347c7b2c3223207c25bdf",
+  "suite": {
+    "passed": 294,
+    "failed": 0,
+    "assertions": 1323,
+    "files": 29,
+    "new_tests": 8,
+    "seconds": 3.8
+  },
+  "strict_types": "passed",
+  "negative_controls": {
+    "receipt": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 3
+    },
+    "binding": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 2
+    }
+  },
+  "sources": {
+    "experiments/member-transactions/CONTRACT.md": "d2a64faf9e5c0dc584194e7ee52e9bd8cd6fa7a0b00648b58c45a7376b7ef19b",
+    "experiments/member-transactions/member-http.ts": "6d481171da1cc4cbdb68178b0e43d0c22c42c5e88f85dbe04532c1af084d19e7",
+    "experiments/member-transactions/member-http.test.ts": "51af2e298669fbb5e7c084548f3405350937c1b64098686dcedeed577c438f3d",
+    "experiments/member-transactions/statement-authorisation.ts": "d143140c46b3d41e1e1c7a32867b5239831be8973a318e1bdd360bd9b40401ac",
+    "experiments/member-transactions/operational-snapshot.ts": "4516099edb72098242fbf8a7590a5fcfebcfa40ce20954d1a2505b1b0cb982e9",
+    "experiments/member-transactions/MEMBER_HTTP.md": "472ab426110d31dd947219db4a95d4989dd9036edb8fceeb2f5cdc32bb9692a2"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-http-tests-20260913.log",
+      "sha256": "15e6c013ada128924a04e279108f0ffc84d793f01659f0a69cbd2f73e2a194d5"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-http-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative-receipt": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-http-negative-receipt-20260913.log",
+      "sha256": "90f63ebe392c043bb12aa4ae806aaed6b4b4fa630328b2841cf89bee7e423e22"
+    },
+    "negative-binding": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/member-http-negative-binding-20260913.log",
+      "sha256": "73ff3d30e4dbab20cc2b015e3e775f799a5acc8a004fc121e5d3623f74766249"
+    }
+  },
+  "limits": [
+    "Generated fixture databases; existing verified sessions; callable Request/Response only",
+    "No native ceremony, listener or live database activation",
+    "No new process-kill or cross-process measurement",
+    "Process-local per-token budgets; ingress policy remains deployment work",
+    "Fingerprint covers immutable configuration, not code or external providers"
+  ]
+}

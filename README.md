@@ -26,7 +26,7 @@ Valence names that interval and gives it a state machine.
 |---|---|
 | `kept` | taken up — bought, given, included in an order |
 | `returned` | declined — the event this specification exists for |
-| `consumed` | used up while trying it, settled at cost |
+| `consumed` | used up while trying it; bought at the merchant's price on the household's signed statement, or uncharged if given |
 | `defaulted` | shipped because nothing was chosen before the deadline |
 | `lost` | not recovered |
 
@@ -40,7 +40,7 @@ A valence is measured, not judged. Nothing in this specification treats `returne
 | valence observed by | what comes back | what the person taps |
 | stock risk | with the merchant or brand | none |
 | goods it suits | ambient, light, high-margin | anything |
-| settles by | reconciling the return | ordering the kept |
+| settles by | reconciling the collection; consumed lines require the household's signed statement | ordering the kept |
 
 The state machine is identical. Implementations differ in fulfilment and in one default: for a physical offer, the goods are already there and expiry means recovery. For a digital offer, **silence means nothing happens.** An order is a debt and is never created by default.
 
@@ -52,11 +52,11 @@ Valence conformance is a requirement of the [Ataraxia](https://github.com/ataras
 - **No negative signal to the giver** (clause 16). Nothing in the gift-facing response surface can express a recipient's inaction.
 - **Absent capabilities** (clauses 28, 29, 30). There is no discount object, no per-person event store, no urgency field. Not disabled — absent.
 
-Conformance tests live in the Ataraxia repository. **Thirteen suites, all written**, and they run against any implementation over HTTP, importing nothing from one. Measured on 2026-09-11: 198 mutations, 231 probes at runtime with one skipped, 225 of them shown to fail under at least one deliberate break, and no break surviving.
+Conformance tests live in the Ataraxia repository. **The suites are written**, and they run against any implementation over HTTP, importing nothing from one. Measured on 2026-09-11: 198 mutations, 231 probes at runtime with one skipped, 225 of them shown to fail under at least one deliberate break, and no break surviving.
 
 ## The reference engine
 
-[`engine/`](engine/) implements the digital binding. It exists so the conformance suites have a subject, and it is not the hub: a member opens Atarasy, and this is the engine underneath an offer. Everything is held in memory, there is no persistence and no identity root, and it should not be deployed.
+[`engine/`](engine/) implements the digital and physical bindings. It exists so the conformance suites have a subject, and it is not the hub: a member opens Atarasy, and this is the engine underneath an offer. Storage is in memory by default, with persistence available through `VALENCE_DB`. It has no authentication or identity root and should not be deployed.
 
 **The specification is the normative half.** Where the two disagree, `SPEC.md` wins, and a change to the engine that would make the specification false is a change to the specification that has not been written yet.
 
@@ -68,7 +68,7 @@ Writing it found three holes in this document, each corrected in the same pass:
 
 ## Status
 
-Draft, September 2026. The specification is written and the reference engine passes the four written conformance suites. No production implementation exists. Expect breaking changes.
+Draft, September 2026. The specification and reference engine are written. Current test evidence belongs with the conformance logs and mutation ledger, rather than a fixed suite count in this overview. No production implementation exists. Expect breaking changes.
 
 ## Licence
 

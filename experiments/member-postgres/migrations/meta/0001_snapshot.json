@@ -1,0 +1,179 @@
+{
+  "id": "0ac12242-85b7-4b6a-b272-60fb8244c274",
+  "prevId": "d031609b-64ee-4d83-b1b7-3001cec30ce6",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "atarasy_member.control": {
+      "name": "control",
+      "schema": "atarasy_member",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "environment": {
+          "name": "environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "epoch": {
+          "name": "epoch",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "positive_epoch": {
+          "name": "positive_epoch",
+          "value": "\"atarasy_member\".\"control\".\"epoch\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "atarasy_member.engine_rows": {
+      "name": "engine_rows",
+      "schema": "atarasy_member",
+      "columns": {
+        "deployment": {
+          "name": "deployment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "namespace": {
+          "name": "namespace",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "engine_rows_ordinal_seq",
+            "schema": "atarasy_member",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        }
+      },
+      "indexes": {
+        "one_blocking_member_statement": {
+          "name": "one_blocking_member_statement",
+          "columns": [
+            {
+              "expression": "deployment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "(\"value\"::jsonb->>'offer')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"atarasy_member\".\"engine_rows\".\"namespace\" = 'member_operations' AND (\"atarasy_member\".\"engine_rows\".\"value\"::jsonb->>'state') IN ('prepared','dispatching','uncertain','committed')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "engine_rows_deployment_control_id_fk": {
+          "name": "engine_rows_deployment_control_id_fk",
+          "tableFrom": "engine_rows",
+          "tableTo": "control",
+          "schemaTo": "atarasy_member",
+          "columnsFrom": [
+            "deployment"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "engine_rows_deployment_namespace_key_pk": {
+          "name": "engine_rows_deployment_namespace_key_pk",
+          "columns": [
+            "deployment",
+            "namespace",
+            "key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "namespace_format": {
+          "name": "namespace_format",
+          "value": "\"atarasy_member\".\"engine_rows\".\"namespace\" ~ '^[a-z][a-z0-9_]{0,63}$'"
+        },
+        "value_size": {
+          "name": "value_size",
+          "value": "octet_length(\"atarasy_member\".\"engine_rows\".\"value\") <= 1048576"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "atarasy_member": "atarasy_member"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

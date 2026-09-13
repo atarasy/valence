@@ -28,9 +28,9 @@ underneath an offer.
 
 Two things, and no others.
 
-1. Give the conformance suites a subject. Six of the seven suites were written
-   against it, and every probe in them has been shown to fail under a
-   deliberate break of this code.
+1. Give the conformance suites a subject. Mutation measurements establish
+   which probes have been shown to fail; the ledger and the logs record
+   their coverage and its gaps.
 2. Find out which requirements the specification states but no component
    supplies. One was found on the first pass and is recorded below.
 
@@ -60,8 +60,8 @@ to start without one.
 ./scripts/conformance.sh
 ```
 
-Starts the server, seeds a catalogue, and runs the `absence`, `floor` and
-`silence` suites from the ataraxia repository. Set `ATARAXIA_TESTS` if that
+Starts the combined and separate-role servers, seeds their catalogues, and
+runs the suites listed in `scripts/conformance.sh` from the ataraxia repository. Set `ATARAXIA_TESTS` if that
 repository is not beside this one.
 
 ## Checking that the tests can fail
@@ -86,15 +86,22 @@ python3 scripts/anchors.py               # seconds; which breaks stopped applyin
 
 `coverage.sh` applies every mutation in turn and collects the probes that
 failed. It keeps each verdict and each run's logs under
-`~/Documents/valence-sweeps/sweep-<key>`, where the key is the content of
-`src`, of `scripts` and of the suites, so an interrupted run resumes and can
-never hand back a result measured against different code. `--fresh` discards
+`~/Documents/valence-sweeps/sweep-<key>`, where the key covers source, scripts, engine unit tests, conformance files,
+package and lock files, runtime versions and the relevant environment settings.
+Inputs are checked before and after each mutation; a changed input invalidates
+the result directory. This detects changes rather than preventing concurrent
+writers, so use an isolated checkout and keep its inputs fixed during a sweep. `--fresh` discards
 the directory, and `VALENCE_SWEEP_HOME` moves it. **It lived under `/tmp` until
 2026-09-11, when a reboot took a finished sweep's verdicts and every log behind
 its figures.**
 
-Run `anchors.py` after any change to `src`: a mutation whose anchor has drifted
-changes nothing, reports nothing, and reads exactly like one the corpus catches.
+Run `anchors.py` after any change to `src`. It runs mutations on disposable
+copies and inspects executed replacements on file-derived text, including
+multiple files and intermediate replacements. Aliased methods, imported
+helpers and skipped branches are outside that inspection. A matching anchor
+can still target the wrong occurrence: the mutation's changed behaviour and
+failure context need review. `python3 scripts/test_anchors.py` checks the
+instrumentation against missing and legitimate replacement fixtures.
 
 ## What this implementation found
 
@@ -141,10 +148,10 @@ neutral registry look like a field on the person's side.
 | `src/common/` | plumbing | the domain types with the clause each shape answers to, the errors, and why an unknown field is refused rather than dropped |
 | `src/http.ts` | the composition root | the §9 surface and the fixture routes, and the one place the three meet |
 
-They run in one process so the conformance suites reach both sides over one
-port. The boundary is real all the same: the engine asks the hub for a mandate
-and for whether a merchant is in the network, and holds nothing else of the
-hub's.
+The default deployment presents both roles in one process. The conformance
+harness also runs them separately. The engine asks the hub for mandates, the
+day's total and delivery records, and reports decided offers and settlements
+to the household's copy, as specified in §13.1 and §13.2.
 
 ## Licence
 

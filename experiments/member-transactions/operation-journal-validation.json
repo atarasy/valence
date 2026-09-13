@@ -1,0 +1,83 @@
+{
+  "date": "2026-09-13",
+  "baseline": "20ad5186264870aa19701559699228b10f605457",
+  "tests": {
+    "passed": 79,
+    "failed": 0,
+    "assertions": 521,
+    "files": 8,
+    "prior": 67,
+    "newJournalTests": 12
+  },
+  "strictTypes": "Passed all member-read, member-login and member-transactions TypeScript sources/tests; strict, noUncheckedIndexedAccess, noEmit",
+  "toolchain": {
+    "bun": "1.2.19",
+    "typescript": "7.0.2",
+    "bunTypes": "1.4.1",
+    "simpleWebAuthn": "14.0.1"
+  },
+  "processEvidence": {
+    "concurrency": "Two independent workers synchronised at a start barrier: one acquired claim, one synthetic effect entry",
+    "forcedDeath": [
+      {
+        "checkpoint": "after claim before synthetic effect",
+        "signal": "SIGKILL",
+        "reopenedState": "dispatching",
+        "syntheticEffects": 0,
+        "reclaimed": false
+      },
+      {
+        "checkpoint": "after synthetic effect before receipt",
+        "signal": "SIGKILL",
+        "reopenedState": "dispatching",
+        "syntheticEffects": 1,
+        "reclaimed": false
+      },
+      {
+        "checkpoint": "after receipt persistence",
+        "signal": "SIGKILL",
+        "reopenedState": "committed",
+        "syntheticEffects": 1,
+        "reclaimed": false
+      }
+    ]
+  },
+  "negativeControl": {
+    "target": "only one claim is acquired and identical repeats never dispatch again",
+    "change": "Disable non-prepared-state rejection in claimVerified",
+    "exitCode": 1,
+    "failedTests": 1,
+    "failedAssertions": 1,
+    "assertionsExecuted": 2,
+    "originalSHA256": "a1c4498cc85b4b61145c7c08e037d05c9166028b44a300b49ff31b966c558947",
+    "mutatedSHA256": "568202087136beab74db9e568530c648ff4c029139b0b44e935013bbe2649c49"
+  },
+  "sourceSHA256": {
+    "experiments/member-read/authority.ts": "dc13e91620b1a2a1b036c6a74a68a7eebe8087d95dc362283e9af590c61269ca",
+    "experiments/member-transactions/mandate-binding.ts": "f0f5bba5785a5b11cd51d54061dd6359a8e5aaf75cf83f8da0f190341c6590e4",
+    "experiments/member-transactions/operation-journal.ts": "a1c4498cc85b4b61145c7c08e037d05c9166028b44a300b49ff31b966c558947",
+    "experiments/member-transactions/operation-journal.test.ts": "22e6d308526edfc445fdfef54b339f73ec286acb853a3cec7512e96df66ee10a",
+    "experiments/member-transactions/journal-fixture.ts": "4cb78fe7032386ef4bbb7aed7d10915a6f2579a4ea78f54c3d3be1219e0e411c",
+    "experiments/member-transactions/journal-worker.ts": "f06e2e1586191312921248d6562a664a28155388bb7c1f7a1e7ac2dc22535db3",
+    "experiments/member-transactions/CONTRACT.md": "c3d3ddbfd67a2a90253fe2962741ccbea4cca646a3a50c2015c339ce284044a6",
+    "experiments/member-transactions/OPERATION_JOURNAL.md": "d73c8e4bbf9bc7f3491b1406c4ac85d487f094c08f426b87631660f6a22135ef"
+  },
+  "logs": {
+    "/Users/yoichirohara/Documents/atarasy-development/operation-journal-tests-20260913.log": "7b1eba364ee0dee02907487db44d7ba6d413d3dda37b2ce2760a5c89c87f3b98",
+    "/Users/yoichirohara/Documents/atarasy-development/operation-journal-types-20260913.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/Users/yoichirohara/Documents/atarasy-development/operation-journal-negative-20260913.log": "ad8a4d7c20a89ab11fb7b73c31e13ff567e854f4caf5586952ba9a31ba1ccf02"
+  },
+  "notMeasured": [
+    "Actual engine offer/ledger/provider effect in worker tests",
+    "Atomic cross-store revocation and external-effect commit",
+    "Transaction assertion verification",
+    "Member operation HTTP or native UI integration",
+    "Actual device ceremony or provider payment"
+  ],
+  "notes": [
+    "Fixture credentials and databases are real test implementations; canonical operation terms and effects are explicitly synthetic.",
+    "No engine source, member HTTP route or iOS changes.",
+    "Expired identical preparation retrieves the original operation ID but cannot acquire a first claim.",
+    "JSON request/challenge checks detect inconsistent storage, not adversarial database tampering."
+  ]
+}

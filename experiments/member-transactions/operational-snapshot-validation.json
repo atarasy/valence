@@ -1,0 +1,56 @@
+{
+  "baseline": "7cf6a7d09f40f06e468bf59f918210f76876cc6a",
+  "profile": "atarasy.operational-snapshot.1",
+  "suite": {
+    "passed": 279,
+    "failed": 0,
+    "assertions": 1256,
+    "files": 27,
+    "new_tests": 6,
+    "seconds": 3.58
+  },
+  "strict_types": "passed",
+  "negative_controls": {
+    "schema": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 3
+    },
+    "counter": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 0,
+      "failure": "copy equality check throws before test assertions"
+    }
+  },
+  "sources": {
+    "experiments/member-transactions/operational-schema-v1.json": "3a19b5bb860bc9f0306cc160742971172b8c9f6a55f5110f21dcff003a5ca85e",
+    "experiments/member-transactions/operational-snapshot.ts": "6547f7d4c17ac392668e88d8da5146d070712c6115d28a9c351a1e34019bdacb",
+    "experiments/member-transactions/operational-snapshot.test.ts": "4252d56dcf27142be62e96578d3b34ff105d8f62c5e4333e14de0e29848b57d4"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/operational-snapshot-tests-20260913.log",
+      "sha256": "b556fd35a820c8ac4a980eaecd7f5f472b20e468f1eea5ef5720b42abdd3c9a8"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/operational-snapshot-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "negative-schema": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/operational-snapshot-negative-schema-20260913.log",
+      "sha256": "30308f220023d0fc4063d8acaabc7af5a877179e201d4508d77a9ed9452b8414"
+    },
+    "negative-counter": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/operational-snapshot-negative-counter-20260913.log",
+      "sha256": "e5d83157f22d610d7b067ff582910e433e9f9f4e366d95e09b4333b4e82b9bca"
+    }
+  },
+  "limits": [
+    "Complete persisted current unified schema only",
+    "No live cutover or writer fence yet",
+    "Runtime configuration and external providers are outside SQLite",
+    "Trusted fixture sources; no full historical authenticity claim",
+    "No new process-kill or concurrent-process snapshot evidence"
+  ]
+}

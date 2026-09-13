@@ -1,0 +1,134 @@
+[
+  {
+    "type": "index",
+    "name": "one_blocking_statement",
+    "tbl_name": "operations",
+    "sql": "CREATE UNIQUE INDEX one_blocking_statement ON operations(offer) WHERE state IN ('prepared','dispatching','uncertain','committed')"
+  },
+  {
+    "type": "index",
+    "name": "sessions_credential",
+    "tbl_name": "sessions",
+    "sql": "CREATE INDEX sessions_credential ON sessions(credential)"
+  },
+  {
+    "type": "table",
+    "name": "atomic_meta",
+    "tbl_name": "atomic_meta",
+    "sql": "CREATE TABLE atomic_meta(scope TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "atomic_rows",
+    "tbl_name": "atomic_rows",
+    "sql": "CREATE TABLE atomic_rows(namespace TEXT NOT NULL,k TEXT NOT NULL,v TEXT NOT NULL,PRIMARY KEY(namespace,k))"
+  },
+  {
+    "type": "table",
+    "name": "authority_meta",
+    "tbl_name": "authority_meta",
+    "sql": "CREATE TABLE authority_meta (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL, environment TEXT NOT NULL, audience TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "binding_meta",
+    "tbl_name": "binding_meta",
+    "sql": "CREATE TABLE binding_meta(scope TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "bindings",
+    "tbl_name": "bindings",
+    "sql": "CREATE TABLE bindings(mandate TEXT PRIMARY KEY, principal TEXT NOT NULL, credential TEXT NOT NULL, household TEXT NOT NULL, fingerprint TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "challenges",
+    "tbl_name": "challenges",
+    "sql": "CREATE TABLE challenges (id TEXT PRIMARY KEY, challenge TEXT NOT NULL, expires INTEGER NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "credentials",
+    "tbl_name": "credentials",
+    "sql": "CREATE TABLE credentials (id TEXT PRIMARY KEY, principal TEXT NOT NULL REFERENCES principals(id), revoked INTEGER NOT NULL CHECK(revoked IN (0,1)))"
+  },
+  {
+    "type": "table",
+    "name": "enrollment_meta",
+    "tbl_name": "enrollment_meta",
+    "sql": "CREATE TABLE enrollment_meta (scope TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "flows",
+    "tbl_name": "flows",
+    "sql": "CREATE TABLE flows (id TEXT PRIMARY KEY, principal TEXT NOT NULL, handle TEXT NOT NULL, challenge TEXT NOT NULL, expires INTEGER NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "handles",
+    "tbl_name": "handles",
+    "sql": "CREATE TABLE handles (principal TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE)"
+  },
+  {
+    "type": "table",
+    "name": "invitations",
+    "tbl_name": "invitations",
+    "sql": "CREATE TABLE invitations (digest TEXT PRIMARY KEY, principal TEXT NOT NULL, expires INTEGER NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "login_meta",
+    "tbl_name": "login_meta",
+    "sql": "CREATE TABLE login_meta (scope TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "operation_meta",
+    "tbl_name": "operation_meta",
+    "sql": "CREATE TABLE operation_meta(scope TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "operations",
+    "tbl_name": "operations",
+    "sql": "CREATE TABLE operations(id TEXT PRIMARY KEY, offer TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('prepared','dispatching','uncertain','committed','cancelled','refused')), record TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "ownership",
+    "tbl_name": "ownership",
+    "sql": "CREATE TABLE ownership (kind TEXT NOT NULL CHECK(kind IN ('offer','mandate')), id TEXT NOT NULL, household TEXT NOT NULL, presenter TEXT, invalidated INTEGER NOT NULL CHECK(invalidated IN (0,1)), PRIMARY KEY(kind,id), CHECK((kind='offer' AND presenter IS NOT NULL) OR (kind='mandate' AND presenter IS NULL)))"
+  },
+  {
+    "type": "table",
+    "name": "passkeys",
+    "tbl_name": "passkeys",
+    "sql": "CREATE TABLE passkeys (id TEXT PRIMARY KEY, public_key BLOB NOT NULL, counter INTEGER NOT NULL, user_handle TEXT NOT NULL, revision INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)))"
+  },
+  {
+    "type": "table",
+    "name": "principals",
+    "tbl_name": "principals",
+    "sql": "CREATE TABLE principals (id TEXT PRIMARY KEY, household TEXT NOT NULL, presenters TEXT NOT NULL, disabled INTEGER NOT NULL CHECK(disabled IN (0,1)))"
+  },
+  {
+    "type": "table",
+    "name": "sessions",
+    "tbl_name": "sessions",
+    "sql": "CREATE TABLE sessions (id TEXT PRIMARY KEY, digest TEXT NOT NULL UNIQUE, credential TEXT NOT NULL REFERENCES credentials(id), expires INTEGER NOT NULL, revoked INTEGER NOT NULL CHECK(revoked IN (0,1)))"
+  },
+  {
+    "type": "table",
+    "name": "statement_review_meta",
+    "tbl_name": "statement_review_meta",
+    "sql": "CREATE TABLE statement_review_meta(scope TEXT NOT NULL)"
+  },
+  {
+    "type": "table",
+    "name": "statement_reviews",
+    "tbl_name": "statement_reviews",
+    "sql": "CREATE TABLE statement_reviews(operation TEXT PRIMARY KEY REFERENCES operations(id), record TEXT NOT NULL)"
+  }
+]
