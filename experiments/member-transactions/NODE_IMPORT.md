@@ -25,3 +25,7 @@ Next define a complete operational snapshot contract, inventory every engine and
 ## Evidence limits
 
 Tests use generated local fixture files, real engine export/import and cryptographic checks, and an actual local settlement receipt. They verify logical source rows remain equal, overwrite refusal, schema/relation failures, archive opening refusal and failed-import isolation. They are not migration of a user's live file, historical source attestation verification, network transport, native device or new process-kill evidence. Existing regression suites retain their previous scope.
+
+## Subsequent complete persisted snapshot
+
+[Operational snapshot v1](OPERATIONAL_SNAPSHOT.md) copies the complete current unified persisted schema, including member authentication and operation/ledger state that node archives omit. This is a separate profile; the archive marker remains protective. A writer fence and explicit single-writer cutover are still required.
