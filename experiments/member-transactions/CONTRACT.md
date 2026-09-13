@@ -69,3 +69,9 @@ The internal physical-statement journal stores the exact canonical bytes, review
 The journal rechecks current binding and offer ownership for member reads, cancellation and claims. A renewed session for the same binding may read its old operation; expiry limits claiming, not authenticated inspection of history. Cancellation and refusal apply only before dispatch. A crash never resets dispatching to prepared. Internal recovery can mark uncertainty or pin an authoritative receipt digest but cannot issue another claim.
 
 Canonical statement construction, consistent reviewed snapshots, transaction assertion verification, revocation at the external effect boundary, effect idempotency and authoritative recovery remain adapter responsibilities. The journal is an internal persistence/claim primitive, not an enabled HTTP operation route or proof of a single provider charge.
+
+## Local unit of work increment
+
+An experimental atomic Store runs existing local engine calls within one SQLite transaction, with fresh maps loaded only after acquiring the write lock. A database-wide lock covers shared household daily totals as well as individual offers. Every reservation, receipt, household-day and offer-state write must commit together or roll back together. An escaped runtime cannot persist later writes. Only detached results leave the scope.
+
+This primitive is internal and accepts trusted local code only. It must not wrap remote adapters or unawaited work. All competing writes, including authority revocation, credential counters, recovery, withdrawal, imports and read-triggered expiry, must join the boundary before member dispatch is enabled. The existing HTTP composition and separate authority/login/binding/journal stores are not migrated by this increment. External effects need a durable outbox, stable effect identifiers and authoritative recovery; a SQLite rollback cannot undo a network payment.
