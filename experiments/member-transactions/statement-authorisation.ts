@@ -144,6 +144,15 @@ export function openStatementAuthorisations(path: string, options: Policy) {
       });
     },
     read(token: string, id: string) { identifier(id); return run(async r => { const operation = await r.journal.read(token, id); return r.response(operation, r.saved(operation)); }); },
+    outcome(token: string, id: string) {
+      identifier(id);
+      return run(async r => {
+        const operation = await r.journal.read(token, id), review = r.saved(operation);
+        const receipt = operation.state === 'committed' ? r.engine.settlement(operation.offer) : null;
+        if (operation.state === 'committed' && (!receipt || hash(receipt) !== operation.receiptDigest || review.verified?.fingerprint !== operation.assertionFingerprint)) throw new Error('Operation outcome conflict');
+        return { operationID: id, operationState: operation.state, receipt: receipt ?? null };
+      });
+    },
     verify(token: string, id: string, assertion: PreparedAssertion) {
       identifier(id); const fixed = structuredClone(assertion);
       return run(async r => {

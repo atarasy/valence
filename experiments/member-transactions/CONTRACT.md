@@ -123,3 +123,9 @@ Pin the current complete unified SQLite table/index definitions in `operational-
 An updated atomic unit rechecks its exact active scope after BEGIN IMMEDIATE. A versioned fence stored in that row blocks both existing connections and new opens without changing the table schema. The operational snapshot recognises only a well-formed same-scope fence, copies it intact, and normalises it solely for logical content comparison. Snapshot copying never activates a fenced destination.
 
 Administrative cutover freezes under the writer lock, captures the final content digest and supplied runtime fingerprint, copies to the ticket's exclusive destination, validates both copies, retires the source and then enables the target. Retired sources are never automatically reopened. Resumption accepts the exact same ticket and target state only. This guarantee requires every active writer to use the updated atomic unit; old open binaries/direct database writers must be excluded before use.
+
+## Authenticated member runtime
+
+Bind a deterministic fingerprint of the exact immutable runtime configuration to the chosen canonical DB under the unified unit. Match any cutover activation receipt to that fingerprint before serving member requests. Cutover wrappers use this same computed fingerprint; configuration changes are not silently accepted.
+
+Member-only routes: POST `/member/statements/prepare`, GET `/member/operations/:id`, POST `/member/operations/:id/submit`, GET `/member/operations/:id/outcome`, POST `/member/operations/:id/cancel`. Existing bearer sessions select authority; household/credential/key terms are never taken from request bodies. Outcomes return owned stored state and a digest-checked committed receipt, without another signature or dispatch. Unknown routes never reach the reference administrative router. This is a callable internal composition, not a listener or a newly enabled enrolment/login flow.
