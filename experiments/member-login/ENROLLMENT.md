@@ -1,0 +1,17 @@
+# Enrollment and transport contract
+
+Trusted provisioning creates the principal and its grants. `issueInvitation` creates a random 256-bit enrollment capability for that active principal, stores only its digest, and returns the secret once. Its lifetime has an explicit maximum. Redemption consumes the invitation and binds a fresh registration flow to the preselected principal and a stable random user handle. Both invitation and flow are single-attempt. Failed or interrupted attempts require a new invitation. No public request may name a principal or household.
+
+Registration options and verification use pinned SimpleWebAuthn 14.0.1: exact origin/RP, ES256, required user presence/verification, resident key required and attestation none. See the [registration API](https://simplewebauthn.dev/docs/packages/server). Registration verifies a ceremony but does not issue a session; login subsequently verifies a signature by the registered key. No hardware attestation claim is made.
+
+Login schema 2 adds an active flag. Recognised schema 1 migrates transactionally, retaining existing trusted keys as active. New enrollment inserts an inactive key before registering the authority reference, then activates it. Neither cross-file collision nor interruption may activate a pending key. Stop all schema-1 login processes before migration: those old readers do not understand inactive keys and must not run alongside schema 2. There is no automatic recovery or rebind. A new credential ceremony and administrative reconciliation are needed after a partial failure.
+
+The opt-in handler exposes POST `/auth/enrollment/options` with `{invitation}`, POST `/auth/enrollment/verify` with `{id,response}`, POST `/auth/login/options` with `{}`, POST `/auth/login/verify` with `{id,response}`, POST `/auth/logout` with `{}`, and GET `/auth/session`. Other permitted GET requests go through the existing read gate. No admin/provisioning endpoint exists. All responses are no-store; failures have neutral bodies.
+
+POST requires JSON with a bounded streamed body and exactly the documented root fields. A present Origin must exactly match the configured HTTPS origin; cross-site fetch metadata and cookies are refused. Native clients may omit Origin. No cross-origin preflight or credential cookie is enabled. Session inspection and logout require an opaque bearer token. Logout revokes only the resolved session, and replaying an already revoked valid-format token returns an empty success.
+
+Every request requires admission from a trusted hosting callback and a host-derived peer key. Never derive that key from an unchecked forwarded header. Denial returns 429; missing context or limiter failure fails closed. This contract requires a deployed limiter before public hosting; tests use deterministic callbacks and do not claim production abuse resistance. A caller must not expose the internal handler on an alternate unprotected origin.
+
+Verification failures consume the submitted ceremony when it reaches the verifier. Transport rejection before verification does not consume a flow. If a success response is lost, do not retry a ceremony expecting the same session: begin a new login. Registration may have completed; try login before requesting a new enrollment invitation. Native UI must present this uncertainty explicitly.
+
+Invitation delivery, TLS/listener composition, production rate limits, device association, encrypted storage, restore policy and operator repair remain deployment work. No private keys or real member data occur in the fixtures.

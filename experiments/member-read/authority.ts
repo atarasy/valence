@@ -57,6 +57,7 @@ export function openMemberAuthority(path: string, options: Options) {
   }
   return {
     scope: Object.freeze({ environment, audience }),
+    isActivePrincipal(id: string) { name(id); return principal(id)?.disabled === 0; },
     provisionPrincipal(id: string, household: string, presenters: readonly string[]) {
       name(id); name(household); const encoded = grants(presenters);
       // INSERT only: no rebind, revive or silent overwrite of an existing principal.
