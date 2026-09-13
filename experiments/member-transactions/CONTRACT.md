@@ -133,3 +133,7 @@ Member-only routes: POST `/member/statements/prepare`, GET `/member/operations/:
 ## Swift operation checkpoint consumer
 
 The Swift consumer binds prepared operation IDs to its environment, session, household, presenter and locally reviewed canonical statement. It independently derives the contextual challenge from profile, scope, operation ID, request digest and reviewed revision. It saves the operation before returning preparation and saves an attempted marker before dispatch. A saved attempted operation is read back through the outcome GET, never automatically submitted again. Local persistence stores neither bearer nor assertion; generic transport/refusal results do not authorise another effect. Native ceremony and UI integration remain separate.
+
+## Native statement review consumer
+
+A native approval follows display of the frozen statement and mandate, with a fresh operation review before requesting an assertion. The platform assertion restricts allowed credentials to the operation's selected credential and requires user verification. Session/selection invalidation between async steps prevents late assertions from being dispatched. Persisted attempted operations are discoverable for exact-session outcome reads and cannot automatically reopen signing. No outcome state authorises an automatic repeat.
