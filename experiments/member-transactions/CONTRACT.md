@@ -97,3 +97,7 @@ A member authorisation from this profile is not a legacy engine settlement signa
 ## Contextual local settlement increment, 2026-09-13
 
 `openStatementAuthorisations.settle(token, operationID, originalAssertion)` now performs current authority/review validation, pinned credential verification, journal claim, explicit Appendix A engine acceptance and committed receipt digest recording within the unified local transaction. It accepts the existing prepared challenge without a substitute signature or another ceremony. Exact committed retries return the stored receipt after checking current access, accepted assertion fingerprint and receipt digest. All other states/proofs fail closed. See [contextual settlement](CONTEXTUAL_SETTLEMENT.md) for the tested boundary. No member HTTP route is enabled.
+
+## Persistent reconstruction increment, 2026-09-13
+
+Fresh engines rebuild candidate lookup and persist exact bare receipt references under SPEC Appendix B. Duplicate candidate imports and ambiguous stored state are refused. See [engine reconstruction and writer inventory](ENGINE_RECONSTRUCTION.md). This closes the process-local index blocker; full writer adoption and existing-file migration are still required before exposing member writes.

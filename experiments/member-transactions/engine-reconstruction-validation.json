@@ -1,0 +1,77 @@
+{
+  "baseline": "eb4122cdc6c7b9f790d8441c7ce81e8fbec96b76",
+  "suite": {
+    "passed": 257,
+    "failed": 0,
+    "assertions": 1155,
+    "files": 24,
+    "new_tests": 8,
+    "seconds": 3.31
+  },
+  "strict_types": "passed",
+  "anchors": {
+    "scripts": 301,
+    "raised": 0,
+    "replacements": 335,
+    "missing": 0,
+    "untracked": 13
+  },
+  "negative_controls": {
+    "candidate": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 0,
+      "failure": "real addNote rejects missing candidate"
+    },
+    "receipt": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 4
+    },
+    "product": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 2,
+      "mutation": "existing receipt_names_its_product"
+    }
+  },
+  "sources": {
+    "SPEC.md": "e6396b42cb4e7086c6212da6c80d0549186580932d803121b8dcded6c9af5aa2",
+    "engine/src/engine/offers.ts": "d67d2ec8725e074d73de49a03d430426316d85d7aeac243c5eb90732914ae5ac",
+    "engine/scripts/mutations/receipt_names_its_product.py": "a875435dd479ad518f95df60692b53a09ac606f703921128a7e8ab71f57f32f3",
+    "experiments/member-transactions/engine-reconstruction.test.ts": "3f68cd2397d2a0fb00b692154ac717f74e5e6517a85a0d272a39f1b85b95fd48"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/engine-reconstruction-tests-20260913.log",
+      "sha256": "bd048fe02d823c84b09a6698afbefd6dc6ce6caddf25da3ce8e903d68676d145"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/engine-reconstruction-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "anchors": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/engine-reconstruction-anchors-20260913.log",
+      "sha256": "3b7dcd96c2fe6097715752624c18c5b6912497051c6cbdbbd64c192d557c1e50"
+    },
+    "negative-candidate": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/engine-reconstruction-negative-candidate-20260913.log",
+      "sha256": "9fe5c58b935026f556b3ce960e894701d808ac9bd729e18f966d6b9c19f245cd"
+    },
+    "negative-receipt": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/engine-reconstruction-negative-receipt-20260913.log",
+      "sha256": "191a2ad318b2766b5b7896ec59ddc79102ef75d5cb03ab602b7cfe4b27bbb981"
+    },
+    "negative-product": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/engine-reconstruction-negative-product-20260913.log",
+      "sha256": "dc6d40214a6f0d65f0585e4d915c75b6899b297a9aa669a4d5910fe9fbffab71"
+    }
+  },
+  "limits": [
+    "No full writer adoption or migration",
+    "No HTTP/native write enablement",
+    "No new process-kill measurement",
+    "No full behavioural mutation sweep",
+    "Legacy missing random receipt references cannot be reconstructed from edges"
+  ]
+}

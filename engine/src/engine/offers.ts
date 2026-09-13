@@ -135,7 +135,7 @@ export class ValenceEngine {
    * moment any route resolves the identifier the record stops being the bare
    * fact. Nothing resolves this token, and no route accepts it.
    */
-  private readonly receipts = new Map<string, { ref: string; at: number }[]>();
+  private readonly receipts: Map<string, { ref: string; at: number }[]>;
   private readonly candidateIndex = new Map<string, string>();
 
   /**
@@ -194,6 +194,13 @@ export class ValenceEngine {
     store: Store = inMemoryStore()
   ) {
     this.offers = store.map("offers");
+    this.receipts = store.map("bare_receipts");
+    // Appendix B: candidate lookup is derived; opaque receipt references are not.
+    for (const [id, offer] of this.offers) {
+      if (id !== offer.id) throw new Error('Stored offer identity mismatch');
+      this.assertCandidateIdentifiers(offer);
+      for (const candidate of offer.candidates) this.candidateIndex.set(candidate.id, id);
+    }
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
     this.memberStatementConfirmations = store.map("member_statement_confirmations");
@@ -550,6 +557,7 @@ export class ValenceEngine {
       reminders_sent: 0,
       decided_at: null,
     };
+    this.assertCandidateIdentifiers(offer);
     this.offers.set(offer.id, offer);
     for (const c of candidates) this.candidateIndex.set(c.id, offer.id);
     return offer;
@@ -1463,7 +1471,7 @@ export class ValenceEngine {
   }
 
   receiptsFor(household: string): { ref: string; at: number }[] {
-    return this.receipts.get(household) ?? [];
+    return structuredClone(this.receipts.get(household) ?? []);
   }
 
   /**
@@ -1590,8 +1598,19 @@ export class ValenceEngine {
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
     }
+    this.assertCandidateIdentifiers(offer);
     this.offers.set(offer.id, offer);
     for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);
+  }
+
+  private assertCandidateIdentifiers(offer: Offer): void {
+    const seen = new Set<string>();
+    for (const candidate of offer.candidates) {
+      if (typeof candidate.id !== 'string' || !candidate.id || seen.has(candidate.id) || this.candidateIndex.has(candidate.id)) {
+        throw conflict('candidate_conflict', 'Candidate identifiers must have one unambiguous owner.');
+      }
+      seen.add(candidate.id);
+    }
   }
 
   importSettlement(settlement: Settlement): void {
@@ -1619,7 +1638,7 @@ export class ValenceEngine {
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {
-    this.receipts.set(household, [...rows]);
+    this.receipts.set(household, structuredClone(rows));
   }
 
   // ---- reads ---------------------------------------------------------------
