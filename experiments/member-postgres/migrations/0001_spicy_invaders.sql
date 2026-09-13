@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "one_blocking_member_statement" ON "atarasy_member"."engine_rows" USING btree ("deployment",("value"::jsonb->>'offer')) WHERE "atarasy_member"."engine_rows"."namespace" = 'member_operations' AND ("atarasy_member"."engine_rows"."value"::jsonb->>'state') IN ('prepared','dispatching','uncertain','committed');

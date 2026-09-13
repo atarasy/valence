@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import type { Store } from '../../engine/src/common/store.ts';
 export type Identity = { id:string; environment:string; origin:string; epoch:number };
+const savepoints=new WeakMap<Store,<T>(fn:()=>T)=>T>();
+export function storeSavepoint<T>(store:Store,fn:()=>T):T {const save=savepoints.get(store);if(!save)throw new Error('Unknown PostgreSQL capability');return save(fn);}
 type Row = {namespace:string; key:string; value:string};
 const validName = (s:string) => typeof s==='string' && /^[a-z][a-z0-9_]{0,63}$/.test(s);
 function identity(input:Identity) {
@@ -45,12 +47,14 @@ export function postgresStore(pool:Pool,input:Identity) {
     const {rows}=await c.query<Row>('SELECT namespace,key,value FROM atarasy_member.engine_rows WHERE deployment=$1 ORDER BY ordinal',[p.id]);
     const snapshots=new Map<string,Map<string,string>>();
     for(const r of rows){let map=snapshots.get(r.namespace);if(!map){map=new Map();snapshots.set(r.namespace,map);}map.set(r.key,r.value);}
+    const liveMaps:Map<string,unknown>[]=[];
     const used=new Set<string>(),operations:({kind:'set';namespace:string;key:string;value:string}|{kind:'delete';namespace:string;key:string}|{kind:'clear';namespace:string})[]=[];
     active=true;
     const store:Store={
      map<V>(namespace:string):Map<string,V> {
       check();if(!validName(namespace)||used.has(namespace))throw new Error('Invalid or duplicate PostgreSQL map');used.add(namespace);
       const map=new Map<string,V>();for(const [key,value]of snapshots.get(namespace)??[])map.set(key,JSON.parse(value));
+      liveMaps.push(map);
       let proxy:Map<string,V>;
       proxy=new Proxy(map,{get(target,property){
        check();
@@ -65,7 +69,13 @@ export function postgresStore(pool:Pool,input:Identity) {
       }});return proxy;
      },close(){throw new Error('PostgreSQL transaction owns store');}
     };
-    const result=structuredClone(await work(store));active=false;
+    savepoints.set(store,<R>(fn:()=>R):R=>{
+     check();if(fn.constructor.name==='AsyncFunction')throw new Error('Savepoints require synchronous work');
+     const mark=operations.length,backups=liveMaps.map(map=>structuredClone([...map]));
+     try{const value=fn();if(value&&typeof (value as any).then==='function')throw new Error('Savepoints require synchronous work');return value;}
+     catch(error){operations.splice(mark);liveMaps.forEach((map,i)=>{map.clear();for(const [k,v]of backups[i]??[])map.set(k,v);});throw error;}
+    });
+    const result=structuredClone(await work(store));active=false;savepoints.delete(store);
     for(const operation of operations){
      if(operation.kind==='clear')await c.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1 AND namespace=$2',[p.id,operation.namespace]);
      else if(operation.kind==='delete')await c.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1 AND namespace=$2 AND key=$3',[p.id,operation.namespace,operation.key]);

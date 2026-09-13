@@ -151,3 +151,7 @@ The user selected Vercel plus Neon PostgreSQL, recorded in Vault decision 57. Ra
 ### PostgreSQL foundation boundary
 
 Vault decision 58 specifies a pg transaction connection, deployment-wide control-row FOR UPDATE lock, immutable scope plus writer epoch/enabled checks, ordered engine-row snapshot and staged explicit Map writes. Drizzle tracks schema migrations. Persist set-time JSON bytes and insertion order. Bound transactions and snapshot size. Do not retry callbacks or ambiguous commits automatically. This first foundation does not implement the authority/login/enrolment/journal SQL participants or a hosted HTTP service.
+
+### PostgreSQL member record composition
+
+Decision 59 selects versioned member record namespaces within the same PostgreSQL transaction snapshot as the engine. No SQLite runs in a hosted request. Participants share one scoped Store; insert-only identity records and reference validation preserve business constraints. Staged synchronous savepoints discard new writes and restore maps on failure. Async cryptographic verification is outside those savepoints. Blocking operations retain a database unique index by deployment/offer. Record references are not represented as relational foreign keys. The initial whole-deployment lock and bounded snapshot remain development constraints.

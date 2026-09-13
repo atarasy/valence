@@ -1,0 +1,12 @@
+import { mkdir,copyFile,writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+const destination=process.argv[2];if(!destination)throw new Error('Explicit isolated output directory required');
+await mkdir(resolve(destination,'api'),{recursive:true});
+await mkdir(resolve(destination,'public'),{recursive:true});
+await writeFile(resolve(destination,'public/robots.txt'),'User-agent: *\nDisallow: /\n');
+const built=await Bun.build({entrypoints:[new URL('./entry.ts',import.meta.url).pathname],target:'bun',format:'esm',packages:'bundle',outdir:resolve(destination,'api'),naming:'index.js'});
+if(!built.success)throw new Error(built.logs.map(String).join('\n'));
+await copyFile(new URL('./vercel.json',import.meta.url),resolve(destination,'vercel.json'));
+await writeFile(resolve(destination,'package.json'),JSON.stringify({name:'atarasy-api-dev',private:true,type:'module',scripts:{build:'echo Prebundled member API'}},null,2)+'\n');
+await writeFile(resolve(destination,'.vercelignore'),'.env*\n.agents\n.claude\n');
+console.log('Built isolated Vercel artifact');
