@@ -121,6 +121,20 @@ export function openMemberAuthority(path: string, options: Options) {
       name(row.household); timestamp(row.expires);
       return { id: row.id, household: row.household, presenters, expiresAt: row.expires, revoked: false, environment };
     },
+    /** Trusted internal lookup only. Never exposed by the member HTTP handler. */
+    transactionContext(token: string, mandate: string) {
+      if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;
+      name(mandate);
+      const row = db.query(`SELECT s.id AS session, s.expires, c.id AS credential, p.id AS principal, p.household, p.presenters FROM sessions s
+        JOIN credentials c ON c.id=s.credential JOIN principals p ON p.id=c.principal
+        JOIN ownership o ON o.kind='mandate' AND o.id=? AND o.household=p.household AND o.invalidated=0
+        WHERE s.digest=? AND s.revoked=0 AND c.revoked=0 AND p.disabled=0 AND s.expires>?`).get(mandate, digest(token), now()) as { session: string; expires: number; credential: string; principal: string; household: string; presenters: string } | null;
+      if (!row) return;
+      const presenters: unknown = JSON.parse(row.presenters);
+      if (!Array.isArray(presenters) || grants(presenters) !== row.presenters) throw new Error('Invalid stored grants');
+      timestamp(row.expires);
+      return { session: row.session, expiresAt: row.expires, credential: row.credential, principal: row.principal, household: row.household, presenters: [...presenters] as string[] };
+    },
     bindResource(resource: Resource, owner: Ownership) {
       name(resource.id); name(owner.household);
       if (resource.kind !== 'offer' && resource.kind !== 'mandate') throw new Error('Invalid resource kind');

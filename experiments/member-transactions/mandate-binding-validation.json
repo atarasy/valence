@@ -1,0 +1,60 @@
+{
+  "date": "2026-09-13",
+  "baseline": "2690d6b0feaaec0a0f60934203896f80f7c9c463",
+  "tests": {
+    "passed": 67,
+    "failed": 0,
+    "files": 7,
+    "assertions": 440,
+    "priorTests": 58,
+    "newBindingTests": 9
+  },
+  "strictTypes": "Passed for all member-read, member-login and member-transactions TypeScript sources/tests; strict, noUncheckedIndexedAccess, noEmit",
+  "runtime": {
+    "bun": "1.2.19",
+    "simpleWebAuthn": "14.0.1",
+    "typescript": "7.0.2",
+    "bunTypes": "1.4.1"
+  },
+  "dependencyHashes": {
+    "/Users/yoichirohara/Documents/atarasy-development/valence-member-transactions-20260913/experiments/member-login/package.json": "ad1079d1ade543a92aa9af6706eba90d32775b3a8e1ff759e3f8e9c3771e65a7",
+    "/Users/yoichirohara/Documents/atarasy-development/valence-member-transactions-20260913/experiments/member-login/bun.lock": "40c8067175ddafb53145d3d6d191abc2b217766d2773ea4058b6039ac8830614",
+    "/Users/yoichirohara/Documents/atarasy-development/mandate-binding-type-tools-20260913/package.json": "7f5b892e1fd9aec49468bc51e0f29e90e9659b02b24dcb0f457fac964438e8d8",
+    "/Users/yoichirohara/Documents/atarasy-development/mandate-binding-type-tools-20260913/bun.lock": "58575c39fcf97a14a77dfbdab2bc106c9e6e8d80b6e2c1bd4b7ba79740ead9db"
+  },
+  "negativeControl": {
+    "target": "different engine key cannot bind even with valid login and owned mandate",
+    "change": "Disable login/engine SPKI equality check",
+    "failedTests": 1,
+    "assertions": 1,
+    "exitCode": 1,
+    "originalSHA256": "1bad1e0f4b18f8c44530a152852a11bf0126ace4450f2c6992660b53e1181654",
+    "mutatedSHA256": "b2ce68f402d816b1a0c9c10bfd2f0a1d1005114006141145cf2546c15a2c7a11"
+  },
+  "sourceSHA256": {
+    "experiments/member-read/authority.ts": "9a2583e267ad86b2d6b69067a8e909eced1d956204bda506b33dcddffdcf2b1f",
+    "experiments/member-login/login.ts": "88596601f13e0e3111cb30021da231fb45606544f78c283d0216365005d9ad6c",
+    "experiments/member-login/credential-key.ts": "11e88737e73c29c6d6d50a6673e6654a42ce512249808c88b7c16a1911707e51",
+    "experiments/member-transactions/mandate-binding.ts": "1bad1e0f4b18f8c44530a152852a11bf0126ace4450f2c6992660b53e1181654",
+    "experiments/member-transactions/mandate-binding.test.ts": "3cdf1ec1393f78f1bcb4e9e1c1a8dab5110964eec5b203f4d0080f37cb11b926",
+    "experiments/member-transactions/CONTRACT.md": "286c13b69961861f82c25d9043acb312715f89ebec58f04f11afbefd024aa6e5",
+    "experiments/member-transactions/MANDATE_BINDING.md": "d78dd83b9a9942d392eeb6bbcd9d3d5dbf8c6b7ac83d50f40838278bcf9d6fbf"
+  },
+  "logs": {
+    "/Users/yoichirohara/Documents/atarasy-development/mandate-binding-tests-20260913.log": "00042eba8f845b267688d9b0ed03f8f8f41df91d5c04f869862efdfb2fad4bdc",
+    "/Users/yoichirohara/Documents/atarasy-development/mandate-binding-types-20260913.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/Users/yoichirohara/Documents/atarasy-development/mandate-binding-negative-20260913.log": "8d6c964dece90f997538681d8dd88a0a71b7f2fcbd885bf0725da894cd2c5250"
+  },
+  "notMeasured": [
+    "Native passkey or device compatibility",
+    "Initial engine identity provisioning",
+    "Offer-specific transaction authority or dispatch",
+    "Simultaneous cross-process claims or process-kill recovery",
+    "Credential rotation or multiple authenticators per mandate"
+  ],
+  "notes": [
+    "Tests use actual verified-login and engine registry with independent fixture keys. Secondary session, mutable engine view and changed configured scope are explicitly synthetic adapters.",
+    "Close/reopen and two database connections verify immutable persistence, not distributed transaction atomicity.",
+    "No engine source, member HTTP route or iOS app changes in this increment."
+  ]
+}

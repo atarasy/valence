@@ -56,6 +56,12 @@ export function openVerifiedLogin(path: string, authority: Authority, policy: Po
       const changed = db.query('UPDATE passkeys SET active=1 WHERE id=? AND active=0').run(id);
       if (changed.changes !== 1) throw new Error('Enrollment activation failed');
     },
+    /** Detached active public-key data for trusted internal mandate binding only. */
+    verifiedPublicKey(id: string): Uint8Array | undefined {
+      if (!b64(id)) return;
+      const row = db.query('SELECT public_key FROM passkeys WHERE id=? AND active=1').get(id) as { public_key: Uint8Array } | null;
+      return row ? new Uint8Array(row.public_key) : undefined;
+    },
     begin() {
       const at = now(), expiresAt = at + challengeLifetimeMs; integer(expiresAt);
       const id = randomUUID(), challenge = randomBytes(32).toString('base64url');

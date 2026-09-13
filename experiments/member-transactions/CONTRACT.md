@@ -4,7 +4,7 @@ Status: proposed integration contract, no routes implemented or enabled. Baselin
 
 ## Existing boundary and blockers
 
-The member gate exposes authenticated reads, not `POST /offers/{id}/decisions` or `/settle`. The login database verifies a registered credential and issues an authority session. The engine separately resolves the identity registered under `offer.mandate`. There is no implemented proof that these keys are the same authorised member key. Never register or replace that identity from a client-supplied household/mandate name, forward a bearer as transaction proof, or sign on the member's behalf.
+The member gate exposes authenticated reads, not `POST /offers/{id}/decisions` or `/settle`. The login database verifies a registered credential and issues an authority session. The engine separately resolves the identity registered under `offer.mandate`. The internal credential bridge below now checks equality against an existing engine mandate key; secure initial engine identity provisioning remains separate. Never register or replace that identity from a client-supplied household/mandate name, forward a bearer as transaction proof, or sign on the member's behalf.
 
 Physical settlement exposes the submitted public signature as `confirmation`. Its lines and amounts support read-back comparison with a frozen statement. The receipt excludes carriage and does not establish provider payment. Digital offer detail does not expose the consumed confirmation tokens; equal choices do not identify the operation that recorded them.
 
@@ -53,3 +53,11 @@ An operation receipt needs the operation ID, kind, resource, principal scope, re
 ## Current implementation boundary
 
 The Atarasy core increment prepares physical statement bytes and checks read-back evidence. It neither provisions transaction authority nor dispatches a write. No API in this experiment is exposed by the member handler. Durable operation storage, digital operation receipts and the commit adapter remain required implementation work.
+
+## Credential bridge increment
+
+The first internal bridge binds only an existing engine mandate identity to the exact ES256/P-256 public key of a live verified-login credential. The authority store must already own the mandate for the session household. No bridge call registers an engine identity or changes one. A persisted mandate binding is immutable across principal, credential, household and key fingerprint; additional authenticators require a separate rotation/multi-device design.
+
+Resolution rechecks live authority, active login key, authoritative mandate ownership and the current engine key. It returns detached scope evidence only, with no assertion ceremony or dispatch privilege. ES256/P-256 uses a closed five-field COSE profile with 32-byte coordinates and no trailing bytes. Unsupported profiles fail closed. This restriction needs real native-device acceptance before widening.
+
+The bridge uses its own scoped SQLite store and synchronous read/compare/write steps. That closes no distributed commit or revocation race: a dispatcher must revalidate at the future atomic effect boundary described above. The member handler remains read-only.
