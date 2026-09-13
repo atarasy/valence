@@ -1,3 +1,4 @@
+import { MEMBER_STATEMENT_PROFILE, type MemberStatementEnvelope } from '../../engine/src/shared/member-statement.ts';
 import { createHash } from 'node:crypto';
 import { ValenceEngine } from '../../engine/src/engine/offers.ts';
 import { InMemoryLedger } from '../../engine/src/engine/ledger.ts';
@@ -13,7 +14,7 @@ import { openMandateBindings } from './mandate-binding.ts';
 import { openOperationJournal, type JournalOperation } from './operation-journal.ts';
 import { databaseFor } from './shared-database.ts';
 
-export const AUTHORISATION_PROFILE = 'atarasy.member-statement-authorisation.1';
+export const AUTHORISATION_PROFILE = MEMBER_STATEMENT_PROFILE;
 function stable(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
@@ -23,7 +24,7 @@ const hash = (value: unknown) => createHash('sha256').update(stable(value)).dige
 function identifier(value: unknown): asserts value is string { if (typeof value !== 'string' || !value || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error('Invalid statement input'); }
 function integer(value: number) { if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid statement amount or time'); }
 type Policy = { environment: string; origin: string; rpID: string; maximumLifetimeMs: number; maxSessionLifetimeMs: number; now?: () => number; engine: ConstructorParameters<typeof ValenceEngine>[1] };
-/** Internal authorisation only. Its contextual challenge is NOT an engine settlement signature. */
+/** Internal local transaction adapter. No HTTP route or external ledger. */
 export function openStatementAuthorisations(path: string, options: Policy) {
   const policy = { ...options, engine: { ...options.engine } };
   if (policy.rpID !== policy.engine.relyingPartyId || new URL(policy.origin).origin !== policy.origin || new URL(policy.origin).hostname !== policy.rpID || !policy.origin.startsWith('https://')) throw new Error('Statement scope mismatch');
@@ -38,7 +39,7 @@ export function openStatementAuthorisations(path: string, options: Policy) {
     return unit.run((store, database) => work(runtime(store, database)));
   }
   function runtime(store: Parameters<Parameters<typeof unit.run>[0]>[0], database: Parameters<Parameters<typeof unit.run>[0]>[1]) {
-    const engine = new ValenceEngine(new InMemoryLedger(store), policy.engine, store), deliveries = new DeliveryRegister(store);
+    const engine = new ValenceEngine(new InMemoryLedger(store), { ...policy.engine, memberStatementScope: { environment: policy.environment, origin: policy.origin } }, store), deliveries = new DeliveryRegister(store);
     engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
     const authority = openMemberAuthority(database, { ...scope, maxSessionLifetimeMs: policy.maxSessionLifetimeMs, now: clock });
     const login = openVerifiedLogin(database, authority, { environment: policy.environment, origin: policy.origin, rpID: policy.rpID, challengeLifetimeMs: policy.maximumLifetimeMs, sessionLifetimeMs: policy.maxSessionLifetimeMs, now: clock });
@@ -101,6 +102,28 @@ export function openStatementAuthorisations(path: string, options: Policy) {
     }
     return { engine, authority, login, bindings, journal, db, snapshot, saved, response };
   }
+  async function verifyInUnit(r: ReturnType<typeof runtime>, token: string, operation: JournalOperation, review: ReturnType<ReturnType<typeof runtime>['saved']>, fixed: PreparedAssertion) {
+    if (operation.state !== 'prepared') throw new Error('Authorisation unavailable');
+    const fingerprint = hash(fixed);
+    if (operation.expiresAt <= clock()) throw new Error('Authorisation expired');
+    const fresh = r.snapshot(token, operation.offer, review.sealed.view.disputed);
+    if (fresh.revision !== review.revision || fresh.canonical !== operation.canonical) throw new Error('Review changed');
+    if (review.verified) {
+      if (review.verified.fingerprint !== fingerprint) throw new Error('Different authorisation');
+      return;
+    }
+    const verified = await r.login.verifyPreparedAssertion(operation.credential, review.challenge, fixed);
+    // The database lock excludes competing writers; time-based expiry still needs another check.
+    r.bindings.resolve(token, operation.mandate);
+    if (operation.expiresAt <= clock()) throw new Error('Authorisation expired');
+    review.verified = { fingerprint, counter: verified.counter, at: clock() };
+    r.db.query('UPDATE statement_reviews SET record=? WHERE operation=?').run(JSON.stringify(review), operation.id);
+  }
+  function envelope(operation: JournalOperation): MemberStatementEnvelope {
+    const { id, principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt, requestDigest } = operation;
+    return { profile: AUTHORISATION_PROFILE, environment: policy.environment, origin: policy.origin, rpID: policy.rpID,
+      id, principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt, requestDigest };
+  }
   return {
     prepare(token: string, input: { offer: string; disputed: string[] }) {
       const fixed = structuredClone(input);
@@ -125,22 +148,30 @@ export function openStatementAuthorisations(path: string, options: Policy) {
       identifier(id); const fixed = structuredClone(assertion);
       return run(async r => {
         const operation = await r.journal.read(token, id), review = r.saved(operation);
-        if (operation.state !== 'prepared') throw new Error('Authorisation unavailable');
-        const fingerprint = hash(fixed);
-        if (operation.expiresAt <= clock()) throw new Error('Authorisation expired');
-        const fresh = r.snapshot(token, operation.offer, review.sealed.view.disputed);
-        if (fresh.revision !== review.revision || fresh.canonical !== operation.canonical) throw new Error('Review changed');
-        if (review.verified) {
-          if (review.verified.fingerprint !== fingerprint) throw new Error('Different authorisation');
-          return r.response(operation, review);
+        await verifyInUnit(r, token, operation, review, fixed);
+        return r.response(operation, review);
+      });
+    },
+    settle(token: string, id: string, assertion: PreparedAssertion) {
+      identifier(id); const fixed = structuredClone(assertion);
+      return run(async r => {
+        const operation = await r.journal.read(token, id), review = r.saved(operation), fingerprint = hash(fixed);
+        if (operation.state === 'committed') {
+          const receipt = r.engine.settlement(operation.offer);
+          if (operation.assertionFingerprint !== fingerprint || review.verified?.fingerprint !== fingerprint || !receipt || hash(receipt) !== operation.receiptDigest) throw new Error('Operation outcome conflict');
+          return { operationID: id, operationState: 'committed' as const, receipt };
         }
-        const verified = await r.login.verifyPreparedAssertion(operation.credential, review.challenge, fixed);
-        // The database lock excludes competing writers; time-based expiry still needs another check.
+        await verifyInUnit(r, token, operation, review, fixed);
+        const claimed = await r.journal.claimVerified(token, id, { requestDigest: operation.requestDigest, reviewedRevision: operation.reviewedRevision, assertionFingerprint: fingerprint });
+        if (!claimed.acquired) throw new Error('Operation outcome unavailable');
+        const receipt = await r.engine.settleMemberStatement(envelope(operation), {
+          authenticator_data: fixed.response.authenticatorData, client_data_json: fixed.response.clientDataJSON, signature: fixed.response.signature,
+        }, review.sealed.view.disputed, clock());
+        // Every effect above is local and rolls back if time expired during the unit.
         r.bindings.resolve(token, operation.mandate);
         if (operation.expiresAt <= clock()) throw new Error('Authorisation expired');
-        review.verified = { fingerprint, counter: verified.counter, at: clock() };
-        r.db.query('UPDATE statement_reviews SET record=? WHERE operation=?').run(JSON.stringify(review), operation.id);
-        return r.response(operation, review);
+        r.journal.recordCommitted(id, fingerprint, hash(receipt));
+        return { operationID: id, operationState: 'committed' as const, receipt };
       });
     },
     cancel(token: string, id: string) { identifier(id); return run(async r => { await r.journal.cancel(token, id); return { cancelled: true }; }); },

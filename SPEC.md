@@ -994,3 +994,13 @@ An implementation of the registry is conformant when it:
 5. lists an entry that carries no mark
 
 ----
+
+## Appendix A. Experimental contextual member statements
+
+This opt-in internal deployment profile leaves §6.5 and §10.5 legacy canonical signatures unchanged. It adds no HTTP request field and no §13 conformance claim. Its identifier is `atarasy.member-statement-authorisation.1`.
+
+The envelope contains `profile`, `environment`, `origin`, `rpID`, `id`, `principal`, `credential`, `household`, `keyFingerprint`, `offer`, `mandate`, `presenter`, `canonical`, `reviewedRevision`, `expiresAt` and `requestDigest`. Digests are lowercase SHA-256 hex; key fingerprint hashes the mandate key's SPKI DER. Request digest hashes UTF-8 JSON of `['atarasy.member-operation.1', JSON.stringify([1, environment, origin]), principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt]`. The WebAuthn challenge is unpadded base64url SHA-256 of UTF-8 JSON of `[profile, JSON.stringify([1, environment, origin, rpID]), id, requestDigest, reviewedRevision]`.
+
+The engine **MUST** explicitly configure environment and HTTPS origin, match RP, recompute both digests, compare canonical bytes to current lines and carriage, and verify the assertion with the registered mandate key. It **MUST** require the configured origin, `webauthn.get`, user presence and verification, and refuse cross-origin/top-origin assertions and expired envelopes. It **MUST NOT** accept a caller-supplied expected challenge or a verification boolean. A receipt for this profile **MUST** retain exact envelope/assertion identity so a different operation cannot receive success through legacy signature-only replay.
+
+The trusted local adapter **MUST** validate current member authority, credential binding/counter, the complete reviewed snapshot and operation claim under the same database transaction as local ledger, daily report, engine receipt and committed outcome. The engine's cryptographic envelope verification alone does not establish current authority or a fresh review. The adapter **MUST NOT** expose this path until every writer shares that boundary. External ledgers require a separately specified uncertainty/reconciliation boundary. Exact committed read-back may return the stored receipt after operation expiry, under current access authority, without executing settlement again.

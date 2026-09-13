@@ -35,3 +35,7 @@ Some changed frozen-offer/recovery cases deliberately mutate stored fixtures to 
 Two isolated negative controls remove current-review comparison or replace the contextual challenge with the legacy canonical challenge. Their focused probes must fail. [Validation](statement-authorisation-validation.json) pins the measurements, source/log hashes and exact tool versions.
 
 Remaining work is explicit engine/protocol integration of this profile, immutable old-file migration, full writer adoption, derived-state reconstruction, provider intent/outcome recovery and native device acceptance. The original HTTP composition and Swift client are unchanged. This service uses one active transaction per instance; a caller must handle contention/refusal until a production composition defines queuing and response schemas. Lock duration, large-data throughput and actual Apple RP/origin configuration have not been measured.
+
+## Subsequent integration
+
+The baseline above describes the authorisation-only increment. The subsequent [contextual local settlement](CONTEXTUAL_SETTLEMENT.md) adds explicit Appendix A engine acceptance and an atomic internal `settle` method. Legacy canonical-only verification still rejects the contextual assertion; the new engine entry point verifies its complete envelope. No public write route or native ceremony is enabled.

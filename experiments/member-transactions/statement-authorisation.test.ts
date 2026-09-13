@@ -1,3 +1,8 @@
+import type { MemberStatementEnvelope } from '../../engine/src/shared/member-statement.ts';
+import { ValenceEngine } from '../../engine/src/engine/offers.ts';
+import { InMemoryLedger } from '../../engine/src/engine/ledger.ts';
+import { DeliveryRegister } from '../../engine/src/hub/delivery.ts';
+import { LocalDeliveries } from '../../engine/src/engine/delivery-source.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -158,4 +163,104 @@ test('two service instances accept an identical proof once even for zero counter
     const row = await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.query('SELECT revision FROM passkeys WHERE id=?').get(s.input.credential));
     expect(row).toEqual({ revision: 2 });
   }
+});
+
+test('contextual settlement commits counter claim ledger day receipt and outcome together with exact read-back', async () => {
+  const s = await setup(), p = await s.prepare(), proof = assertion(s, p);
+  const result = await s.service.settle(s.input.token, p.operationID, proof);
+  expect(result).toMatchObject({ operationID: p.operationID, operationState: 'committed', receipt: { charged: 1200, confirmation: proof.response.signature } });
+  const state = await s.inspect();
+  expect(state).toMatchObject({ counter: 2, state: 'settled', reservation: { status: 'committed' } });
+  expect(state.day).toHaveLength(1);
+  expect((await s.service.read(s.input.token, p.operationID)).operationState).toBe('committed');
+  s.clock.at += 6000;
+  expect(await s.service.settle(s.input.token, p.operationID, proof)).toEqual(result);
+  expect((await s.inspect()).day).toHaveLength(1);
+  await expect(s.service.settle(s.input.token, p.operationID, assertion(s, p, { counter: 3 }))).rejects.toThrow('conflict');
+});
+test('previously verified proof settles without a second counter increment or device ceremony', async () => {
+  const s = await setup(), p = await s.prepare(), proof = assertion(s, p);
+  await s.service.verify(s.input.token, p.operationID, proof);
+  expect((await s.service.settle(s.input.token, p.operationID, proof)).receipt.charged).toBe(1200);
+  const row = await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.query('SELECT revision FROM passkeys WHERE id=?').get(s.input.credential));
+  expect(row).toEqual({ revision: 2 });
+});
+test('outcome write failure rolls back every local settlement effect and allows the same proof after repair', async () => {
+  const s = await setup(), p = await s.prepare(), proof = assertion(s, p);
+  await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.run("CREATE TRIGGER fail_outcome BEFORE UPDATE ON operations WHEN NEW.state='committed' BEGIN SELECT RAISE(ABORT,'injected outcome failure'); END"));
+  await expect(s.service.settle(s.input.token, p.operationID, proof)).rejects.toThrow('injected outcome failure');
+  expect(await s.inspect()).toMatchObject({ counter: 1, receipt: null, state: 'decided', day: [], reservation: { status: 'held' } });
+  expect(await s.service.read(s.input.token, p.operationID)).toMatchObject({ operationState: 'prepared', authorisation: 'prepared' });
+  await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.run('DROP TRIGGER fail_outcome'));
+  expect((await s.service.settle(s.input.token, p.operationID, proof)).receipt.charged).toBe(1200);
+});
+test('engine proof identity write failure rolls back the receipt ledger and credential', async () => {
+  const s = await setup(), p = await s.prepare();
+  await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.run("CREATE TRIGGER fail_identity BEFORE INSERT ON atomic_rows WHEN NEW.namespace='member_statement_confirmations' BEGIN SELECT RAISE(ABORT,'injected identity failure'); END"));
+  await expect(s.service.settle(s.input.token, p.operationID, assertion(s, p))).rejects.toThrow('injected identity failure');
+  expect(await s.inspect()).toMatchObject({ counter: 1, receipt: null, state: 'decided', day: [], reservation: { status: 'held' } });
+});
+test('concurrent local settlement instances return one committed outcome for zero and increasing counters', async () => {
+  for (const zero of [false, true]) {
+    const s = await setup(zero), p = await s.prepare(), proof = assertion(s, p, { counter: zero ? 0 : 2 });
+    const second = openStatementAuthorisations(s.path, s.policy); cleanups.push(() => second.close());
+    const results = await Promise.all([s.service.settle(s.input.token, p.operationID, proof), second.settle(s.input.token, p.operationID, proof)]);
+    expect(results[0]).toEqual(results[1]); expect((await s.inspect()).day).toHaveLength(1);
+    expect((await s.inspect()).counter).toBe(zero ? 0 : 2);
+  }
+});
+test('accepted approval does not bypass fresh review expiry or revoked access at settlement', async () => {
+  for (const mode of ['review', 'expiry', 'revocation']) {
+    const s = await setup(), p = await s.prepare(), proof = assertion(s, p);
+    await s.service.verify(s.input.token, p.operationID, proof);
+    if (mode === 'review') await s.unit.run((store, db) => { const r = unifiedRuntime(store, db), m = r.engine.mandates.get('mandate-1')!; r.engine.mandates.importMandate({ ...m, ceiling_daily: 5000, version: m.version + 1 }); });
+    if (mode === 'expiry') s.clock.at += 6000;
+    if (mode === 'revocation') await s.unit.run((store, db) => unifiedRuntime(store, db).authority.revokeCredential(s.input.credential));
+    await expect(s.service.settle(s.input.token, p.operationID, proof)).rejects.toThrow();
+    expect(await s.inspect()).toMatchObject({ counter: 2, receipt: null, state: 'decided', day: [], reservation: { status: 'held' } });
+  }
+});
+test('disputed consumed lines settle at zero and release the reservation under contextual approval', async () => {
+  const s = await setup(), candidate = await s.unit.run((store, db) => unifiedRuntime(store, db).engine.mustGet(s.input.statement.offer).candidates[0]!.id);
+  const p = await s.service.prepare(s.input.token, { offer: s.input.statement.offer, disputed: [candidate] });
+  expect((await s.service.settle(s.input.token, p.operationID, assertion(s, p))).receipt).toMatchObject({ charged: 0, disputed_amount: 1200 });
+  expect((await s.inspect()).reservation?.status).toBe('released');
+});
+async function engineEnvelope(s: Fixture, p: Prepared): Promise<MemberStatementEnvelope> {
+  const operation = await s.unit.run((store, db) => unifiedRuntime(store, db).journal.read(s.input.token, p.operationID));
+  const { id, principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt, requestDigest } = operation;
+  return { profile: AUTHORISATION_PROFILE, environment: 'test', origin: atomicScope.audience, rpID: 'unit.example', id, principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt, requestDigest };
+}
+function contextualEngine(s: Fixture, store: Parameters<Parameters<Fixture['unit']['run']>[0]>[0]) {
+  const engine = new ValenceEngine(new InMemoryLedger(store), { ...s.policy.engine, memberStatementScope: { environment: 'test', origin: atomicScope.audience } }, store);
+  engine.readDeliveriesFrom(new LocalDeliveries(new DeliveryRegister(store)));
+  return engine;
+}
+const engineProof = (proof: ReturnType<typeof assertion>) => ({ authenticator_data: proof.response.authenticatorData, client_data_json: proof.response.clientDataJSON, signature: proof.response.signature });
+test('engine public contextual entry verifies envelope scope terms expiry and proof independently of member verifier', async () => {
+  const s = await setup(), p = await s.prepare(), e = await engineEnvelope(s, p), proof = assertion(s, p);
+  for (const change of [{ profile: 'unknown' }, { environment: 'other' }, { origin: 'https://other.example' }, { rpID: 'other.example' }, { id: 'other-operation' }, { principal: 'other-person' }, { credential: 'other-credential' }, { household: 'other-household' }, { mandate: 'other-mandate' }, { presenter: 'other-presenter' }, { canonical: p.canonical + '\n' }, { reviewedRevision: '0'.repeat(64) }, { keyFingerprint: '0'.repeat(64) }, { requestDigest: '0'.repeat(64) }, { expiresAt: fixtureTime }, { extra: true }]) {
+    await expect(s.unit.run((store, db) => {
+      const r = { engine: contextualEngine(s, store) };
+      return r.engine.settleMemberStatement({ ...e, ...change } as typeof e, engineProof(proof), [], s.clock.at);
+    })).rejects.toThrow('Invalid contextual');
+  }
+  for (const options of [{ origin: 'https://other.example' }, { rp: 'other.example' }, { type: 'webauthn.create' }, { flags: 1 }, { flags: 4 }, { crossOrigin: true }, { otherKey: true }]) {
+    await expect(s.unit.run((store, db) => {
+      const r = { engine: contextualEngine(s, store) };
+      return r.engine.settleMemberStatement(e, engineProof(assertion(s, p, options)), [], s.clock.at);
+    })).rejects.toThrow('Invalid contextual');
+  }
+  await expect(s.unit.run((store, db) => unifiedRuntime(store, db).engine.settleMemberStatement(e, engineProof(proof), [], s.clock.at))).rejects.toThrow('Invalid contextual');
+  expect(await s.inspect()).toMatchObject({ counter: 1, receipt: null, reservation: { status: 'held' }, day: [] });
+});
+test('engine preserves exact contextual operation identity across fresh runtimes and refuses legacy replay', async () => {
+  const s = await setup(), p = await s.prepare(), e = await engineEnvelope(s, p), proof = engineProof(assertion(s, p));
+  const call = () => s.unit.run((store, db) => { const r = { engine: contextualEngine(s, store) }; return r.engine.settleMemberStatement(e, proof, [], s.clock.at); });
+  const result = await call(); expect(await call()).toEqual(result);
+  await expect(s.unit.run((store, db) => unifiedRuntime(store, db).engine.settle(e.offer, s.clock.at, { signed: { assertion: proof } }))).rejects.toThrow('different operation');
+  const other = { ...e, id: 'another-operation' };
+  const challenge = createHash('sha256').update(JSON.stringify([other.profile, JSON.stringify([1, other.environment, other.origin, other.rpID]), other.id, other.requestDigest, other.reviewedRevision])).digest('base64url');
+  await expect(s.unit.run((store, db) => { const r = { engine: contextualEngine(s, store) }; return r.engine.settleMemberStatement(other, engineProof(assertion(s, p, { challenge })), [], s.clock.at); })).rejects.toThrow('different operation');
+  expect((await s.inspect()).day).toHaveLength(1);
 });

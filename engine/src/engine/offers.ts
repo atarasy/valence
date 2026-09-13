@@ -1,3 +1,4 @@
+import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
@@ -76,6 +77,8 @@ export type EngineConfig = {
    * deployment the name is the hub's and the engine is told it.
    */
   relyingPartyId: string;
+  /** Appendix A: internal contextual statement opt-in; no HTTP route. */
+  memberStatementScope?: MemberStatementScope;
   /**
    * §16.3. Where the deployment puts the start of a household's day, for the
    * daily ceiling. The specification does not name one: a household's day
@@ -107,6 +110,7 @@ export class ValenceEngine {
   private readonly offers: Map<string, Offer>;
   private readonly notes: Map<string, Note[]>;
   private readonly settlements: Map<string, Settlement>;
+  private readonly memberStatementConfirmations: Map<string, string>;
   private readonly configs: Map<string, StoredPresenterConfig>;
   private readonly edges: Map<string, LineageEdge>;
   private readonly identities: Map<string, string>;
@@ -192,6 +196,7 @@ export class ValenceEngine {
     this.offers = store.map("offers");
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
+    this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
     this.edges = store.map("edges");
     this.identities = store.map("identities");
@@ -230,7 +235,14 @@ export class ValenceEngine {
     if (!Number.isInteger(config.recoveryGraceDays) || config.recoveryGraceDays < 0) {
       throw new Error("recoveryGraceDays must be an integer of at least zero");
     }
-    this.config = { ...config };
+    const memberScope = config.memberStatementScope;
+    if (memberScope !== undefined) {
+      const origin = new URL(memberScope.origin);
+      if (Object.keys(memberScope).sort().join(',') !== 'environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
+        throw new Error('Invalid member statement deployment scope');
+      }
+    }
+    this.config = { ...config, ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }) };
     Object.freeze(this.config);
   }
 
@@ -959,17 +971,42 @@ export class ValenceEngine {
     return false;
   }
 
-  async settle(
+  async settleMemberStatement(envelope: MemberStatementEnvelope, assertion: Assertion, disputed: string[] = [], now = Date.now()): Promise<Settlement> {
+    const fixed = structuredClone(envelope), proof = structuredClone(assertion);
+    return this.settleInternal(fixed.offer, now, { signed: { assertion: proof }, disputed: [...disputed] }, fixed);
+  }
+
+  async settle(offerId: string, now = Date.now(), confirmation: { signed?: PersonalSignature; disputed?: string[] } = {}): Promise<Settlement> {
+    return this.settleInternal(offerId, now, confirmation);
+  }
+
+  private async settleInternal(
     offerId: string,
     now = Date.now(),
     // §6.5. The household's signature over the statement, and the consumed
     // lines it disputes. Both are absent for the digital binding and for a
     // physical box that came back with nothing used.
-    confirmation: { signed?: PersonalSignature; disputed?: string[] } = {}
+    confirmation: { signed?: PersonalSignature; disputed?: string[] } = {},
+    memberEnvelope?: MemberStatementEnvelope
   ): Promise<Settlement> {
     const offer = this.mustGet(offerId, now);
+    let memberIdentity: string | undefined;
+    if (memberEnvelope) {
+      const delivery = await this.deliverySource.find(offer.id), key = this.identities.get(offer.mandate), sent = confirmation.signed;
+      if (!needsStatement(offer) || !delivery || !key || !sent || !("assertion" in sent) ||
+          !verifyMemberStatement(memberEnvelope, sent.assertion, key, this.config.memberStatementScope, this.config.relyingPartyId,
+            canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [])).toString(), offer, now)) {
+        throw unprocessable("bad_signature", "Invalid contextual member statement.");
+      }
+      memberIdentity = memberStatementIdentity(memberEnvelope, sent.assertion);
+    }
     const existing = this.settlements.get(offer.id);
     if (existing) {
+      const recorded = this.memberStatementConfirmations.get(offer.id);
+      if (memberIdentity !== undefined || (recorded !== undefined && confirmation.signed)) {
+        if (memberIdentity !== undefined && recorded === memberIdentity) return existing;
+        throw conflict("already_settled", "A different operation settled this offer.");
+      }
       // §6.5. Settling is idempotent for the party that only asks for it: a
       // presenter retrying after a timeout gets the settlement that stands.
       // **A household signing is not asking, it is applying**, and handing it
@@ -1054,8 +1091,12 @@ export class ValenceEngine {
           "a physical box with goods used settles on the household's signature over its statement"
         );
       }
-      if (!verifyPersonal(bytes, sent, householdKey, this.config.relyingPartyId)) {
-        throw unprocessable("bad_signature", "the signature does not cover this settlement statement");
+      if (memberEnvelope) {
+        if (memberEnvelope.canonical !== bytes.toString()) throw unprocessable("bad_signature", "Statement changed during verification.");
+      } else {
+        if (!verifyPersonal(bytes, sent, householdKey, this.config.relyingPartyId)) {
+          throw unprocessable("bad_signature", "the signature does not cover this settlement statement");
+        }
       }
       signed = "signature" in sent ? sent.signature : sent.assertion.signature;
     } else if (disputed.length > 0) {
@@ -1203,6 +1244,7 @@ export class ValenceEngine {
         .digest("hex"),
     };
     this.settlements.set(offer.id, settlement);
+    if (memberIdentity !== undefined) this.memberStatementConfirmations.set(offer.id, memberIdentity);
     // §16.3. The person's own copy, written as the settlement is made. It
     // carries an amount and a date and nothing about what was in the offer: a
     // copy that carried products would be a second vertical ledger on the

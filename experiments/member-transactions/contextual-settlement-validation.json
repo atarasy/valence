@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-13",
+  "baseline": "a1845d0b1d7206d3e25cf6ee3e29a900921f94e3",
+  "profile": "atarasy.member-statement-authorisation.1",
+  "suite": {
+    "passed": 249,
+    "failed": 0,
+    "assertions": 1127,
+    "files": 23,
+    "new_tests": 9,
+    "seconds": 6.55
+  },
+  "strict_types": "passed",
+  "anchors": {
+    "scripts": 301,
+    "raised": 0,
+    "replacements": 335,
+    "missing": 0,
+    "untracked": 13
+  },
+  "negative_controls": {
+    "signature": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 5
+    },
+    "digest": {
+      "exit": 1,
+      "failed": 1,
+      "assertions": 6
+    }
+  },
+  "source_sha256": {
+    "SPEC.md": "0424ca2ba161b7d15c029e10ae21c01662d70645f3a8407a0ace7c2d42837baa",
+    "engine/src/engine/offers.ts": "143471b69e98488723f21b0dc5d69615c8eb6f2aca75b2f4fb535ee3be5df25f",
+    "engine/src/shared/member-statement.ts": "e7deda6e5ad1f0c01e2f16806733644e5903e534934493665c54749c1a09c16c",
+    "experiments/member-transactions/statement-authorisation.ts": "349465b9ff68fa4c617d4310b8fe22bec3a18286405ca441d0f9ffbccbb49f86",
+    "experiments/member-transactions/statement-authorisation.test.ts": "2a8d738e342bca048e1ff329ff0953add5ae962c7d00c54b3fa1dffeda8ab903"
+  },
+  "logs": {
+    "tests": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/contextual-settlement-tests-20260913.log",
+      "sha256": "5db981bfa472df0c21d34749c71a3770ed0c3d1ee7e3b0bcfedf9f46e02ffa57"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/contextual-settlement-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "anchors": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/contextual-settlement-anchors-20260913.log",
+      "sha256": "3b7dcd96c2fe6097715752624c18c5b6912497051c6cbdbbd64c192d557c1e50"
+    },
+    "negative-signature": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/contextual-settlement-negative-signature-20260913.log",
+      "sha256": "9e32649cb2524dafb68d9da5bf161fb8d11df4c316f58489828e18ed6f196a53"
+    },
+    "negative-digest": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/contextual-settlement-negative-digest-20260913.log",
+      "sha256": "c165a78fb7a80d1512319e61a90252730eecc26ca49c53573a12c76245cb9cd0"
+    }
+  },
+  "limits": [
+    "No HTTP or native ceremony",
+    "Real crypto with fixture keys and a local ledger",
+    "No new contextual process-kill measurement",
+    "No all-writer adoption or existing-file migration",
+    "No full conformance or complete mutation sweep claim"
+  ]
+}
