@@ -36,7 +36,7 @@ describe('member read boundary',()=>{
   for(const owner of [undefined,{household:'other',presenter:offer.presenter},{household:offer.household,presenter:'other'}]){
    const {state,read}=setup();state.owner=owner;const r=await read();results.push([r.status,await r.text()]);expect(state.calls).toBe(0);
   }
-  expect(results[0]).toEqual(results[1]);expect(results[1]).toEqual(results[2]);expect(results[0][0]).toBe(404);
+  expect(results[0]).toEqual(results[1]);expect(results[1]).toEqual(results[2]);expect(results[0]![0]).toBe(404);
  });
  test('list cannot substitute household/presenter or duplicate/extend query parameters',async()=>{
   const {state,read}=setup();state.body={offers:[offer]};

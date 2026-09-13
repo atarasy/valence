@@ -93,22 +93,16 @@ const post = async (path: string, body: unknown) => {
 // §5.4. A catalogue is signed by the presenter it names. The reference
 // presenter's key is root-endorsed; the second one's is not, which is what a
 // rename looks like from outside: a new identity, visibly not the same one.
-const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; maker: string; ships: string; price: number; category?: string }> }) =>
-  Buffer.from(
-    [
-      c.version,
-      c.presenter,
-      ...Object.keys(c.products).sort().map((ref) => {
-        const e = c.products[ref]!;
-        // Escaped exactly as `canonicalConfig` escapes it. A plain join lets
-        // a relay move the boundary between two fields under a good signature.
-        return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""]
-          .map(encodeURIComponent)
-          .join(":");
-      }),
-    ].join("\n"),
-    "utf8"
-  );
+// Independent fixture encoder for catalogue revision 2, not imported from the engine.
+const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; maker: string; ships: string; price: number; category?: string; physical?: { ambient: boolean; keeps_for_days: number; fits_ten_per_container: boolean; regulated: boolean } }> }) => {
+  const rows = Object.keys(c.products).sort().map(ref => {
+    const e = c.products[ref]!;
+    const p = e.physical;
+    return [ref, e.merchant, e.maker, e.ships, e.price, e.category ?? null,
+      p === undefined ? null : [p.ambient, p.keeps_for_days, p.fits_ten_per_container, p.regulated]];
+  });
+  return Buffer.from(JSON.stringify(["valence.catalogue.2", c.version, c.presenter, rows]), "utf8");
+};
 const presenterKeys: Record<string, ReturnType<typeof pairFor>> = {
   "reference-merchant": pairFor("presenter:reference-merchant"),
   "other-merchant": pairFor("presenter:other-merchant"),

@@ -232,7 +232,7 @@ async function route(
       if (typeof products !== "object" || products === null) {
         throw badRequest("malformed", "config: products must be an object");
       }
-      const entries: Record<string, CatalogueEntry> = {};
+      const entries: Record<string, CatalogueEntry> = Object.create(null);
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {

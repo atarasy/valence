@@ -1,0 +1,86 @@
+{
+  "date": "2026-09-13",
+  "baseline": "9013674152970438d48f35f39d45d9fd398dca9b",
+  "format": "valence.catalogue.2",
+  "source_sha256": {
+    "SPEC.md": "d096b7aa046c628623fe2cebc766d1f522990c101eae657ca16255c7af3ae40d",
+    "engine/scripts/mutations/catalogue_form_is_malleable.py": "71a9ee35d89ce4cc0e5aeaca312a4f34dcccff2a3fa51bf37a1569554825f048",
+    "engine/scripts/mutations/invent_product.py": "fa8709acfe7dc24f589566cfd1086f99ec2cc7b4e440c19781d6d6d1cac22463",
+    "engine/scripts/mutations/place_anything.py": "c00f7f44a4bbc8c02b23bc61deaf0a09e36aeed5b71624e759959e6e768f2ef5",
+    "engine/scripts/seed.ts": "607d10b31ce02041a381af9b6f163ca7cab360c3c1e0c69c54d645fa460899de",
+    "engine/src/engine/offers.ts": "21b3e3568cc1bf2abc9cc7e1c9c2dfe79aef18913a95b2765bba408383356020",
+    "engine/src/http.ts": "5b7223de33e16a96960a5ca57b8a920713793cf5f86980123f5ed868d36b64d0",
+    "experiments/member-read/gate.test.ts": "5df8f21bf3505f6badf0dcce1a8f914c0fd143df897421373adb170d3151ce0e",
+    "engine/src/shared/catalogue.ts": "479dc484e92a8240def95e79793710687a09f3d19ad8fefb95556f7872638a82",
+    "engine/scripts/catalogue-v2-vectors.py": "8b9021496716def9bd030c330e9222ef481a35edb41d927438b9720cde4625b7",
+    "engine/test/catalogue-v2.test.ts": "c6a02aad2d5d5ecb9090317fe34504ed5aa02b4647c866dc76cdcefe8dc49322",
+    "engine/test/fixtures/catalogue-v2-vectors.json": "ed552168e10a8aeb41d9dac9db74c8e1be74e6c2dd7d9416417db9ce6edc9c2a"
+  },
+  "checks": {
+    "unit": {
+      "pass": 143,
+      "fail": 0,
+      "files": 13
+    },
+    "strict_types": {
+      "exit_code": 0
+    },
+    "conformance": {
+      "pass": 278,
+      "skip": 1,
+      "fail": 0,
+      "ataraxia_commit": "07e15d0f3f236ce2b9ec05a3aa14295f12b0f1e6",
+      "ports": [
+        55788,
+        55888,
+        55988,
+        56088
+      ],
+      "skip_reason": "physical-binding-absent case in physical-enabled fixture"
+    },
+    "independent_vectors": 10,
+    "mutation_anchors": {
+      "scripts": 301,
+      "replacements": 335,
+      "missing": 0,
+      "uninspected": 13
+    },
+    "existing_malleability_mutant": {
+      "expected_fail": 1,
+      "pass": 6,
+      "scope": "disposable engine copy; catalogue-bytes.test.ts"
+    }
+  },
+  "logs": {
+    "unit": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/catalogue-v2-unit-20260913.log",
+      "sha256": "4c40cf84230b20dd6034d394b3e89a7b654f85ca5e6ba198ca1e72b2a422a377"
+    },
+    "types": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/catalogue-v2-types-20260913.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "conformance": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/catalogue-v2-conformance-20260913.log",
+      "sha256": "c03d737b834231120a37533ff05813587fc9214f9c37138e0e4edd380d3ee171"
+    },
+    "anchors": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/catalogue-v2-anchors-20260913.log",
+      "sha256": "3b7dcd96c2fe6097715752624c18c5b6912497051c6cbdbbd64c192d557c1e50"
+    },
+    "malleability-negative": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/catalogue-v2-malleability-negative-20260913.log",
+      "sha256": "86358159c6d30ee13255900040048611b8a524e0bd2972afebdcf6ecda6b5744"
+    },
+    "product-key-before": {
+      "path": "/Users/yoichirohara/Documents/atarasy-development/catalogue-v2-product-key-before-20260913.log",
+      "sha256": "48e2f8904d178e5968afac423c769ba0aed912d04fac1c1792f71083200a1205"
+    }
+  },
+  "limits": [
+    "Anchor checks do not establish semantic mutation coverage.",
+    "The local persisted format marker is not cryptographic export attestation.",
+    "Existing legacy offers are not rewritten; legacy physical inventory requires migration review.",
+    "No production authentication or deployment is delivered."
+  ]
+}

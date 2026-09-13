@@ -93,34 +93,11 @@ function utcMidnight(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-/**
- * §5.4. What a presenter signs when it publishes a catalogue: the version,
- * the presenter's name, and each product with its merchant, carrier and
- * price, in key order.
- */
-export function canonicalConfig(config: PresenterConfig): Buffer {
-  const products = Object.keys(config.products)
-    .sort()
-    .map((ref) => {
-      const e = config.products[ref]!;
-      // The maker and the category are signed with the price. Left out of the
-      // bytes, whoever relays a catalogue could change who made a product or
-      // strip what the merchant said it was, under a signature that still
-      // verifies, and clause 12 is answered by whatever the relay chose.
-      // **Each part is escaped before the join.** A plain ":" join is
-      // malleable: a merchant named "a:b" with a maker of "c" produces the
-      // same bytes as a merchant "a" with a maker "b:c", so whoever relays a
-      // catalogue can move the boundary between who sold it and who made it
-      // under a signature that still verifies. Found 2026-09-12 while writing
-      // the unit test for the maker being in these bytes at all; the mandate's
-      // form (§16.1) and the edge's (§7.1) had both already been escaped for
-      // the same reason, and this was the third place with the same defect.
-      return [ref, e.merchant, e.maker, e.ships, String(e.price), e.category ?? ""]
-        .map(encodeURIComponent)
-        .join(":");
-    });
-  return Buffer.from([config.version, config.presenter, ...products].join("\n"), "utf8");
-}
+import { canonicalConfig } from "../shared/catalogue.js";
+export { canonicalConfig } from "../shared/catalogue.js";
+
+/** Local verification provenance, never accepted from a publication payload. */
+type StoredPresenterConfig = PresenterConfig & { __catalogueSignatureFormat?: 2 };
 
 export function explorationFloor(candidateCount: number, rate: number): number {
   return Math.max(1, Math.ceil(candidateCount * rate));
@@ -130,7 +107,7 @@ export class ValenceEngine {
   private readonly offers: Map<string, Offer>;
   private readonly notes: Map<string, Note[]>;
   private readonly settlements: Map<string, Settlement>;
-  private readonly configs: Map<string, PresenterConfig>;
+  private readonly configs: Map<string, StoredPresenterConfig>;
   private readonly edges: Map<string, LineageEdge>;
   private readonly identities: Map<string, string>;
   /** §10a. Each merchant's own disclosure, as that merchant signed it. */
@@ -321,8 +298,11 @@ export class ValenceEngine {
         `this catalogue is not signed by ${config.presenter}`
       );
     }
-    this.configs.set(config.version, config);
-    return config;
+    // One persisted row contains the payload and its local verification marker.
+    // Separate snapshots prevent callers or exports from changing verified data.
+    const frozen = structuredClone(config);
+    this.configs.set(config.version, { ...frozen, __catalogueSignatureFormat: 2 });
+    return structuredClone(frozen);
   }
 
   registerIdentity(key: string, publicKeyPem: string, attested = false): void {
@@ -364,6 +344,9 @@ export class ValenceEngine {
     if (!config) {
       throw notFound(`no presenter config ${input.config_version}`);
     }
+    if (config.__catalogueSignatureFormat !== 2) {
+      throw conflict("catalogue_republication_required", "republish a fresh catalogue version using valence.catalogue.2 before creating an offer");
+    }
     if (input.candidates.length < 1) {
       throw badRequest("malformed", "an offer needs at least one candidate");
     }
@@ -378,7 +361,7 @@ export class ValenceEngine {
     }
 
     const candidates: Candidate[] = input.candidates.map((c) => {
-      const entry = config.products[c.product];
+      const entry = Object.hasOwn(config.products, c.product) ? config.products[c.product] : undefined;
       if (!entry) {
         throw notFound(`no product ${c.product} in config ${config.version}`);
       }
@@ -1623,7 +1606,8 @@ export class ValenceEngine {
 
   /** Clauses 5 and 43. Every catalogue version this presenter registered. */
   configsForPresenter(presenter: string): PresenterConfig[] {
-    return [...this.configs.values()].filter((c) => c.presenter === presenter);
+    return [...this.configs.values()].filter((c) => c.presenter === presenter)
+      .map(({ version, presenter, products }) => structuredClone({ version, presenter, products }));
   }
 
   /** Clauses 5 and 43. Every offer this presenter made, whatever its state. */

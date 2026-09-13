@@ -1,0 +1,220 @@
+[
+  {
+    "id": "absent-metadata",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,null]]]",
+    "sha256": "711e672cda7e70aebab38cefded5318149f84d3643c6620ddf0b391fe1eeeb18"
+  },
+  {
+    "id": "eligible",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "physical": {
+            "ambient": true,
+            "keeps_for_days": 365,
+            "fits_ten_per_container": true,
+            "regulated": false
+          }
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,[true,365,true,false]]]]",
+    "sha256": "4f805e01d5beafd4918a56d67e823455828c7c481cbc0bf9328c2e38c3b619e1"
+  },
+  {
+    "id": "changed-ambient",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "physical": {
+            "ambient": false,
+            "keeps_for_days": 365,
+            "fits_ten_per_container": true,
+            "regulated": false
+          }
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,[false,365,true,false]]]]",
+    "sha256": "31e102ccf51a9978c55c70a44d7feef709f0b5e47673227df5bbb0e37f6bc4c6"
+  },
+  {
+    "id": "changed-keeps_for_days",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "physical": {
+            "ambient": true,
+            "keeps_for_days": 364,
+            "fits_ten_per_container": true,
+            "regulated": false
+          }
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,[true,364,true,false]]]]",
+    "sha256": "0e895303e521d6f4f2894699ddcfbe7eb780f0003aea1ee722596feae236c783"
+  },
+  {
+    "id": "changed-fits_ten_per_container",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "physical": {
+            "ambient": true,
+            "keeps_for_days": 365,
+            "fits_ten_per_container": false,
+            "regulated": false
+          }
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,[true,365,false,false]]]]",
+    "sha256": "3b2a215bff7e147eea5a258f2b1d25464fed0a0f43a2cc853fc2856d42f19bbc"
+  },
+  {
+    "id": "changed-regulated",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "physical": {
+            "ambient": true,
+            "keeps_for_days": 365,
+            "fits_ten_per_container": true,
+            "regulated": true
+          }
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,[true,365,true,true]]]]",
+    "sha256": "9b73362b9ffe5a449746ecfd10948eef3efe23496cb5d1d40b352c77e4895ba2"
+  },
+  {
+    "id": "present-false-zero",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "physical": {
+            "ambient": false,
+            "keeps_for_days": 0,
+            "fits_ten_per_container": false,
+            "regulated": false
+          }
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,null,[false,0,false,false]]]]",
+    "sha256": "b3ae7aaf2adfd9e9483dc5f2ff7938effdd1765928fd1df600a44532321579ba"
+  },
+  {
+    "id": "escaped-and-unicode",
+    "config": {
+      "version": "v\n\"\\",
+      "presenter": "提供者",
+      "products": {
+        "tea": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200,
+          "category": "a:b,c\n\"\\ "
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"v\\n\\\"\\\\\",\"提供者\",[[\"tea\",\"shop\",\"maker\",\"carrier\",1200,\"a:b,c\\n\\\"\\\\ \",null]]]",
+    "sha256": "783ef431ab5e641634d3679c959c4b5fea62b8cad19973de1aabaa3b011943be"
+  },
+  {
+    "id": "utf16-order-no-normalisation",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {
+        "": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200
+        },
+        "😀": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200
+        },
+        "é": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200
+        },
+        "é": {
+          "merchant": "shop",
+          "maker": "maker",
+          "ships": "carrier",
+          "price": 1200
+        }
+      }
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[[\"é\",\"shop\",\"maker\",\"carrier\",1200,null,null],[\"é\",\"shop\",\"maker\",\"carrier\",1200,null,null],[\"😀\",\"shop\",\"maker\",\"carrier\",1200,null,null],[\"\",\"shop\",\"maker\",\"carrier\",1200,null,null]]]",
+    "sha256": "972de70f920bc030ae41751c744b85cc2643a263def3dc7914c8affeffa1d5b1"
+  },
+  {
+    "id": "empty-catalogue",
+    "config": {
+      "version": "fixture-v2",
+      "presenter": "presenter",
+      "products": {}
+    },
+    "canonical": "[\"valence.catalogue.2\",\"fixture-v2\",\"presenter\",[]]",
+    "sha256": "78bab47ff4d3072564a57951aa204f1e20ce5bd0c809fe771043c3c728ce2e5e"
+  }
+]

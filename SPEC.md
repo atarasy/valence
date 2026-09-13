@@ -192,6 +192,23 @@ Exploration candidates MUST NOT be concealed. The presentation surface SHOULD in
 
 ----
 
+#### Catalogue publication signature revision 2
+
+For revised catalogue publication, the presenter **MUST** sign the UTF-8 bytes of compact JSON with this exact array shape and no trailing newline:
+
+```text
+["valence.catalogue.2",version,presenter,[productRow,...]]
+productRow = [reference,merchant,maker,ships,price,categoryOrNull,physicalOrNull]
+physicalOrNull = null | [ambient,keeps_for_days,fits_ten_per_container,regulated]
+```
+
+Product references **MUST** sort by UTF-16 code units without Unicode normalisation. Strings use ECMAScript compact JSON escaping and **MUST** be well-formed Unicode. Required names and an explicitly provided category **MUST** be nonempty. Price and shelf-life days **MUST** be nonnegative integers no greater than 9007199254740991. Eligibility flags **MUST** be booleans. Absent category/physical metadata becomes null. Unknown publication fields **MUST** be refused rather than excluded from signed bytes.
+
+This domain replaces the earlier unversioned catalogue form, which omitted physical eligibility. A revised publisher/verifier **MUST NOT** fall back to that form for a new publication. The request shape need not add a signature-format field: the signed domain fixes the format. Publish the service/client revision together; a signature refusal does not authorise an unsigned retry.
+
+The reference stores its verification-format marker with the catalogue row. A legacy row without that evidence **MUST NOT** be used to create a new offer and **MUST NOT** be silently marked as revision 2. Republish a fresh catalogue version after reviewing eligibility. Already-created offers and historical exports remain readable without rewriting their signed content. A local marker is not an exported authority claim or a replacement for verification on another host.
+
+
 ## 6. Settlement
 
 ```
