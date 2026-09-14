@@ -681,10 +681,6 @@ async function route(
         ) {
           throw badRequest("malformed", "missing_notes must map candidate ids to notes");
         }
-        const stray = Object.keys(notes).filter((key) => !(raw.missing as string[]).includes(key));
-        if (stray.length > 0) {
-          throw badRequest("malformed", `notes for items not named missing: ${stray.join(", ")}`);
-        }
         // §11.2. Every rule and its order are the engine's, so an in-process
         // caller meets the same refusals as this route.
         const collected = engine.collect({

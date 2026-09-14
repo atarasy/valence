@@ -1,5 +1,5 @@
 import { inMemoryStore, type Store } from "../common/store.js";
-import { conflict, notFound, unprocessable } from "../common/errors.js";
+import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Candidate, Offer, PhysicalEligibility, Recovery } from "../common/types.js";
 
 /**
@@ -136,10 +136,19 @@ export class RecoveryLedger {
         `a candidate cannot carry two verdicts in one collection: ${[...new Set(repeated)].join(", ")}`
       );
     }
-    // Question 46, R2. A loss the stock holder bears arrives with a reason.
+    // Question 46, R2. A note belongs to a missing item and nothing else; a
+    // note for another id is a malformed body, checked here so an in-process
+    // caller meets it too (a refutation pass on 2026-09-14 found the route held
+    // the only copy and dropped a stray note in silence).
+    const stray = Object.keys(notes).filter((id) => !missing.includes(id));
+    if (stray.length > 0) {
+      throw badRequest("malformed", `notes for items not named missing: ${stray.join(", ")}`);
+    }
+    // A loss the stock holder bears arrives with a reason. The length is
+    // counted in characters (code points), which is what §11.2 says.
     const unexplained = missing.filter((id) => {
       const note = notes[id];
-      return typeof note !== "string" || note.trim() === "" || note.length > MISSING_NOTE_LIMIT;
+      return typeof note !== "string" || note.trim() === "" || [...note].length > MISSING_NOTE_LIMIT;
     });
     if (unexplained.length > 0) {
       throw unprocessable(
