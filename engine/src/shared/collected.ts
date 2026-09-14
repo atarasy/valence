@@ -10,8 +10,11 @@ import type { Recovery } from "../common/types.js";
  */
 export function collectedAs(recovery: Recovery | undefined, candidate: string): "returned" | "consumed" | "missing" | null {
   if (!recovery || recovery.collected_at == null) return null;
-  if (recovery.missing.includes(candidate)) return "missing";
-  if (recovery.consumed.includes(candidate)) return "consumed";
-  if (recovery.returned.includes(candidate)) return "returned";
+  // A row collected before question 46 was stored with no `missing` list, and
+  // the development store holds such rows; reading one as undefined failed
+  // every offer list that included it.
+  if ((recovery.missing ?? []).includes(candidate)) return "missing";
+  if ((recovery.consumed ?? []).includes(candidate)) return "consumed";
+  if ((recovery.returned ?? []).includes(candidate)) return "returned";
   return null;
 }

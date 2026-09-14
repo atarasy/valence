@@ -47,6 +47,11 @@ describe("§3: what a collection named each candidate (question 48)", () => {
     expect(collectedAs(row, "not-a-candidate")).toBeNull();
     expect(collectedAs(undefined, back!.id)).toBeNull();
   });
+
+  test("a row collected before question 46 has no missing list, and reads without failing", () => {
+    const legacy = { offer: "o", due_at: 1, grace_days: 3, collected_at: 2, returned: ["a"], consumed: ["b"] } as unknown as Parameters<typeof collectedAs>[0];
+    expect([collectedAs(legacy, "a"), collectedAs(legacy, "b"), collectedAs(legacy, "c")]).toEqual(["returned", "consumed", null]);
+  });
 });
 
 describe("§11.1: a physical line carries one (question 49)", () => {
