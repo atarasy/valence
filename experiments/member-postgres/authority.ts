@@ -56,6 +56,12 @@ export function openMemberAuthority(path: Records, options: Options) {
         credentials.insert(id,{id,principal:principalID,revoked:0});
       }).immediate();
     },
+    /** Trusted operator lookup only. Never exposed by the member HTTP handler. */
+    activeCredentialIDs(principalID: string): string[] {
+      name(principalID); const ids: string[] = [];
+      credentials.each(c => { if (c.principal === principalID && c.revoked === 0) ids.push(c.id); });
+      return ids.sort();
+    },
     setPresenterGrants(id: string, presenters: readonly string[]) {
       name(id); const encoded = grants(presenters);
       db.transaction(() => {
