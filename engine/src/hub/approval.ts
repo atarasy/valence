@@ -1,6 +1,7 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import type { ValenceEngine } from "../engine/offers.js";
 import type { Offer, Valence } from "../common/types.js";
+import { collectedAs } from "../shared/collected.js";
 import type { Delivery } from "./delivery.js";
 
 /**
@@ -55,6 +56,11 @@ export type ApprovalCandidate = {
    * pass over the reference hub.
    */
   valence: Valence;
+  /**
+   * §11.2, question 48. What the collection named this line, or null. It is
+   * what tells a line not in the box from one the deadline made `lost`.
+   */
+  collected_as: "returned" | "consumed" | "missing" | null;
   /** Clause 59. What else the agent considered. */
   alternatives: string[];
   /** Clause 59. The argument against taking it. */
@@ -219,6 +225,7 @@ export class ApprovalDesk {
         ships: c.ships,
         is_exploration: c.is_exploration,
         valence: c.valence,
+        collected_as: collectedAs(engine.recoveries.for(offer.id), c.id),
         alternatives: entry.alternatives,
         argument_against: entry.argument_against,
         disclosure: governing(offer, c.merchant, c.product),
