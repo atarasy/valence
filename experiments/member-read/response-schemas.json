@@ -223,6 +223,20 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "collected_as": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "returned",
+                          "consumed",
+                          "missing"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -537,6 +551,20 @@
               "anyOf": [
                 {
                   "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "collected_as": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "returned",
+                    "consumed",
+                    "missing"
+                  ]
                 },
                 {
                   "type": "null"
@@ -867,6 +895,20 @@
               "required": [
                 "merchant",
                 "product"
+              ]
+            },
+            "collected_as": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "returned",
+                    "consumed",
+                    "missing"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },
