@@ -879,6 +879,21 @@ export class ValenceEngine {
         "this offer was resolved by a collection rather than by a signed set, so there is nothing to withdraw"
       );
     }
+    // §16.5, question 47, decided 2026-09-15. **A box past its expiry cannot
+    // have its signed set taken back.** The reset returns every line the
+    // collection did not name to `offered`, and on a box past its expiry the
+    // next read turns those lines `lost` once the grace has passed, which is
+    // never billed. A household that signed `kept`, let the box expire
+    // uncollected and withdrew inside a long cooling window kept the goods and
+    // settled at nothing (measured: kept 0, lost 3100, charged 0). Refusing
+    // from the expiry rather than from the end of the grace also closes the
+    // same move made inside the grace, where the reset lines go `lost` later.
+    if (offer.binding === "physical" && now >= offer.expires_at) {
+      throw conflict(
+        "not_withdrawable",
+        "this box is past its expiry, so the signed set stands; what was kept is settled as kept"
+      );
+    }
     const mandate = await this.mandateSource.get(offer.mandate);
     const cooling = mandate?.cooling_seconds ?? null;
     if (cooling === null) {
