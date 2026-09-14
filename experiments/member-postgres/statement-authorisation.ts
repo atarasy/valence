@@ -115,10 +115,13 @@ export function openStatementAuthorisations(base: ReturnType<typeof memberRuntim
       return run(async r => {
         const fresh = r.snapshot(token, fixed.offer, fixed.disputed);
         const previous = r.operations.find(v=>v.offer===fixed.offer&&['prepared','dispatching','uncertain','committed'].includes(v.state)) as { id: string } | null;
-        if (previous) {
-          const operation = await r.journal.read(token, previous.id), review = r.saved(operation);
-          if (operation.state !== 'prepared' || fresh.revision !== review.revision || fresh.canonical !== review.canonical) throw new Error('Review changed');
-          return r.response(operation, review);
+        const earlier = previous && await r.journal.read(token, previous.id);
+        // An unsigned operation past its expiry can never be claimed, so it must not keep blocking the offer.
+        if (earlier && earlier.state === 'prepared' && earlier.expiresAt <= clock()) r.journal.refuseBeforeDispatch(earlier.id, 'expired');
+        else if (earlier) {
+          const review = r.saved(earlier);
+          if (earlier.state !== 'prepared' || fresh.revision !== review.revision || fresh.canonical !== review.canonical) throw new Error('Review changed');
+          return r.response(earlier, review);
         }
         const expiresAt = Math.min(clock() + policy.maximumLifetimeMs, fresh.bound.expiresAt, fresh.view.mandate.lapses_at);
         const operation = await r.journal.prepare(token, { offer: fixed.offer, mandate: fresh.bound.binding.mandate, presenter: fresh.sealed.offer.presenter, canonical: fresh.canonical, reviewedRevision: fresh.revision, expiresAt });
