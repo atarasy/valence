@@ -57,6 +57,7 @@ test('a presenter credential publishes, presents, delivers and collects only its
  for(const path of ['/presenter/offers/'+offer.id,'/presenter/offers/'+randomUUID()])expect(await (await s.send(s.tokenB,path)).json()).toMatchObject({error:'offer_unavailable'});
  expect((await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[]})).status).toBe(404);
  expect((await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/present',{})).status).toBe(200);
+ expect(await (await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[offer.candidates[0]!.id]})).json()).toMatchObject({error:'delivery_missing'});
  const delivered=await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/delivery',{carriage:550,status:'delivered'});
  expect(delivered.status).toBe(201);expect(await delivered.json()).toEqual({offer:offer.id,carriage:550,status:'delivered'});
  expect(await (await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:['stranger']})).json()).toMatchObject({error:'unknown_candidate'});
@@ -68,6 +69,16 @@ test('a presenter credential publishes, presents, delivers and collects only its
  expect(JSON.parse(text)).toMatchObject({offer:{id:offer.id,state:'decided'},delivery:{carriage:550,status:'delivered'},recovery:{consumed:[candidate]},settlement:null});
  expect((await (await s.send(s.tokenA,'/presenter/offers?household=house')).json()).offers.map((o:{id:string})=>o.id)).toEqual([offer.id]);
  expect((await (await s.send(s.tokenB,'/presenter/offers?household=house')).json()).offers).toEqual([]);
+});
+test('a digital offer accepts neither a delivery nor a collection',async()=>{
+ const s=await setup();
+ expect((await s.send(s.tokenB,'/presenter/configs',s.b.catalogue('b-1'))).status).toBe(201);
+ expect((await s.send(s.tokenB,'/presenter/disclosures',s.b.disclosure())).status).toBe(201);
+ const created=await s.send(s.tokenB,'/presenter/offers',{...s.offerBody('b-1','tea-b'),binding:'digital'});expect(created.status).toBe(201);
+ const offer=await created.json() as {id:string;candidates:{id:string}[]};
+ expect(await (await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/delivery',{carriage:550,status:'delivered'})).json()).toMatchObject({error:'not_physical'});
+ expect(await (await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[offer.candidates[0]!.id]})).json()).toMatchObject({error:'not_physical'});
+ expect((await (await s.send(s.tokenB,'/presenter/offers/'+offer.id)).json()).delivery).toBeNull();
 });
 test('presenter routes refuse member tokens and member routes refuse presenter tokens',async()=>{
  const s=await setup();
