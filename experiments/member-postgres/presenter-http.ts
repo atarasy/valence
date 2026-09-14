@@ -94,8 +94,8 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
   return created;
  }
  const id=parts[1]!;
- let owner:string;
- try{owner=r.engine.mustGet(id).presenter;}catch{owner='';}
+ let owner:string,binding='';
+ try{const found=r.engine.mustGet(id);owner=found.presenter;binding=found.binding;}catch{owner='';}
  // Another presenter's offer answers exactly as an absent one, so a credential learns nothing about offers it does not own.
  if(owner!==presenter)return reply(404,{error:'offer_unavailable',message:'no such offer for this presenter'});
  if(parts.length===2&&method==='GET'){
@@ -107,7 +107,15 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
  }
  if(parts.length===3&&method==='POST'){
   if(parts[2]==='present')return forward('/offers/'+encodeURIComponent(id)+'/present',input);
-  if(parts[2]==='recovery')return forward('/offers/'+encodeURIComponent(id)+'/recovery',input);
+  // A digital offer has no goods in a home. The engine records a delivery on one anyway, and the hub then
+  // draws that carriage on the approval, so the presenter surface refuses both physical steps for it.
+  if((parts[2]==='recovery'||parts[2]==='delivery')&&binding!=='physical')return reply(422,{error:'not_physical',message:'delivery and collection apply only to a physical box'});
+  if(parts[2]==='recovery'){
+   // A collection before any delivery holds the household's next box while settlement refuses with delivery_missing,
+   // so nobody could clear it. Refuse it here instead.
+   if(!r.deliveries.find(id))return reply(422,{error:'delivery_missing',message:'record the delivery before the collection'});
+   return forward('/offers/'+encodeURIComponent(id)+'/recovery',input);
+  }
   if(parts[2]==='delivery'){
    if(Object.keys(b).sort().join(',')!=='carriage,status')return reply(400,{error:'malformed',message:'delivery takes carriage and status'});
    const recorded=await forward('/offers/'+encodeURIComponent(id)+'/delivery',{carriage:b.carriage,status:b.status,code:'dev-'+randomBytes(8).toString('hex')});
