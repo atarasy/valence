@@ -12,6 +12,7 @@ import { RecoveryRegister } from '../../engine/src/hub/node.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { PermissionLedger } from '../../engine/src/hub/permissions.ts';
 import type { PreparedAssertion } from './login.ts';
+import { presenterRequest } from './presenter-http.ts';
 const json=(status:number,error:string)=>Response.json({error},{status,headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}});
 const authPaths=['/auth/enrollment/options','/auth/enrollment/verify','/auth/login/options','/auth/login/verify','/auth/session','/auth/logout'];
 async function body(request:Request,max:number,timeout:number){
@@ -27,9 +28,9 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',member=prepare||!!match;
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',member=prepare||!!match,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
-   if(!member&&!authPaths.includes(url.pathname)&&url.pathname!=='/offers'&&!/^\/offers\/[A-Za-z0-9_-]+(?:\/(approval|statement|settlement))?$/.test(url.pathname)&&!/^\/_node\/mandates\/[A-Za-z0-9_-]+$/.test(url.pathname))return json(404,'request_unavailable');
+   if(!member&&!presenter&&!authPaths.includes(url.pathname)&&url.pathname!=='/offers'&&!/^\/offers\/[A-Za-z0-9_-]+(?:\/(approval|statement|settlement))?$/.test(url.pathname)&&!/^\/_node\/mandates\/[A-Za-z0-9_-]+$/.test(url.pathname))return json(404,'request_unavailable');
    if(typeof context?.peer!=='string'||!context.peer||context.peer.length>256||pending>=c.maximumPending)return json(503,'unavailable');
    if(!['GET','POST'].includes(request.method))return json(405,'method_not_allowed');
    pending++;
@@ -50,6 +51,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     const fixed=new Request(request.url,{method:request.method,headers:request.headers,...(bytes===undefined?{}:{body:bytes})});
     const result=await unit.run(async store=>{
      binding(store);const r=memberRuntime(store,c,now);
+     if(presenter)return presenterRequest(r,{deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
      if(member){
       if(url.search)return {status:404,body:JSON.stringify({error:'operation_unavailable'})};
       const action=prepare?'prepare':match![2]??'review',method=['review','outcome'].includes(action)?'GET':'POST';
