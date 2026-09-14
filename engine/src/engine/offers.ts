@@ -853,17 +853,26 @@ export class ValenceEngine {
     if (this.settlements.get(offer.id)) {
       throw conflict("bad_state", "this offer has settled");
     }
-    // §16.5, question 43, decided 2026-09-13. **Where the household signed
-    // nothing there is no commitment to remove.** A physical box reaches this
-    // state when a collection resolves its last line, and this route then did
-    // three things instead: the box went back to `presented` with the
-    // collection's verdicts intact, so it reached no section of the
-    // household's own list and was invisible until it expired; the
-    // household's signature over the original statement was refused as out of
-    // state; and §6.5's block lifted, because the block counts only boxes in
-    // `decided` and `expired`, so a presenter that then withdrew the box left
-    // the consumed goods charged to nobody. The route needs no signature by
-    // design, and a presenter knows its own offer ids.
+    // §16.5, §11.2, question 46, decided 2026-09-14. **A collection fixes what
+    // is in the home, and a withdrawal cannot re-narrate it.** A physical box
+    // whose collection is recorded may not have its decisions taken back:
+    // otherwise a household that kept an item, waited for the collection, then
+    // withdrew and re-decided it `returned`, kept the goods and paid nothing,
+    // with the collection already past and unable to contradict it. That is the
+    // silent loss question 46 removes from the merchant, reappearing on the
+    // household's side. The household's recourse after a collection is the
+    // statement: it confirms or disputes the collection's lines (§6.5), it does
+    // not withdraw them. A refutation pass measured the hole on 2026-09-14.
+    //
+    // Before this, the guard refused only a box with no confirmation at all,
+    // which caught a box resolved purely by a collection and missed one the
+    // household had also signed a line of.
+    if (offer.binding === "physical" && this.recoveries.for(offer.id)?.collected_at != null) {
+      throw conflict(
+        "not_withdrawable",
+        "a collection has recorded what is in the home; dispute the statement rather than withdrawing the decision"
+      );
+    }
     if ((this.confirmations.get(offer.id) ?? []).length === 0) {
       throw conflict(
         "not_withdrawable",
@@ -973,8 +982,20 @@ export class ValenceEngine {
       if (other.binding !== "physical" || this.settlements.has(other.id)) continue;
       if (other.state !== "decided" && other.state !== "expired") continue;
       const recovery = this.recoveries.for(other.id);
-      if (recovery && recovery.collected_at !== null && recovery.consumed.length > 0) {
-        return true;
+      if (recovery && recovery.collected_at !== null) {
+        // A consumed line owes money and holds the next box. A box with only
+        // `missing` lines owes nothing and does not (question 46, R1). A box
+        // that also carries a kept, defaulted or consumed line has a statement
+        // the household must still sign or dispute, and it holds too, so a
+        // household cannot receive the next box by never signing (question 46,
+        // decided 2026-09-14). A missing-only box still does not.
+        if (recovery.consumed.length > 0) return true;
+        if (
+          recovery.missing.length > 0 &&
+          other.candidates.some((c) => c.valence === "kept" || c.valence === "defaulted" || c.valence === "consumed")
+        ) {
+          return true;
+        }
       }
     }
     return false;
@@ -1335,6 +1356,16 @@ export class ValenceEngine {
   }): Recovery {
     const at = input.at ?? Date.now();
     const offer = this.mustGet(input.offer, at);
+    // §11.2, question 46. A collection resolves open lines, so it belongs to a
+    // box still `presented`, or one `decided` by the household that has not
+    // settled (the overrule of a household `returned`, R3). On a `settled`,
+    // `withdrawn`, `expired` or `drafted` box it would rewrite fixed facts: a
+    // refutation pass on 2026-09-14 recorded a collection accepted on a settled
+    // box, writing a consumed line nobody signed and a missing line nobody saw,
+    // and on a withdrawn box, overruling the withdraw's own `returned`.
+    if (offer.state !== "presented" && !(offer.state === "decided" && !this.settlements.has(offer.id))) {
+      throw conflict("bad_state", `cannot record a collection for an offer in ${offer.state}`);
+    }
     const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
     this.applyRecoveryTo(input.offer, at);
     return row;

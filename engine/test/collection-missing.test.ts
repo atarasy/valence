@@ -199,7 +199,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     expect(statementLines(after, [])).toEqual([]);
   });
 
-  test("a cooling window leaves a missing line as the collection left it", async () => {
+  test("a box with a missing line cannot be withdrawn once collected (question 46)", async () => {
     const made = makeEngine();
     made.engine.readMandatesFrom({
       async get() {
@@ -225,8 +225,30 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
       missing: [gone!.id],
       missing_notes: { [gone!.id]: "gone" },
     });
-    const taken = await made.engine.withdrawDecisions(offer.id);
-    expect(taken.candidates.map((c) => c.valence)).toEqual(["lost", "returned", "offered"]);
+    // A collection fixes what is in the home; the missing line and the kept
+    // line stay as the collection left them, and the recourse is the statement.
+    await expect(made.engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    expect(made.engine.mustGet(offer.id).candidates.map((c) => c.valence)).toEqual(["lost", "returned", "kept"]);
+  });
+
+  test("a box that carries a kept line and a missing line holds the next box (question 46)", async () => {
+    // The founder's decision of 2026-09-14: a household cannot receive the next
+    // box by never signing a statement it owes nothing on but must still answer.
+    const made = makeEngine();
+    const offer = await box(made, "house-m6");
+    const [gone, back, kept] = offer.candidates;
+    await decideSigned(made.engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
+    made.engine.collect({
+      offer: offer.id,
+      returned: [back!.id],
+      consumed: [],
+      missing: [gone!.id],
+      missing_notes: { [gone!.id]: "gone" },
+    });
+    const second = made.engine.createOffer(physical("house-m6", ["nori-a", "coffee-a"]));
+    await expect(made.engine.present(second.id)).rejects.toMatchObject({ code: "statement_unsigned" });
+    await settleSigned(made.engine, offer.id);
+    expect((await made.engine.present(second.id)).state).toBe("presented");
   });
 
   test("a row stored before question 46 is read without failing", async () => {
