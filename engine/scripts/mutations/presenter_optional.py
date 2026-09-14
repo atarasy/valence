@@ -5,7 +5,7 @@ p = pathlib.Path("src/http.ts"); s = p.read_text()
 old = '      if (!household || !presenter) {\n        throw badRequest("malformed", "household and presenter are required");'
 assert old in s
 s = s.replace(old, '      if (!household) {\n        throw badRequest("malformed", "household is required");', 1)
-old2 = "        offers: engine.offersForHousehold(household, presenter).map(offerView),"
+old2 = "        offers: engine.offersForHousehold(household, presenter).map(view),"
 assert old2 in s
-s = s.replace(old2, '        offers: engine.offersForHousehold(household, presenter ?? "").map(offerView),', 1)
+s = s.replace(old2, '        offers: engine.offersForHousehold(household, presenter ?? "").map(view),', 1)
 p.write_text(s)

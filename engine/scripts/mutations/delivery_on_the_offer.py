@@ -13,9 +13,9 @@ import pathlib
 p = pathlib.Path("src/http.ts"); s = p.read_text()
 # Re-anchored 2026-09-12, when §10a's disclosures were added between the
 # candidates and the closing brace.
-a = """    candidates: o.candidates.map(candidateView),"""
+a = """    candidates: o.candidates.map((c) => candidateView(c, recovery)),"""
 assert a in s, "http.ts offerView anchor has drifted"
-s = s.replace(a, """    candidates: o.candidates.map(candidateView),
+s = s.replace(a, """    candidates: o.candidates.map((c) => candidateView(c, recovery)),
     code: "dc-probe-2",
     carriage: 550,""", 1)
 p.write_text(s)
