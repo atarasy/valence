@@ -70,6 +70,22 @@ test('a presenter credential publishes, presents, delivers and collects only its
  expect((await (await s.send(s.tokenA,'/presenter/offers?household=house')).json()).offers.map((o:{id:string})=>o.id)).toEqual([offer.id]);
  expect((await (await s.send(s.tokenB,'/presenter/offers?household=house')).json()).offers).toEqual([]);
 });
+test('a collection must name every undecided item, so the box can always settle',async()=>{
+ const s=await setup(),physical={ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false};
+ const body={version:'b-2',presenter:s.b.presenter.id,products:{'tea-b':{merchant:s.b.merchant.id,maker:'maker-b',ships:'carrier-b',price:1200,physical},'rice-b':{merchant:s.b.merchant.id,maker:'maker-b',ships:'carrier-b',price:900,physical}}};
+ expect((await s.send(s.tokenB,'/presenter/configs',{...body,signature:sign(null,canonicalConfig(body),s.b.presenter.pair.privateKey).toString('base64')})).status).toBe(201);
+ expect((await s.send(s.tokenB,'/presenter/disclosures',s.b.disclosure())).status).toBe(201);
+ const both=s.offerBody('b-2','tea-b');both.candidates.push({...both.candidates[0]!,product:'rice-b'});
+ const offer=await (await s.send(s.tokenB,'/presenter/offers',both)).json() as {id:string;candidates:{id:string;product:string}[]};
+ expect((await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/present',{})).status).toBe(200);
+ expect((await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/delivery',{carriage:550,status:'delivered'})).status).toBe(201);
+ const [tea,rice]=offer.candidates.map(c=>c.id) as [string,string];
+ expect(await (await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[tea]})).json()).toMatchObject({error:'collection_incomplete'});
+ expect((await (await s.send(s.tokenB,'/presenter/offers/'+offer.id)).json()).recovery.collected_at).toBeNull();
+ const collected=await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/recovery',{returned:[rice],consumed:[tea]});
+ expect(collected.status).toBe(200);
+ expect((await (await s.send(s.tokenB,'/presenter/offers/'+offer.id)).json()).offer.state).toBe('decided');
+});
 test('a digital offer accepts neither a delivery nor a collection',async()=>{
  const s=await setup();
  expect((await s.send(s.tokenB,'/presenter/configs',s.b.catalogue('b-1'))).status).toBe(201);
