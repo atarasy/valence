@@ -114,6 +114,17 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
    // A collection before any delivery holds the household's next box while settlement refuses with delivery_missing,
    // so nobody could clear it. Refuse it here instead.
    if(!r.deliveries.find(id))return reply(422,{error:'delivery_missing',message:'record the delivery before the collection'});
+   // The engine marks an item lost only when nothing was ever collected, and refuses a second collection. A collection
+   // that leaves an undecided item unnamed therefore leaves the box unsettleable for good, so every undecided item must
+   // be named. An item the household already decided is its own record and is not the collection's to restate.
+   // A repeat collection is the engine's to refuse with already_collected; its own items look decided by then.
+   if(r.engine.recoveries.for(id)?.collected_at!=null)return forward('/offers/'+encodeURIComponent(id)+'/recovery',input);
+   const candidates=r.engine.mustGet(id).candidates,known=new Set(candidates.map(c=>c.id));
+   const named=new Set([...(Array.isArray(b.returned)?b.returned:[]),...(Array.isArray(b.consumed)?b.consumed:[])].filter((v):v is string=>typeof v==='string'));
+   const decided=candidates.filter(c=>c.valence!=='offered'&&named.has(c.id)).map(c=>c.id);
+   if(decided.length)return reply(422,{error:'candidate_decided',message:'already decided by the household: '+decided.join(', ')});
+   const unnamed=candidates.filter(c=>c.valence==='offered'&&!named.has(c.id)).map(c=>c.id);
+   if(unnamed.length&&[...named].every(n=>known.has(n)))return reply(422,{error:'collection_incomplete',message:'name every undecided item as returned or consumed: '+unnamed.join(', ')});
    return forward('/offers/'+encodeURIComponent(id)+'/recovery',input);
   }
   if(parts[2]==='delivery'){
