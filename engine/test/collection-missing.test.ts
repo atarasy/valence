@@ -264,6 +264,50 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     expect(made.engine.mustGet(offer.id).candidates.map((c) => c.valence)).toEqual(["lost", "returned", "kept"]);
   });
 
+  test("a signed set on a box past its expiry cannot be withdrawn (question 47)", async () => {
+    // A long cooling window outlasting the expiry and the grace. Withdrawing
+    // used to reset the kept line to `offered`, the deadline then made it
+    // `lost`, and the box settled at nothing with the goods kept.
+    const DAY = 86_400_000;
+    // One engine and household per box: a second box to the same household
+    // would have no exploration candidate left to offer.
+    const signedBox = async (household: string) => {
+      const made = makeEngine();
+      made.engine.readMandatesFrom({
+        async get() {
+          return {
+            id: "mandate-1",
+            household,
+            ceiling_out_of_network: 1_000_000,
+            ceiling_daily: null,
+            cooling_seconds: 30 * 86_400,
+            co_signers: [],
+            lapses_at: Date.now() + 90 * DAY,
+            version: 1,
+          } as never;
+        },
+      });
+      const offer = await box(made, household);
+      const [kept, ...back] = offer.candidates;
+      await decideSigned(made.engine, offer.id, [
+        { candidate: kept!.id, valence: "kept", kept_as: "self" },
+        ...back.map((c) => ({ candidate: c.id, valence: "returned" as const })),
+      ]);
+      return { made, offer };
+    };
+    // Before the expiry the window means what it says.
+    const early = await signedBox("house-q47-early");
+    await expect(early.made.engine.withdrawDecisions(early.offer.id)).resolves.toMatchObject({ state: "presented" });
+    // At the expiry, inside the grace and after it, the set stands.
+    const { made, offer: late } = await signedBox("house-q47-late");
+    for (const at of [late.expires_at, late.expires_at + DAY, late.expires_at + 10 * DAY]) {
+      await expect(made.engine.withdrawDecisions(late.id, at)).rejects.toMatchObject({ code: "not_withdrawable" });
+    }
+    const after = made.engine.mustGet(late.id, late.expires_at + 10 * DAY);
+    expect(after.state).toBe("decided");
+    expect(after.candidates[0]!.valence).toBe("kept");
+  });
+
   test("a box that carries a kept line and a missing line holds the next box (question 46)", async () => {
     // The founder's decision of 2026-09-14: a household cannot receive the next
     // box by never signing a statement it owes nothing on but must still answer.
