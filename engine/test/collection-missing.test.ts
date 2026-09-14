@@ -139,6 +139,39 @@ describe("§11.2: the collection's rules are the engine's", () => {
 });
 
 describe("§6.5: a missing line is on the statement, may be disputed, and moves nothing", () => {
+  test("a collection is refused on a settled box (question 46)", async () => {
+    // NOTE (mutation check, 2026-09-14): collect_ignores_offer_state accepts it,
+    // and this rejection fails. A collection on a settled box would rewrite its
+    // valences under a settlement nobody re-signed.
+    const made = makeEngine();
+    const offer = await box(made, "house-settled");
+    // The household decides every line itself, so no collection is needed.
+    await decideSigned(made.engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })));
+    await made.engine.settle(offer.id);
+    expect(made.engine.mustGet(offer.id).state).toBe("settled");
+    let code = "accepted";
+    try {
+      made.engine.collect({ offer: offer.id, returned: [], consumed: [offer.candidates[0]!.id], missing: [], at: Date.now() });
+    } catch (err) { code = (err as { code?: string }).code ?? "?"; }
+    expect(code).toBe("bad_state");
+  });
+
+  test("a collection is refused on a withdrawn box (question 46)", async () => {
+    // NOTE (mutation check, 2026-09-14): collect_ignores_offer_state accepts it.
+    // A presenter's withdraw stamps offered->returned; a collection then
+    // overruling those returns would rewrite a withdrawn box.
+    const made = makeEngine();
+    const offer = await box(made, "house-withdrawn");
+    await made.engine.withdraw(offer.id);
+    expect(made.engine.mustGet(offer.id).state).toBe("withdrawn");
+    let code = "accepted";
+    try {
+      made.engine.collect({ offer: offer.id, returned: [], consumed: [offer.candidates[0]!.id], missing: [], at: Date.now() });
+    } catch (err) { code = (err as { code?: string }).code ?? "?"; }
+    expect(code).toBe("bad_state");
+  });
+
+
   async function missingOnly(made: ReturnType<typeof makeEngine>, household: string) {
     const offer = await box(made, household);
     const [gone, ...rest] = offer.candidates;
