@@ -5,7 +5,7 @@ import { InMemoryLedger } from '../../engine/src/engine/ledger.ts';
 import { DeliveryRegister } from '../../engine/src/hub/delivery.ts';
 import { LocalDeliveries } from '../../engine/src/engine/delivery-source.ts';
 import { renderStatement } from '../../engine/src/hub/statement.ts';
-import { canonicalStatement, statementLines, needsStatement } from '../../engine/src/shared/statement.ts';
+import { canonicalStatement, disputable, statementLines, needsStatement } from '../../engine/src/shared/statement.ts';
 import { verifyDisclosure } from '../../engine/src/shared/disclosure.ts';
 
 import type { PreparedAssertion } from './login.ts';
@@ -40,16 +40,18 @@ export function openStatementAuthorisations(base: ReturnType<typeof memberRuntim
     const {engine,deliveries,authority,login,bindings,journal,reviews,operations}=base;
     function snapshot(token: string, offerID: string, disputed: string[]) {
       const offer = engine.mustGet(offerID, clock());
+      // Question 46: a line the collection recorded missing is on the statement and may be disputed.
+      const recovery = engine.recoveries.for(offerID), missing = recovery?.missing ?? [];
       const bound = bindings.resolve(token, offer.mandate);
       const owner = authority.transactionOfferOwner(offerID);
       if (!owner || owner.household !== bound.binding.household || offer.household !== owner.household || owner.presenter !== offer.presenter || !bound.presenters.includes(offer.presenter)) throw new Error('Statement unavailable');
-      if (!needsStatement(offer) || !['decided', 'expired'].includes(offer.state) || engine.settlement(offerID)) throw new Error('Statement unavailable');
+      if (!needsStatement(offer, missing) || !['decided', 'expired'].includes(offer.state) || engine.settlement(offerID)) throw new Error('Statement unavailable');
       const delivery = deliveries.find(offerID); if (!delivery) throw new Error('Delivery unavailable'); integer(delivery.carriage);
       const mandate = engine.mandates.mustGet(offer.mandate, clock()); if (mandate.household !== offer.household) throw new Error('Mandate unavailable');
       const catalogue = engine.configsForPresenter(offer.presenter).find(c => c.version === offer.config_version); if (!catalogue) throw new Error('Catalogue unavailable');
       if (!Array.isArray(disputed) || disputed.length > 1000 || new Set(disputed).size !== disputed.length) throw new Error('Invalid disputes');
       disputed.forEach(identifier);
-      for (const id of disputed) if (!offer.candidates.some(c => c.id === id && c.valence === 'consumed')) throw new Error('Invalid disputes');
+      for (const id of disputed) if (!disputable(offer, id, missing)) throw new Error('Invalid disputes');
       for (const c of offer.candidates) {
         integer(c.unit_price); integer(c.quantity); integer(c.unit_price * c.quantity); if (!c.quantity) throw new Error('Invalid quantity');
         const entry = catalogue.products[c.product];
@@ -57,9 +59,9 @@ export function openStatementAuthorisations(base: ReturnType<typeof memberRuntim
         if (!offer.disclosures.some(d => d.merchant === c.merchant && d.product === null)) throw new Error('Disclosure missing');
       }
       for (const d of offer.disclosures) { const key = engine.publicKeyFor(d.merchant); if (!key || !verifyDisclosure(d, key)) throw new Error('Disclosure invalid'); }
-      const lines = statementLines(offer, disputed); integer(lines.reduce((sum, line) => sum + line.amount, 0));
+      const lines = statementLines(offer, disputed, missing); integer(lines.reduce((sum, line) => sum + line.amount, 0));
       const canonical = canonicalStatement(offerID, delivery.carriage, lines).toString();
-      const { challenge: _legacy, ...statement } = renderStatement(offer, delivery);
+      const { challenge: _legacy, ...statement } = renderStatement(offer, delivery, recovery);
       const view = { statement, disputed: [...disputed].sort(), mandate: structuredClone(mandate) };
       const sealed = { offer: structuredClone(offer), catalogue, delivery, mandate: structuredClone(mandate), recovery: engine.recoveries.for(offerID) ?? null, view };
       if (Buffer.byteLength(stable(sealed)) > 262144) throw new Error('Statement snapshot too large');

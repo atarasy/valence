@@ -4,7 +4,7 @@ import { badRequest, conflict, notFound, unprocessable } from "../common/errors.
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
-import { canonicalStatement, needsStatement, statementLines } from "../shared/statement.js";
+import { canonicalStatement, disputable, needsStatement, statementLines } from "../shared/statement.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -42,6 +42,7 @@ import type {
   SettlementLine,
   PriceBand,
   NoteParty,
+  Recovery,
 } from "../common/types.js";
 
 export type EngineConfig = {
@@ -852,17 +853,26 @@ export class ValenceEngine {
     if (this.settlements.get(offer.id)) {
       throw conflict("bad_state", "this offer has settled");
     }
-    // §16.5, question 43, decided 2026-09-13. **Where the household signed
-    // nothing there is no commitment to remove.** A physical box reaches this
-    // state when a collection resolves its last line, and this route then did
-    // three things instead: the box went back to `presented` with the
-    // collection's verdicts intact, so it reached no section of the
-    // household's own list and was invisible until it expired; the
-    // household's signature over the original statement was refused as out of
-    // state; and §6.5's block lifted, because the block counts only boxes in
-    // `decided` and `expired`, so a presenter that then withdrew the box left
-    // the consumed goods charged to nobody. The route needs no signature by
-    // design, and a presenter knows its own offer ids.
+    // §16.5, §11.2, question 46, decided 2026-09-14. **A collection fixes what
+    // is in the home, and a withdrawal cannot re-narrate it.** A physical box
+    // whose collection is recorded may not have its decisions taken back:
+    // otherwise a household that kept an item, waited for the collection, then
+    // withdrew and re-decided it `returned`, kept the goods and paid nothing,
+    // with the collection already past and unable to contradict it. That is the
+    // silent loss question 46 removes from the merchant, reappearing on the
+    // household's side. The household's recourse after a collection is the
+    // statement: it confirms or disputes the collection's lines (§6.5), it does
+    // not withdraw them. A refutation pass measured the hole on 2026-09-14.
+    //
+    // Before this, the guard refused only a box with no confirmation at all,
+    // which caught a box resolved purely by a collection and missed one the
+    // household had also signed a line of.
+    if (offer.binding === "physical" && this.recoveries.for(offer.id)?.collected_at != null) {
+      throw conflict(
+        "not_withdrawable",
+        "a collection has recorded what is in the home; dispute the statement rather than withdrawing the decision"
+      );
+    }
     if ((this.confirmations.get(offer.id) ?? []).length === 0) {
       throw conflict(
         "not_withdrawable",
@@ -894,7 +904,7 @@ export class ValenceEngine {
     // Found by a refutation pass on 2026-09-12, hours after §6.5 was written
     // to close the same hole on the other side.
     const recovery = this.recoveries.for(offer.id);
-    const recorded = new Set([...(recovery?.returned ?? []), ...(recovery?.consumed ?? [])]);
+    const recorded = new Set([...(recovery?.returned ?? []), ...(recovery?.consumed ?? []), ...(recovery?.missing ?? [])]);
     for (const c of offer.candidates) {
       if (recorded.has(c.id)) continue;
       c.valence = "offered";
@@ -972,8 +982,20 @@ export class ValenceEngine {
       if (other.binding !== "physical" || this.settlements.has(other.id)) continue;
       if (other.state !== "decided" && other.state !== "expired") continue;
       const recovery = this.recoveries.for(other.id);
-      if (recovery && recovery.collected_at !== null && recovery.consumed.length > 0) {
-        return true;
+      if (recovery && recovery.collected_at !== null) {
+        // A consumed line owes money and holds the next box. A box with only
+        // `missing` lines owes nothing and does not (question 46, R1). A box
+        // that also carries a kept, defaulted or consumed line has a statement
+        // the household must still sign or dispute, and it holds too, so a
+        // household cannot receive the next box by never signing (question 46,
+        // decided 2026-09-14). A missing-only box still does not.
+        if (recovery.consumed.length > 0) return true;
+        if (
+          recovery.missing.length > 0 &&
+          other.candidates.some((c) => c.valence === "kept" || c.valence === "defaulted" || c.valence === "consumed")
+        ) {
+          return true;
+        }
       }
     }
     return false;
@@ -998,12 +1020,15 @@ export class ValenceEngine {
     memberEnvelope?: MemberStatementEnvelope
   ): Promise<Settlement> {
     const offer = this.mustGet(offerId, now);
+    // Question 46. Which `lost` lines a collection recorded, and so which are
+    // on the statement; the offer alone cannot tell them from the deadline's.
+    const missing = this.recoveries.for(offer.id)?.missing ?? [];
     let memberIdentity: string | undefined;
     if (memberEnvelope) {
       const delivery = await this.deliverySource.find(offer.id), key = this.identities.get(offer.mandate), sent = confirmation.signed;
-      if (!needsStatement(offer) || !delivery || !key || !sent || !("assertion" in sent) ||
+      if (!needsStatement(offer, missing) || !delivery || !key || !sent || !("assertion" in sent) ||
           !verifyMemberStatement(memberEnvelope, sent.assertion, key, this.config.memberStatementScope, this.config.relyingPartyId,
-            canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [])).toString(), offer, now)) {
+            canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [], missing)).toString(), offer, now)) {
         throw unprocessable("bad_signature", "Invalid contextual member statement.");
       }
       memberIdentity = memberStatementIdentity(memberEnvelope, sent.assertion);
@@ -1052,11 +1077,12 @@ export class ValenceEngine {
       const candidate = offer.candidates.find((c) => c.id === id);
       if (!candidate) throw notFound(`no candidate ${id} in this offer`);
       // A household disputes the collection's verdict and nothing else: a
-      // kept line is one it signed itself at the decision.
-      if (candidate.valence !== "consumed") {
+      // kept line is one it signed itself at the decision. Since question 46
+      // that verdict includes an item the collection recorded missing.
+      if (!disputable(offer, id, missing)) {
         throw unprocessable(
           "not_disputable",
-          `candidate ${id} is ${candidate.valence}; only a consumed line can be disputed`
+          `candidate ${id} is ${candidate.valence}; only a consumed or missing line can be disputed`
         );
       }
     }
@@ -1067,7 +1093,7 @@ export class ValenceEngine {
     // choose the verdict (§11.2), only confirm the collection's or dispute a
     // line of it.
     let signed: string | null = null;
-    if (needsStatement(offer)) {
+    if (needsStatement(offer, missing)) {
       // §6.5, 法11条1号. The statement is the screen this application is made
       // on, and the carriage belongs on it. **`null` and `0` are different
       // facts**: 1号 asks for the carriage beside the price 「販売価格に商品の
@@ -1088,7 +1114,7 @@ export class ValenceEngine {
       if (!householdKey) {
         throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
       }
-      const lines = statementLines(offer, disputed);
+      const lines = statementLines(offer, disputed, missing);
       // §6.5, question 40. The carriage is inside what the household signed,
       // so a signature made against a different figure no longer verifies.
       const bytes = canonicalStatement(offer.id, carried.carriage, lines);
@@ -1128,7 +1154,7 @@ export class ValenceEngine {
     // **The message no longer promises a settle.** It read "this set settles
     // at N", and nothing in this engine settles on a timer: `sweep` applies
     // expiry and the only settle is the route.
-    if (!needsStatement(offer) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
+    if (!needsStatement(offer, missing) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
       const opens = offer.decided_at + mandate.cooling_seconds * 1000;
       if (now < opens) {
         throw unprocessable(
@@ -1185,8 +1211,10 @@ export class ValenceEngine {
           line(c, amount);
         }
       } else if (c.valence === "lost") {
+        // §3.2. Reported for the stock holder and never charged. A missing
+        // line the household disputed says so and moves nothing (question 46).
         lost += c.unit_price * c.quantity;
-        line(c, c.unit_price * c.quantity);
+        line(c, c.unit_price * c.quantity, missing.includes(c.id) && disputed.includes(c.id));
       }
     }
 
@@ -1310,6 +1338,37 @@ export class ValenceEngine {
     // Past both guards, so the deadline has passed on an offer that was still
     // presented and something above has changed. The caller writes it back.
     return true;
+  }
+
+  /**
+   * §11.2. Records a collection against the offer's candidates as they stand
+   * at `at`, and folds it in. The offer is read at that time first, so a
+   * deadline already passed has made its `lost` before the rules are read
+   * rather than depending on whether some earlier read passed a time.
+   */
+  collect(input: {
+    offer: string;
+    returned: string[];
+    consumed: string[];
+    missing?: string[];
+    missing_notes?: Record<string, string>;
+    at?: number;
+  }): Recovery {
+    const at = input.at ?? Date.now();
+    const offer = this.mustGet(input.offer, at);
+    // §11.2, question 46. A collection resolves open lines, so it belongs to a
+    // box still `presented`, or one `decided` by the household that has not
+    // settled (the overrule of a household `returned`, R3). On a `settled`,
+    // `withdrawn`, `expired` or `drafted` box it would rewrite fixed facts: a
+    // refutation pass on 2026-09-14 recorded a collection accepted on a settled
+    // box, writing a consumed line nobody signed and a missing line nobody saw,
+    // and on a withdrawn box, overruling the withdraw's own `returned`.
+    if (offer.state !== "presented" && !(offer.state === "decided" && !this.settlements.has(offer.id))) {
+      throw conflict("bad_state", `cannot record a collection for an offer in ${offer.state}`);
+    }
+    const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
+    this.applyRecoveryTo(input.offer, at);
+    return row;
   }
 
   /**

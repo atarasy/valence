@@ -113,6 +113,14 @@ export type Recovery = {
   returned: string[];
   /** Candidates the household used while trying, at the merchant's price. Samples settle at zero (§6.2). */
   consumed: string[];
+  /** Question 46. Candidates the route found gone; they become `lost` and are never billed (§3.2). */
+  missing: string[];
+  /**
+   * Question 46, §11.2. The recording party's note for each missing candidate.
+   * It travels in both exports so the stock holder receives a per-item,
+   * attributable record rather than a silent loss. Nothing judges it.
+   */
+  missing_notes: Record<string, string>;
 };
 
 export type Candidate = {

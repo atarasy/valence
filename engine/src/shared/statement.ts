@@ -21,8 +21,8 @@ import { challengeForBytes } from "./decisions.js";
  *   <offer id>
  *   <carriage>
  *   <candidate>:<valence>:<amount>:<"disputed" or empty>   (one line per
- *   kept, defaulted or consumed candidate, ascending candidate id, UTF-8,
- *   "\n" between lines)
+ *   kept, defaulted or consumed candidate and per candidate the collection
+ *   recorded missing, ascending candidate id, UTF-8, "\n" between lines)
  *
  * **The first line is a domain tag and it is there on purpose.** A decided
  * set is signed as `<offer id>` then `<candidate>:<valence>:<kept_as>:<lineage>`
@@ -36,19 +36,34 @@ import { challengeForBytes } from "./decisions.js";
  * The amount is the line's own: `unit_price * quantity`, or 0 for a gift
  * (§6.2). A disputed line is a consumed line the household does not confirm:
  * it is not charged, and what is owed for it is between the merchant and the
- * household outside this record. Lost lines are not in the statement; they
- * are never charged (§3.2).
+ * household outside this record.
+ *
+ * **A line the collection recorded missing is in the statement, at 0, and
+ * may be disputed** (question 46, decided 2026-09-14). It is never charged
+ * (§3.2), but it is a merchant's statement about goods in a household's home,
+ * and until then the household never saw it and could not contest it. A
+ * candidate the deadline made `lost` is not in it: nobody said anything about
+ * the home. The offer alone cannot tell the two apart, so the collection's
+ * `missing` list is passed in.
  */
 export type StatementLine = {
   candidate: string;
-  valence: "kept" | "defaulted" | "consumed";
+  valence: "kept" | "defaulted" | "consumed" | "lost";
   amount: number;
   disputed: boolean;
 };
 
-export function statementLines(offer: Offer, disputed: readonly string[]): StatementLine[] {
+export function statementLines(
+  offer: Offer,
+  disputed: readonly string[],
+  missing: readonly string[] = []
+): StatementLine[] {
   const lines: StatementLine[] = [];
   for (const c of offer.candidates) {
+    if (c.valence === "lost" && missing.includes(c.id)) {
+      lines.push({ candidate: c.id, valence: "lost", amount: 0, disputed: disputed.includes(c.id) });
+      continue;
+    }
     if (c.valence !== "kept" && c.valence !== "defaulted" && c.valence !== "consumed") continue;
     lines.push({
       candidate: c.id,
@@ -59,6 +74,12 @@ export function statementLines(offer: Offer, disputed: readonly string[]): State
     });
   }
   return lines;
+}
+
+/** §6.5. The lines a household may dispute: the collection's, never its own. */
+export function disputable(offer: Offer, candidate: string, missing: readonly string[] = []): boolean {
+  const c = offer.candidates.find((x) => x.id === candidate);
+  return c !== undefined && (c.valence === "consumed" || (c.valence === "lost" && missing.includes(c.id)));
 }
 
 export const STATEMENT_DOMAIN = "valence.statement.1";
@@ -91,10 +112,14 @@ export function challengeForStatement(
 
 /**
  * Whether a physical offer's settlement needs the household's signature:
- * when the collection found something used. A box that came back with
- * everything unopened, or whose kept lines the household signed at the
- * decision, has nothing in it the household has not already signed for.
+ * when the collection found something used, or recorded something missing
+ * (question 46). A box that came back with everything unopened, or whose kept
+ * lines the household signed at the decision, has nothing in it the household
+ * has not already signed for.
  */
-export function needsStatement(offer: Offer): boolean {
-  return offer.binding === "physical" && offer.candidates.some((c) => c.valence === "consumed");
+export function needsStatement(offer: Offer, missing: readonly string[] = []): boolean {
+  return (
+    offer.binding === "physical" &&
+    offer.candidates.some((c) => c.valence === "consumed" || (c.valence === "lost" && missing.includes(c.id)))
+  );
 }
