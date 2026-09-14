@@ -33,7 +33,7 @@ export async function seedAtomicFixture(path: string, count = 1, ceiling: number
     }
     return offers.map(offer => {
       deliveries.record({ offer: offer.id, carriage: 550, code: 'fixture-delivery', status: 'delivered', now: fixtureTime });
-      engine.recoveries.collect({ offer: offer.id, consumed: offer.candidates.map(c => c.id), returned: [], at: fixtureTime }); engine.applyRecoveryTo(offer.id, fixtureTime);
+      engine.collect({ offer: offer.id, consumed: offer.candidates.map(c => c.id), returned: [], at: fixtureTime }); engine.applyRecoveryTo(offer.id, fixtureTime);
       const bytes = canonicalStatement(offer.id, 550, statementLines(offer, []));
       return { offer: offer.id, signature: sign(mandatePair.privateKey.asymmetricKeyType === 'ed25519' ? null : 'sha256', bytes, mandatePair.privateKey).toString('base64'), disputed: [] };
     });

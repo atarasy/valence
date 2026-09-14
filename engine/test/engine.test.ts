@@ -291,7 +291,7 @@ describe("settlement", () => {
     // the statement renders the carriage from it.
     deliveries.record({ offer: offer.id, carriage: 550, code: "dc-gift", status: "delivered" });
     // §11. Consumed is what the collection found, not a verdict.
-    engine.recoveries.collect({
+    engine.collect({
       offer: offer.id,
       returned: [offer.candidates[2]!.id],
       consumed: [offer.candidates[0]!.id, offer.candidates[1]!.id],

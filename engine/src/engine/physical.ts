@@ -1,6 +1,6 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import { conflict, notFound, unprocessable } from "../common/errors.js";
-import type { Offer, PhysicalEligibility, Recovery } from "../common/types.js";
+import type { Candidate, Offer, PhysicalEligibility, Recovery } from "../common/types.js";
 
 /**
  * The physical binding's operations, which the valences alone do not give you.
@@ -14,6 +14,9 @@ import type { Offer, PhysicalEligibility, Recovery } from "../common/types.js";
  * (§3.2). Loss is an operating metric, and an implementation that turns it
  * into a receivable has replaced the trust model with a deposit.
  */
+
+/** §11.2, question 46. The longest note a missing item may carry. */
+export const MISSING_NOTE_LIMIT = 500;
 
 /** §11.1. Eligible for placement in a home, or not, and why not. */
 export function ineligibleReason(
@@ -87,6 +90,7 @@ export class RecoveryLedger {
       returned: [],
       consumed: [],
       missing: [],
+      missing_notes: {},
     };
     this.rows.set(input.offer, row);
     return row;
@@ -96,35 +100,83 @@ export class RecoveryLedger {
    * Records a collection.
    *
    * The presenter reports what came back unopened, what was used, and, since
-   * question 46, what was not in the box. Omitting an item does not make it
-   * `lost`: the deadline does that only while nothing was collected, which is
-   * why the HTTP route requires a first collection to name every undecided
-   * item. `missing` is named on purpose, and it is never billed (§3.2).
+   * question 46, what was not in the box, with a note for each. Every rule of
+   * §11.2 is checked here and not only on the HTTP route, because a review
+   * pass on 2026-09-14 measured an in-process caller leaving a box open for
+   * good through this method. The order of the refusals is §11.2's, so that a
+   * body breaking two rules names the same one on every implementation.
    */
   collect(input: {
     offer: string;
+    /** The offer's candidates as they stand now, which the rules are read against. */
+    candidates: readonly Pick<Candidate, "id" | "valence">[];
     returned: string[];
     consumed: string[];
     missing?: string[];
+    missing_notes?: Record<string, string>;
     at: number;
   }): Recovery {
     const row = this.rows.get(input.offer);
     if (!row) throw notFound(`no recovery open for offer ${input.offer}`);
+    const missing = input.missing ?? [];
+    const notes = input.missing_notes ?? {};
+    const named = [...input.returned, ...input.consumed, ...missing];
+    const known = new Set(input.candidates.map((c) => c.id));
+    // §11.2. A collection names candidates of this offer. An id belonging to
+    // no candidate resolved nothing and still read as goods used.
+    const strangers = named.filter((id) => !known.has(id));
+    if (strangers.length > 0) {
+      throw unprocessable("unknown_candidate", `not candidates of this offer: ${strangers.join(", ")}`);
+    }
+    // One item, one verdict. The same id twice in one list is two verdicts too.
+    const repeated = named.filter((id, i) => named.indexOf(id) !== i);
+    if (repeated.length > 0) {
+      throw unprocessable(
+        "returned_and_consumed",
+        `a candidate cannot carry two verdicts in one collection: ${[...new Set(repeated)].join(", ")}`
+      );
+    }
+    // Question 46, R2. A loss the stock holder bears arrives with a reason.
+    const unexplained = missing.filter((id) => {
+      const note = notes[id];
+      return typeof note !== "string" || note.trim() === "" || note.length > MISSING_NOTE_LIMIT;
+    });
+    if (unexplained.length > 0) {
+      throw unprocessable(
+        "missing_note_required",
+        `each missing item needs a note of 1 to ${MISSING_NOTE_LIMIT} characters: ${unexplained.join(", ")}`
+      );
+    }
     if (row.collected_at !== null) {
       throw conflict("already_collected", "this offer has already been collected");
     }
-    const missing = input.missing ?? [];
-    const lists = [input.returned, input.consumed, missing];
-    const both = lists.flatMap((list, i) => list.filter((id) => lists.some((other, j) => j !== i && other.includes(id))));
-    if (both.length > 0) {
+    // Question 46, R3. The collection may overrule a household's `returned`,
+    // because what came back is the collection's to find, and nothing else a
+    // candidate already carries. The valence is named so a line the deadline
+    // made `lost` is not blamed on the household.
+    const decided = input.candidates.filter(
+      (c) => c.valence !== "offered" && c.valence !== "returned" && named.includes(c.id)
+    );
+    if (decided.length > 0) {
       throw unprocessable(
-        "returned_and_consumed",
-        `a candidate cannot carry two verdicts in one collection: ${[...new Set(both)].join(", ")}`
+        "candidate_decided",
+        `already decided, and not a collection's to change: ${decided.map((c) => `${c.id} (${c.valence})`).join(", ")}`
+      );
+    }
+    // The deadline makes an item lost only while nothing was collected, and a
+    // second collection is refused, so an undecided item left unnamed would
+    // stay `offered` and the box would never close.
+    const unnamed = input.candidates.filter((c) => c.valence === "offered" && !named.includes(c.id));
+    if (unnamed.length > 0) {
+      throw unprocessable(
+        "collection_incomplete",
+        `name every undecided item as returned, consumed or missing: ${unnamed.map((c) => c.id).join(", ")}`
       );
     }
     row.returned = [...input.returned];
     row.consumed = [...input.consumed];
     row.missing = [...missing];
+    row.missing_notes = Object.fromEntries(missing.map((id) => [id, notes[id]!]));
     row.collected_at = input.at;
     // A store's map writes through on `set` and cannot see a field being
     // assigned, so the row goes back (see `OfferRegister.commit`).
@@ -153,6 +205,7 @@ export class RecoveryLedger {
         consumed: [...row.consumed],
         // An export written before question 46 carries no `missing`.
         missing: [...(row.missing ?? [])],
+        missing_notes: { ...(row.missing_notes ?? {}) },
       });
     }
   }
@@ -184,7 +237,14 @@ export function applyRecovery(
     now > recovery.due_at + recovery.grace_days * 86_400_000;
 
   for (const candidate of offer.candidates) {
-    if (candidate.valence !== "offered") continue;
+    // Question 46, R3. A household's `returned` gives way to what the
+    // collection found used or gone; nothing else the household said does.
+    const overruled =
+      candidate.valence === "returned" &&
+      recovery !== undefined &&
+      recovery.collected_at !== null &&
+      (recovery.consumed.includes(candidate.id) || recovery.missing.includes(candidate.id));
+    if (candidate.valence !== "offered" && !overruled) continue;
     if (recovery?.returned.includes(candidate.id)) {
       candidate.valence = "returned";
       candidate.decided_at = recovery.collected_at ?? now;

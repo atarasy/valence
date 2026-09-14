@@ -1,4 +1,4 @@
-import type { Offer } from "../common/types.js";
+import type { Offer, Recovery } from "../common/types.js";
 import type { Delivery } from "./delivery.js";
 import { challengeForStatement, statementLines } from "../shared/statement.js";
 import { governing } from "./approval.js";
@@ -11,8 +11,10 @@ import { governing } from "./approval.js";
  * shows the lines the collection's record proposes, each at its price, with
  * the merchant's blocks beside them and the carriage from the hub's own
  * delivery record, so that what the household signs is a sale and not a
- * total. The household confirms it, or disputes consumed lines and signs the
- * rest; it cannot add a verdict of its own (§11.2).
+ * total. The household confirms it, or disputes consumed or missing lines and
+ * signs the rest; it cannot add a verdict of its own (§11.2). A missing line
+ * carries the collection's note, so the household reads the reason it may
+ * contest (question 46).
  */
 export type Statement = {
   offer: string;
@@ -31,10 +33,12 @@ export type Statement = {
     maker: string;
     ships: string;
     given_by: string | null;
-    valence: "kept" | "defaulted" | "consumed";
+    valence: "kept" | "defaulted" | "consumed" | "lost";
     quantity: number;
     unit_price: number;
     amount: number;
+    /** Question 46. The collection's note for a missing line, null otherwise. */
+    note: string | null;
     /** §10a.5. Which of the blocks below governs this line. */
     disclosure: { merchant: string; product: string | null };
   }[];
@@ -52,8 +56,13 @@ export type Statement = {
   challenge: string;
 };
 
-export function renderStatement(offer: Offer, delivery: Delivery | undefined): Statement {
-  const proposed = statementLines(offer, []);
+export function renderStatement(
+  offer: Offer,
+  delivery: Delivery | undefined,
+  recovery?: Recovery
+): Statement {
+  const missing = recovery?.missing ?? [];
+  const proposed = statementLines(offer, [], missing);
   return {
     offer: offer.id,
     household: offer.household,
@@ -71,6 +80,7 @@ export function renderStatement(offer: Offer, delivery: Delivery | undefined): S
         quantity: c.quantity,
         unit_price: c.unit_price,
         amount: l.amount,
+        note: l.valence === "lost" ? recovery?.missing_notes?.[c.id] ?? null : null,
         disclosure: governing(offer, c.merchant, c.product),
       };
     }),

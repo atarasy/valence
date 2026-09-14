@@ -5,6 +5,7 @@ import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { canonicalConfig } from "../src/engine/offers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import { canonicalDisclosure, verifyDisclosure } from "../src/shared/disclosure.js";
+import type { Offer } from "../src/common/types.js";
 
 /**
  * §6.5 and §11.2. Question 36, decided 2026-09-12.
@@ -34,6 +35,32 @@ const physical = (household: string, products: { product: string; given_by?: str
   })),
 });
 
+/**
+ * A box whose collection recorded goods used and which is back in
+ * `presented`: the household kept one line, the route resolved the rest, and
+ * the household took its line back inside a cooling window of an hour.
+ */
+async function reopenedAfterCollection(engine: ReturnType<typeof makeEngine>["engine"], offer: Offer) {
+  engine.readMandatesFrom({
+    async get() {
+      return {
+        id: "mandate-1",
+        household: offer.household,
+        ceiling_out_of_network: 1_000_000,
+        ceiling_daily: null,
+        cooling_seconds: 3600,
+        co_signers: [],
+        lapses_at: Date.now() + 86_400_000,
+        version: 1,
+      } as never;
+    },
+  });
+  const [used, returned, kept] = offer.candidates;
+  await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
+  engine.collect({ offer: offer.id, returned: [returned!.id], consumed: [used!.id], at: Date.now() });
+  await engine.withdrawDecisions(offer.id);
+}
+
 async function collected(
   made: ReturnType<typeof makeEngine>,
   household = "house-s"
@@ -46,7 +73,7 @@ async function collected(
   // price includes carriage records 0; `null` is an implementation that never
   // recorded what it did, and `settle` refuses it.
   deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
-  engine.recoveries.collect({
+  engine.collect({
     offer: offer.id,
     returned: [offer.candidates[2]!.id],
     consumed: [offer.candidates[0]!.id, offer.candidates[1]!.id],
@@ -117,7 +144,7 @@ describe("§6.5: a physical box with goods used settles on the household's signa
     const { engine } = makeEngine();
     const offer = engine.createOffer(physical("house-clean", [{ product: "coffee-a" }, { product: "tea-b" }]));
     await engine.present(offer.id);
-    engine.recoveries.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
     engine.applyRecoveryTo(offer.id);
     const settlement = await engine.settle(offer.id);
     expect(settlement.charged).toBe(0);
@@ -251,14 +278,15 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     const offer = engine.createOffer(physical("house-mixed-withdrawal", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(offer.id);
     const [used, returned, kept] = offer.candidates;
-    engine.recoveries.collect({
+    // Question 46: a first collection names every undecided item, so the
+    // household keeps its line before the route comes.
+    await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
+    engine.collect({
       offer: offer.id,
       consumed: [used!.id],
       returned: [returned!.id],
       at: Date.now(),
     });
-    engine.applyRecoveryTo(offer.id);
-    await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
 
     const taken = await engine.withdrawDecisions(offer.id);
     expect(taken.candidates.map((c) => ({ id: c.id, valence: c.valence }))).toEqual([
@@ -281,27 +309,27 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
 
 describe("§6.5: the block is a pressure the household can lift, and nobody else can make permanent", () => {
   test("a withdrawn box does not block the next one", async () => {
-    // A presenter that collects part of a box and then withdraws it leaves an
-    // offer that can never be settled. Counting it blocked that household's
-    // every future physical box, from every presenter, for good.
+    // A presenter that withdraws a box after its collection leaves an offer
+    // that can never be settled. Counting it blocked that household's every
+    // future physical box, from every presenter, for good. Since question 46
+    // a collection resolves every open line, so the box is `presented` again
+    // only when the household takes back a line inside its window.
     const { engine } = makeEngine();
     const first = engine.createOffer(physical("house-w", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(first.id);
-    engine.recoveries.collect({ offer: first.id, returned: [], consumed: [first.candidates[0]!.id], at: Date.now() });
-    engine.applyRecoveryTo(first.id);
+    await reopenedAfterCollection(engine, first);
     await engine.withdraw(first.id);
     const second = engine.createOffer(physical("house-w", [{ product: "nori-a" }, { product: "coffee-a" }]));
     expect((await engine.present(second.id)).state).toBe("presented");
   });
 
   test("a box the household cannot yet settle does not block the next one", async () => {
-    // A partial collection leaves the offer `presented`, where `settle` is a
-    // 409. A block counting it is one the household is forbidden to cure.
+    // A collected box the household reopened is `presented`, where `settle`
+    // is a 409. A block counting it is one the household is forbidden to cure.
     const { engine } = makeEngine();
     const first = engine.createOffer(physical("house-p2", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(first.id);
-    engine.recoveries.collect({ offer: first.id, returned: [], consumed: [first.candidates[0]!.id], at: Date.now() });
-    engine.applyRecoveryTo(first.id);
+    await reopenedAfterCollection(engine, first);
     expect(engine.mustGet(first.id).state).toBe("presented");
     await expect(engine.settle(first.id)).rejects.toMatchObject({ status: 409 });
     const second = engine.createOffer(physical("house-p2", [{ product: "nori-a" }, { product: "coffee-a" }]));

@@ -115,6 +115,12 @@ export type Recovery = {
   consumed: string[];
   /** Question 46. Candidates the route found gone; they become `lost` and are never billed (§3.2). */
   missing: string[];
+  /**
+   * Question 46, §11.2. The recording party's note for each missing candidate.
+   * It travels in both exports so the stock holder receives a per-item,
+   * attributable record rather than a silent loss. Nothing judges it.
+   */
+  missing_notes: Record<string, string>;
 };
 
 export type Candidate = {

@@ -38,7 +38,12 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * refused rather than dropped: a member who arrived at such a host would look
  * intact and would carry no record that any box had been collected.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/4";
+/**
+ * Bumped to /5 on 2026-09-14, when a collection gained `missing` and
+ * `missing_notes` (question 46), for the same reason. A /4 export is still
+ * read: it carries no missing items, and its rows import with none.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/5";
 
 export type NodeExport = {
   format: string;

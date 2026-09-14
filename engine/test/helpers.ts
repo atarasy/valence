@@ -28,7 +28,7 @@ export async function settleSigned(
   now = Date.now()
 ) {
   const offer = engine.mustGet(offerId, now);
-  const lines = statementLines(offer, disputed);
+  const lines = statementLines(offer, disputed, engine.recoveries.for(offerId)?.missing ?? []);
   // §6.5, question 40. The carriage is inside the bytes, and the helper reads
   // it where the screen does rather than being told it, so a test that records
   // a different figure signs the figure it recorded.

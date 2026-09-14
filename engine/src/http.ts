@@ -661,75 +661,40 @@ async function route(
       if (method === "POST" && action === "recovery") {
         const raw = strict(
           await body(request),
-          ["returned", "consumed", "missing"],
+          ["returned", "consumed", "missing", "missing_notes"],
           "recovery"
         );
         // §11.2, question 46. `missing` is optional so a collection written
         // before it existed still reads; absent means nothing was missing.
         if (raw.missing === undefined) raw.missing = [];
+        if (raw.missing_notes === undefined) raw.missing_notes = {};
         for (const key of ["returned", "consumed", "missing"] as const) {
           const list = raw[key];
           if (!Array.isArray(list) || list.some((x) => typeof x !== "string")) {
             throw badRequest("malformed", `${key} must be an array of candidate ids`);
           }
         }
-        // §11.2. A collection names candidates of this offer. Nothing checked
-        // that until a refutation pass on 2026-09-12: `consumed: ["anything"]`
-        // resolved no candidate and still made the offer look collected with
-        // goods used, which held §6.5's block over that household until the
-        // loss deadline lifted it.
-        const candidates = engine.mustGet(id).candidates;
-        const known = new Set(candidates.map((c) => c.id));
-        const named = [...(raw.returned as string[]), ...(raw.consumed as string[]), ...(raw.missing as string[])];
-        const strangers = named.filter((candidate) => !known.has(candidate));
-        if (strangers.length > 0) {
-          throw unprocessable(
-            "unknown_candidate",
-            `not candidates of this offer: ${strangers.join(", ")}`
-          );
+        const notes = raw.missing_notes;
+        if (
+          typeof notes !== "object" || notes === null || Array.isArray(notes) ||
+          Object.values(notes).some((note) => typeof note !== "string")
+        ) {
+          throw badRequest("malformed", "missing_notes must map candidate ids to notes");
         }
-        // §11.2, question 46. A repeat is `collect`'s to refuse with
-        // already_collected, so the two rules below read a first collection.
-        // Two verdicts on one item are refused before completeness is read, so
-        // that refusal keeps its own name whatever else the body leaves out.
-        const repeated = named.filter((candidate, i) => named.indexOf(candidate) !== i);
-        if (repeated.length > 0) {
-          throw unprocessable(
-            "returned_and_consumed",
-            `a candidate cannot carry two verdicts in one collection: ${[...new Set(repeated)].join(", ")}`
-          );
+        const stray = Object.keys(notes).filter((key) => !(raw.missing as string[]).includes(key));
+        if (stray.length > 0) {
+          throw badRequest("malformed", `notes for items not named missing: ${stray.join(", ")}`);
         }
-        if (engine.recoveries.for(id)?.collected_at === null) {
-          // An item the household already decided is its own record, and a
-          // collection that restated it would put two verdicts on one line.
-          const decided = candidates.filter((c) => c.valence !== "offered" && named.includes(c.id));
-          if (decided.length > 0) {
-            throw unprocessable(
-              "candidate_decided",
-              `already decided by the household: ${decided.map((c) => c.id).join(", ")}`
-            );
-          }
-          // The deadline makes an item lost only while nothing was collected,
-          // and a second collection is refused, so an undecided item a
-          // collection leaves unnamed stays `offered` and the box never closes.
-          const unnamed = candidates.filter((c) => c.valence === "offered" && !named.includes(c.id));
-          if (unnamed.length > 0) {
-            throw unprocessable(
-              "collection_incomplete",
-              `name every undecided item as returned, consumed or missing: ${unnamed.map((c) => c.id).join(", ")}`
-            );
-          }
-        }
-        const collected = engine.recoveries.collect({
+        // §11.2. Every rule and its order are the engine's, so an in-process
+        // caller meets the same refusals as this route.
+        const collected = engine.collect({
           offer: id,
           returned: raw.returned as string[],
           consumed: raw.consumed as string[],
           missing: raw.missing as string[],
+          missing_notes: notes as Record<string, string>,
           at: Date.now(),
         });
-        // The collection is what the household never said. Apply it now so a
-        // settlement after this call sees the valences it produced.
-        engine.applyRecoveryTo(id);
         return json(collected);
       }
       // §7.5b. The household's surface. A merchant never reaches this: a
@@ -765,7 +730,7 @@ async function route(
         // §6.5. The screen a household signs a physical settlement from.
         // Clause 54: data, never presentation. The hub draws it, with the
         // carriage from its own delivery record beside the lines.
-        return json(renderStatement(engine.mustGet(id, Date.now()), await engine.deliveryFor(id)));
+        return json(renderStatement(engine.mustGet(id, Date.now()), await engine.deliveryFor(id), engine.recoveries.for(id)));
       }
       if (method === "POST" && action === "settle") {
         // §6.5. Empty for the digital binding and for a box with nothing
@@ -1192,7 +1157,9 @@ async function route(
     // Clause 52. The receiving host of a move.
     if (method === "POST") {
       const body_ = (await body(request)) as NodeExport;
-      if (!body_ || body_.format !== EXPORT_FORMAT_VERSION) {
+      // A /4 export predates question 46 and carries no `missing`; its rows
+      // import with none, which is what it recorded.
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);

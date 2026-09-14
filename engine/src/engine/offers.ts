@@ -4,7 +4,7 @@ import { badRequest, conflict, notFound, unprocessable } from "../common/errors.
 import type { Ledger } from "./ledger.js";
 import { verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
-import { canonicalStatement, needsStatement, statementLines } from "../shared/statement.js";
+import { canonicalStatement, disputable, needsStatement, statementLines } from "../shared/statement.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -42,6 +42,7 @@ import type {
   SettlementLine,
   PriceBand,
   NoteParty,
+  Recovery,
 } from "../common/types.js";
 
 export type EngineConfig = {
@@ -998,12 +999,15 @@ export class ValenceEngine {
     memberEnvelope?: MemberStatementEnvelope
   ): Promise<Settlement> {
     const offer = this.mustGet(offerId, now);
+    // Question 46. Which `lost` lines a collection recorded, and so which are
+    // on the statement; the offer alone cannot tell them from the deadline's.
+    const missing = this.recoveries.for(offer.id)?.missing ?? [];
     let memberIdentity: string | undefined;
     if (memberEnvelope) {
       const delivery = await this.deliverySource.find(offer.id), key = this.identities.get(offer.mandate), sent = confirmation.signed;
-      if (!needsStatement(offer) || !delivery || !key || !sent || !("assertion" in sent) ||
+      if (!needsStatement(offer, missing) || !delivery || !key || !sent || !("assertion" in sent) ||
           !verifyMemberStatement(memberEnvelope, sent.assertion, key, this.config.memberStatementScope, this.config.relyingPartyId,
-            canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [])).toString(), offer, now)) {
+            canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [], missing)).toString(), offer, now)) {
         throw unprocessable("bad_signature", "Invalid contextual member statement.");
       }
       memberIdentity = memberStatementIdentity(memberEnvelope, sent.assertion);
@@ -1052,11 +1056,12 @@ export class ValenceEngine {
       const candidate = offer.candidates.find((c) => c.id === id);
       if (!candidate) throw notFound(`no candidate ${id} in this offer`);
       // A household disputes the collection's verdict and nothing else: a
-      // kept line is one it signed itself at the decision.
-      if (candidate.valence !== "consumed") {
+      // kept line is one it signed itself at the decision. Since question 46
+      // that verdict includes an item the collection recorded missing.
+      if (!disputable(offer, id, missing)) {
         throw unprocessable(
           "not_disputable",
-          `candidate ${id} is ${candidate.valence}; only a consumed line can be disputed`
+          `candidate ${id} is ${candidate.valence}; only a consumed or missing line can be disputed`
         );
       }
     }
@@ -1067,7 +1072,7 @@ export class ValenceEngine {
     // choose the verdict (§11.2), only confirm the collection's or dispute a
     // line of it.
     let signed: string | null = null;
-    if (needsStatement(offer)) {
+    if (needsStatement(offer, missing)) {
       // §6.5, 法11条1号. The statement is the screen this application is made
       // on, and the carriage belongs on it. **`null` and `0` are different
       // facts**: 1号 asks for the carriage beside the price 「販売価格に商品の
@@ -1088,7 +1093,7 @@ export class ValenceEngine {
       if (!householdKey) {
         throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
       }
-      const lines = statementLines(offer, disputed);
+      const lines = statementLines(offer, disputed, missing);
       // §6.5, question 40. The carriage is inside what the household signed,
       // so a signature made against a different figure no longer verifies.
       const bytes = canonicalStatement(offer.id, carried.carriage, lines);
@@ -1128,7 +1133,7 @@ export class ValenceEngine {
     // **The message no longer promises a settle.** It read "this set settles
     // at N", and nothing in this engine settles on a timer: `sweep` applies
     // expiry and the only settle is the route.
-    if (!needsStatement(offer) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
+    if (!needsStatement(offer, missing) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
       const opens = offer.decided_at + mandate.cooling_seconds * 1000;
       if (now < opens) {
         throw unprocessable(
@@ -1185,8 +1190,10 @@ export class ValenceEngine {
           line(c, amount);
         }
       } else if (c.valence === "lost") {
+        // §3.2. Reported for the stock holder and never charged. A missing
+        // line the household disputed says so and moves nothing (question 46).
         lost += c.unit_price * c.quantity;
-        line(c, c.unit_price * c.quantity);
+        line(c, c.unit_price * c.quantity, missing.includes(c.id) && disputed.includes(c.id));
       }
     }
 
@@ -1310,6 +1317,27 @@ export class ValenceEngine {
     // Past both guards, so the deadline has passed on an offer that was still
     // presented and something above has changed. The caller writes it back.
     return true;
+  }
+
+  /**
+   * §11.2. Records a collection against the offer's candidates as they stand
+   * at `at`, and folds it in. The offer is read at that time first, so a
+   * deadline already passed has made its `lost` before the rules are read
+   * rather than depending on whether some earlier read passed a time.
+   */
+  collect(input: {
+    offer: string;
+    returned: string[];
+    consumed: string[];
+    missing?: string[];
+    missing_notes?: Record<string, string>;
+    at?: number;
+  }): Recovery {
+    const at = input.at ?? Date.now();
+    const offer = this.mustGet(input.offer, at);
+    const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
+    this.applyRecoveryTo(input.offer, at);
+    return row;
   }
 
   /**
