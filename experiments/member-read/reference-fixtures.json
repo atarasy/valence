@@ -248,7 +248,8 @@
         "disclosure": {
           "merchant": "maker-a",
           "product": null
-        }
+        },
+        "note": null
       },
       {
         "candidate": "661da2a5-fa91-49e5-aad3-c45f13de4fb7",
@@ -264,7 +265,8 @@
         "disclosure": {
           "merchant": "maker-a",
           "product": null
-        }
+        },
+        "note": null
       }
     ],
     "disclosures": [

@@ -987,7 +987,8 @@
               "enum": [
                 "kept",
                 "defaulted",
-                "consumed"
+                "consumed",
+                "lost"
               ]
             },
             "quantity": {
@@ -1028,6 +1029,13 @@
                 "product"
               ],
               "additionalProperties": false
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 500
             }
           },
           "required": [
@@ -1041,7 +1049,8 @@
             "quantity",
             "unit_price",
             "amount",
-            "disclosure"
+            "disclosure",
+            "note"
           ],
           "additionalProperties": false
         }
