@@ -788,6 +788,8 @@ merchant export
 
 It carries nothing of another presenter's, and nothing of a household's beyond what this presenter already holds, which is its own vertical view (clause 8). There is no import beside it: where a shop goes with its ledgers is the receiving platform's business, and what this specification owes the shop is that leaving is possible and complete. Added 2026-09-09; until then two clauses promised an export that no route provided.
 
+**When the format's version moves.** Decided 2026-09-15, when question 46 added `missing` and `missing_notes` to the recovery rows here without a new version. A format version MUST change when a field is removed, renamed or given a different meaning, and when a field is added to a format something imports, because an importer that does not know the field drops it and the data arrives apparently intact; that is why `valence-node/5` moved (§14). A field added to a format nothing imports does not move it, because the only reader is whoever the shop hands the file to, and a new version would tell that reader nothing a new field does not. So this export stays `valence-merchant/1` with the missing notes in it. **The day an import of this format is specified, the rule's second half applies to it** and the version moves with the next field added.
+
 ### 14.2 What an import verifies
 
 An import is an arrival from outside, not a restore of the host's own backup, so it verifies what it is handed:
