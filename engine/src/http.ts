@@ -7,6 +7,7 @@ import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
 import type { Assertion, PersonalSignature } from "./shared/decisions.js";
 import { renderStatement } from "./hub/statement.js";
+import { collectedAs } from "./shared/collected.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
   optionalUnitInterval,
@@ -23,6 +24,7 @@ import type {
   Offer,
   Valence,
   NoteParty,
+  Recovery,
 } from "./common/types.js";
 
 const BINDINGS = ["physical", "digital"] as const;
@@ -77,7 +79,7 @@ function readAssertion(value: unknown, where: string): Assertion {
   };
 }
 
-function candidateView(c: Candidate) {
+function candidateView(c: Candidate, recovery: Recovery | undefined) {
   return {
     id: c.id,
     product: c.product,
@@ -98,10 +100,11 @@ function candidateView(c: Candidate) {
     decided_at: c.decided_at,
     kept_as: c.kept_as,
     lineage: c.lineage,
+    collected_as: collectedAs(recovery, c.id),
   };
 }
 
-function offerView(o: Offer) {
+function offerView(o: Offer, recovery: Recovery | undefined) {
   return {
     id: o.id,
     binding: o.binding,
@@ -117,7 +120,7 @@ function offerView(o: Offer) {
     state: o.state,
     exploration_floor_met: o.exploration_floor_met,
     mandate: o.mandate,
-    candidates: o.candidates.map(candidateView),
+    candidates: o.candidates.map((c) => candidateView(c, recovery)),
     // §10a.4. The person sees it before they sign, so it travels on the offer
     // rather than with a receipt. Returned as the merchant composed it: the
     // items in the merchant's order, with no field added and none dropped.
@@ -201,6 +204,8 @@ async function route(
   request: Request
 ): Promise<Response> {
   const { recovery, approvals, permissions, registry, deliveries } = hub;
+  // Question 48. Every offer this route answers with carries what its collection named each line.
+  const view = (o: Offer) => offerView(o, engine.recoveries.for(o.id));
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const parts = path.split("/").filter(Boolean);
@@ -463,7 +468,7 @@ async function route(
         mandate: requireString(raw, "mandate", "offer"),
         candidates,
       });
-      return json(offerView(offer), 201);
+      return json(view(offer), 201);
     }
 
     if (method === "GET" && parts.length === 1) {
@@ -476,20 +481,20 @@ async function route(
       // list carries no total and no ranking. Clause 8: it is one presenter's
       // view, never the household's union.
       return json({
-        offers: engine.offersForHousehold(household, presenter).map(offerView),
+        offers: engine.offersForHousehold(household, presenter).map(view),
       });
     }
 
     const id = parts[1];
     if (id && parts.length === 2 && method === "GET") {
-      return json(offerView(engine.mustGet(id, Date.now())));
+      return json(view(engine.mustGet(id, Date.now())));
     }
 
     if (id && parts.length === 3) {
       const action = parts[2];
       if (method === "POST" && action === "present") {
         strict(await body(request), [], "present");
-        return json(offerView(await engine.present(id)));
+        return json(view(await engine.present(id)));
       }
       if (method === "POST" && action === "decisions") {
         const raw = strict(
@@ -557,12 +562,12 @@ async function route(
           };
         }
         return json(
-          offerView(await engine.decide(id, decisions, confirmation))
+          view(await engine.decide(id, decisions, confirmation))
         );
       }
       // §16.5. The person takes back a signed set inside its cooling window.
       if (method === "DELETE" && action === "decisions") {
-        return json(offerView(await engine.withdrawDecisions(id)));
+        return json(view(await engine.withdrawDecisions(id)));
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
@@ -757,7 +762,7 @@ async function route(
       }
       if (method === "POST" && action === "withdraw") {
         strict(await body(request), [], "withdraw");
-        return json(offerView(await engine.withdraw(id)));
+        return json(view(await engine.withdraw(id)));
       }
       if (method === "POST" && action === "remind") {
         strict(await body(request), [], "remind");

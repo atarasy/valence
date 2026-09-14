@@ -374,6 +374,12 @@ export class ValenceEngine {
     // twice toward the floor, and a quantity is what a line carries.
     const products = new Set<string>();
     for (const c of input.candidates) {
+      // §11.1, question 49, decided 2026-09-15. A collection gives a line one
+      // verdict, so two of a thing with one used was `consumed` and charged
+      // for both, and the same product may not be split across two lines.
+      if (input.binding === "physical" && c.quantity !== 1) {
+        throw unprocessable("physical_quantity", `a physical line carries one of ${c.product}; a collection cannot record part of a line`);
+      }
       if (products.has(c.product)) {
         throw badRequest("malformed", `product ${c.product} appears twice; use quantity`);
       }

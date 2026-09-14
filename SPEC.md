@@ -122,6 +122,8 @@ candidate
 
 `lost` is a loss to whoever holds stock risk. It MUST NOT be charged to the household, **and a `missing` record MUST NOT found any claim against the household, on this rail or off it** (question 46). An implementation that bills a household for unreturned goods is not conformant; the trust model is the point, and loss rates are an operating metric, not a receivable.
 
+**What a collection named a candidate travels beside it.** Question 48, decided 2026-09-15. `GET /offers`, `GET /offers/{id}` and `GET /offers/{id}/approval` MUST carry on each candidate `collected_as`: `returned`, `consumed` or `missing` where a collection named it so (§11.2), and null where no collection has named it. It is read from the collection's record and is not part of the candidate record above, so an export does not carry it; the collection rows do (§14). **The valence alone cannot tell a hub why a line is `lost`**: not in the box, which the household sees on its statement and may dispute, or never collected by the deadline, which is on no statement. A hub that could not tell them apart drew one sentence covering both.
+
 ### 3.3 What a candidate does not carry
 
 There is no field for a discount, a countdown, a stock-scarcity indicator, a star rating, or a per-person tracking identifier. These are absent, not disabled (clauses 27, 28, 29, 30). An implementation that adds them is not conformant.
@@ -655,6 +657,8 @@ A candidate MUST NOT appear in more than one of the returned, consumed and missi
 A product is eligible for the physical binding when it is ambient, keeps for at least three times the offer period, is small enough that ten fit in one container, and carries enough margin to absorb recovery and redistribution. Chilled and bulky goods are out of scope for this binding. Regulated categories, including alcohol and medicines, are out of scope entirely.
 
 **Eligibility is recorded on the presenter's catalogue and checked when the offer is created**, not when the goods are loaded. The presenter is the party that knows whether a product is ambient and how long it keeps, and creation is the last moment at which refusing costs nothing.
+
+**A physical line carries one of its product.** Question 49, decided 2026-09-15. `POST /offers` MUST refuse, with `422 physical_quantity`, a physical offer with a candidate whose `quantity` is not 1. A collection gives a line one verdict, so a line of two with one used was `consumed` and charged for both, and §5's rule of one line per product left no way to record the unused one. Recording part of a line is a change to the collection, the statement the household signs and the settlement, and it is not made here. A digital line may carry any quantity, because a digital line is decided whole.
 
 The digital binding has no eligibility restriction.
 
