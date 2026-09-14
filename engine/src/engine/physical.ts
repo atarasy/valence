@@ -239,11 +239,13 @@ export function applyRecovery(
   for (const candidate of offer.candidates) {
     // Question 46, R3. A household's `returned` gives way to what the
     // collection found used or gone; nothing else the household said does.
+    // A row stored before question 46 has no `missing`; the store hands it
+    // back as written, so this reads it as nothing missing.
     const overruled =
       candidate.valence === "returned" &&
       recovery !== undefined &&
       recovery.collected_at !== null &&
-      (recovery.consumed.includes(candidate.id) || recovery.missing.includes(candidate.id));
+      (recovery.consumed.includes(candidate.id) || (recovery.missing ?? []).includes(candidate.id));
     if (candidate.valence !== "offered" && !overruled) continue;
     if (recovery?.returned.includes(candidate.id)) {
       candidate.valence = "returned";

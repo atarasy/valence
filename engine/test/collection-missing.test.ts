@@ -117,8 +117,8 @@ describe("§11.2: the collection's rules are the engine's", () => {
     const offer = await box(made, "house-overrule");
     const [used, gone, back] = offer.candidates;
     await decideSigned(made.engine, offer.id, [
-      { candidate: used!.id, valence: "returned", kept_as: null },
-      { candidate: gone!.id, valence: "returned", kept_as: null },
+      { candidate: used!.id, valence: "returned" },
+      { candidate: gone!.id, valence: "returned" },
     ]);
     made.engine.collect({
       offer: offer.id,
@@ -227,6 +227,16 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     });
     const taken = await made.engine.withdrawDecisions(offer.id);
     expect(taken.candidates.map((c) => c.valence)).toEqual(["lost", "returned", "offered"]);
+  });
+
+  test("a row stored before question 46 is read without failing", async () => {
+    const { inMemoryStore } = await import("../src/common/store.js");
+    const { RecoveryLedger, applyRecovery } = await import("../src/engine/physical.js");
+    const store = inMemoryStore();
+    const ledger = new RecoveryLedger(store);
+    store.map("recoveries").set("old-1", { offer: "old-1", due_at: 0, grace_days: 0, collected_at: 1, returned: ["c1"], consumed: [] } as never);
+    const offer = { binding: "physical", candidates: [{ id: "c1", valence: "returned", decided_at: 1 }] } as never;
+    expect(() => applyRecovery(offer, ledger.for("old-1"), 2)).not.toThrow();
   });
 
   test("a collection row moved from a host before question 46 imports with no notes", () => {
