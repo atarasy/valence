@@ -24,7 +24,8 @@ export function prepareDeviceAcceptance(store:Store,c:MemberRuntimeConfig){
 }
 export function deviceAcceptanceStatus(store:Store,c:MemberRuntimeConfig){
  const entries=checked(store,c),value=entries.get('current');if(!value)return {prepared:false as const};
- const statement=statementEntry(entries),grants=statement?[statement.presenter]:[];
+ const statement=statementEntry(entries),vox=entries.get('vox') as unknown as {presenter:string}|undefined;
+ const grants=vox?[vox.presenter]:statement?[statement.presenter]:[];
  const principal=store.map<{household:string;presenters:string;disabled:number}>('member_principals').get(value.principal);
  if(!principal||principal.household!==value.household||principal.presenters!==JSON.stringify(grants)||principal.disabled!==0)throw new Error('Acceptance principal changed or unavailable');
  const credentials=store.map<{principal:string;revoked:number}>('member_credentials');
@@ -112,4 +113,24 @@ export async function prepareStatementBox(store:Store,c:MemberRuntimeConfig,now=
  r.authority.bindResource({kind:'offer',id:box.offer},{household:value.household,presenter:box.presenter});
  entries.set('statement',{...statement,...box,createdAt:at} as unknown as Acceptance);
  return {household:value.household,presenter:box.presenter,offer:box.offer};
+}
+/**
+ * Trusted operator capability standing in for the household's own grant: lets
+ * the acceptance household receive boxes from a Vox shop's presenter. Granting
+ * is the household's act, so a presenter can never do this for itself. It
+ * requires the latest operator box to be settled, so no statement is left
+ * waiting under a presenter the household can no longer read, and it revokes
+ * the device's session like any grant change.
+ */
+export function grantVoxPresenter(store:Store,c:MemberRuntimeConfig,presenter:string,now=Date.now){
+ const entries=checked(store,c),value=entries.get('current'),statement=statementEntry(entries);
+ if(!value||!statement)throw new Error('Statement acceptance not prepared');
+ const r=memberRuntime(store,c,now);
+ if(!r.engine.settlement(statement.offer))throw new Error('Latest acceptance box is not settled');
+ if(!r.engine.publicKeyFor(presenter))throw new Error('Presenter identity not registered');
+ if(entries.has('vox'))throw new Error('A Vox presenter is already granted; inspect status');
+ if(!r.authority.matchesActivePrincipalScope(value.principal,value.household,[statement.presenter]))throw new Error('Acceptance principal changed or unavailable');
+ r.authority.setPresenterGrants(value.principal,[presenter]);
+ entries.set('vox',{presenter,createdAt:now()} as unknown as Acceptance);
+ return {household:value.household,presenter,mandate:statement.mandate};
 }

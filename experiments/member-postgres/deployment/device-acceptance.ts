@@ -1,11 +1,12 @@
 import {openSync,writeFileSync,closeSync} from 'node:fs';
 import {isAbsolute} from 'node:path';
 import {createPool,postgresStore} from '../store.ts';
-import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox} from '../device-acceptance.ts';
+import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox,grantVoxPresenter} from '../device-acceptance.ts';
 import type {MemberRuntimeConfig} from '../config.ts';
 import config from './config.json';
 const [action,output,...extra]=process.argv.slice(2);
-if(!['prepare','status','invite','statement','box'].includes(action??'')||extra.length||(action==='invite'?(!output||!isAbsolute(output)):output!==undefined))throw new Error('Usage: device-acceptance.ts prepare | status | statement | box | invite /absolute/private/new-file.json');
+const needs=action==='invite'?'path':action==='vox'?'presenter':'none';
+if(!['prepare','status','invite','statement','box','vox'].includes(action??'')||extra.length||(needs==='path'?(!output||!isAbsolute(output)):needs==='presenter'?!output:output!==undefined))throw new Error('Usage: device-acceptance.ts prepare | status | statement | box | vox <presenter> | invite /absolute/private/new-file.json');
 if(process.env.NEON_PROJECT_ID!=='young-pond-73223516'||!process.env.DATABASE_URL_UNPOOLED)throw new Error('Dedicated development database required');
 const c=config as MemberRuntimeConfig,pool=createPool(process.env.DATABASE_URL_UNPOOLED),unit=postgresStore(pool,{id:'atarasy_api_dev',environment:c.environment,origin:c.origin,epoch:1});
 try{
@@ -13,6 +14,7 @@ try{
  else if(action==='status')console.log(JSON.stringify(await unit.run(s=>deviceAcceptanceStatus(s,c))));
  else if(action==='statement')console.log(JSON.stringify(await unit.run(s=>prepareStatementAcceptance(s,c))));
  else if(action==='box')console.log(JSON.stringify(await unit.run(s=>prepareStatementBox(s,c))));
+ else if(action==='vox')console.log(JSON.stringify(await unit.run(s=>grantVoxPresenter(s,c,output!))));
  else{
   // Exclusive creation refuses existing files and symlinks; no token on stdout.
   const fd=openSync(output!,'wx',0o600);

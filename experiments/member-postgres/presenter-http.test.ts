@@ -1,0 +1,74 @@
+import {afterAll,beforeAll,expect,test} from 'bun:test';
+import {generateKeyPairSync,randomUUID,sign} from 'node:crypto';
+import {createPool,initialiseDeployment,postgresStore,type Identity} from './store.ts';
+import {migrateDatabase} from './migrate.ts';
+import {openPostgresMemberHTTP} from './http.ts';
+import {memberRuntime} from './runtime.ts';
+import {registerPresenter} from './presenter-http.ts';
+import {canonicalConfig} from '../../engine/src/engine/offers.ts';
+import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
+import type {MemberRuntimeConfig} from './config.ts';
+const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
+const pool=createPool(url),ids:string[]=[];
+const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:1000,maximumPending:8,budgetWindowMs:60000,maximumRequests:500,maximumTrackedTokens:100};
+beforeAll(()=>migrateDatabase(url));
+afterAll(async()=>{for(const id of ids){await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await pool.end();});
+const pem=(pair:ReturnType<typeof generateKeyPairSync>)=>pair.publicKey.export({type:'spki',format:'pem'}).toString();
+function shop(name:string){
+ const presenter={id:'presenter-'+name,pair:generateKeyPairSync('ed25519')},merchant={id:'merchant-'+name,pair:generateKeyPairSync('ed25519')};
+ const catalogue=(version:string,named=presenter.id)=>{
+  const body={version,presenter:named,products:{['tea-'+name]:{merchant:merchant.id,maker:'maker-'+name,ships:'carrier-'+name,price:1200,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}}}};
+  return {...body,signature:sign(null,canonicalConfig(body),presenter.pair.privateKey).toString('base64')};
+ };
+ const disclosure=(forMerchant=merchant.id)=>{
+  const body={merchant:forMerchant,product:null,version:'d-1',items:[{label:'notice',value:'test'}]};
+  return {...body,signature:sign(null,canonicalDisclosure(body),merchant.pair.privateKey).toString('base64')};
+ };
+ return {presenter,merchant,catalogue,disclosure};
+}
+async function setup(){
+ const identity:Identity={id:'presenter_'+randomUUID().replaceAll('-',''),environment:'test',origin:config.origin,epoch:1};ids.push(identity.id);await initialiseDeployment(pool,identity);
+ const app=await openPostgresMemberHTTP(pool,identity,config),unit=postgresStore(pool,identity);
+ const a=shop('a'),b=shop('b');
+ await unit.run(store=>{memberRuntime(store,config).engine.mandates.importMandate({id:'mandate-1',household:'house',ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:Date.now()+86_400_000*7,version:1});});
+ // One registration per unit, as the operator command does: a unit opens each record namespace once.
+ const register=(s:ReturnType<typeof shop>)=>unit.run(store=>registerPresenter(memberRuntime(store,config),{presenter:s.presenter.id,presenterKey:pem(s.presenter.pair),merchant:s.merchant.id,merchantKey:pem(s.merchant.pair),at:Date.now()}).token);
+ const tokenA=await register(a),tokenB=await register(b);
+ const send=(token:string,path:string,body?:unknown)=>app.fetch(new Request(config.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',authorization:'Bearer '+token},...(body===undefined?{}:{body:JSON.stringify(body)})}),{peer:'presenter-test'});
+ const offerBody=(version:string,product:string)=>({binding:'physical',household:'house',purpose:'replenish',config_version:version,expires_at:Date.now()+86_400_000,mandate:'mandate-1',price_band:null,giver:null,candidates:[{product,quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
+ return {unit,a,b,tokenA:tokenA!,tokenB:tokenB!,send,offerBody};
+}
+test('a presenter credential publishes, presents, delivers and collects only its own box',async()=>{
+ const s=await setup();
+ expect(await (await s.send(s.tokenA,'/presenter/self')).json()).toEqual({presenter:s.a.presenter.id});
+ expect((await s.send('apr1_'+'x'.repeat(43),'/presenter/self')).status).toBe(401);
+ expect((await s.send(s.tokenB,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(403);
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(201);
+ expect((await s.send(s.tokenB,'/presenter/disclosures',s.a.disclosure())).status).toBe(403);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ expect((await s.send(s.tokenB,'/presenter/offers',s.offerBody('a-1','tea-a'))).status).toBe(403);
+ const created=await s.send(s.tokenA,'/presenter/offers',s.offerBody('a-1','tea-a'));expect(created.status).toBe(201);
+ const offer=await created.json() as {id:string;candidates:{id:string}[]};
+ expect(await s.unit.run(store=>memberRuntime(store,config).authority.ownerOf({kind:'offer',id:offer.id}))).toEqual({household:'house',presenter:s.a.presenter.id});
+ // Another presenter's offer answers exactly like one that does not exist.
+ for(const path of ['/presenter/offers/'+offer.id,'/presenter/offers/'+randomUUID()])expect(await (await s.send(s.tokenB,path)).json()).toMatchObject({error:'offer_unavailable'});
+ expect((await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[]})).status).toBe(404);
+ expect((await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/present',{})).status).toBe(200);
+ const delivered=await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/delivery',{carriage:550,status:'delivered'});
+ expect(delivered.status).toBe(201);expect(await delivered.json()).toEqual({offer:offer.id,carriage:550,status:'delivered'});
+ expect(await (await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:['stranger']})).json()).toMatchObject({error:'unknown_candidate'});
+ const candidate=offer.candidates[0]!.id;
+ expect((await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[candidate]})).status).toBe(200);
+ expect(await (await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/recovery',{returned:[],consumed:[candidate]})).json()).toMatchObject({error:'already_collected'});
+ const read=await s.send(s.tokenA,'/presenter/offers/'+offer.id),text=await read.text();
+ expect(read.status).toBe(200);expect(text).not.toContain('dev-');
+ expect(JSON.parse(text)).toMatchObject({offer:{id:offer.id,state:'decided'},delivery:{carriage:550,status:'delivered'},recovery:{consumed:[candidate]},settlement:null});
+ expect((await (await s.send(s.tokenA,'/presenter/offers?household=house')).json()).offers.map((o:{id:string})=>o.id)).toEqual([offer.id]);
+ expect((await (await s.send(s.tokenB,'/presenter/offers?household=house')).json()).offers).toEqual([]);
+});
+test('presenter routes refuse member tokens and member routes refuse presenter tokens',async()=>{
+ const s=await setup();
+ expect((await s.send('amr1_'+'x'.repeat(43),'/presenter/self')).status).toBe(401);
+ expect((await s.send(s.tokenA,'/auth/session')).status).toBe(401);
+ expect((await s.send(s.tokenA,'/presenter/identities',{})).status).toBe(404);
+});
