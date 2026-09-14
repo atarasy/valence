@@ -83,3 +83,14 @@ test('expired or wrong-challenge approval cannot consume a prepared operation',a
  const expired=await openPostgresMemberHTTP(pool,s.identity,s.c,()=>now()+61000);expect((await expired.fetch(s.request(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,2)},s.grant.token),{peer:'expiry'})).status).toBe(404);
  expect(await s.unit.run(store=>memberRuntime(store,s.c,now).engine.settlement(s.input.statement.offer)??null)).toBeNull();
 });
+test('an expired unsigned operation is refused by the next prepare instead of blocking the offer',async()=>{
+ const s=await setup(),first=await (await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]})).json();
+ // Before expiry the same operation is returned, so a retry cannot fork a second one.
+ expect((await (await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]})).json()).operationID).toBe(first.operationID);
+ const later=()=>now()+61000,app=await openPostgresMemberHTTP(pool,s.identity,s.c,later),at=(path:string,body?:unknown)=>app.fetch(s.request(path,body,s.grant.token),{peer:'later'});
+ const reply=await at('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]});expect(reply.status).toBe(200);const second=await reply.json();
+ expect(second.operationID).not.toBe(first.operationID);expect(second.operationState).toBe('prepared');
+ expect((await (await at('/member/operations/'+first.operationID+'/outcome')).json()).operationState).toBe('refused');
+ const submitted=await at('/member/operations/'+second.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,second.publicKey.challenge,2)});
+ expect(submitted.status).toBe(200);expect((await submitted.json()).operationState).toBe('committed');
+});
