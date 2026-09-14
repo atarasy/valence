@@ -113,6 +113,8 @@ export type Recovery = {
   returned: string[];
   /** Candidates the household used while trying, at the merchant's price. Samples settle at zero (§6.2). */
   consumed: string[];
+  /** Question 46. Candidates the route found gone; they become `lost` and are never billed (§3.2). */
+  missing: string[];
 };
 
 export type Candidate = {

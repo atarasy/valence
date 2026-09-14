@@ -894,7 +894,7 @@ export class ValenceEngine {
     // Found by a refutation pass on 2026-09-12, hours after §6.5 was written
     // to close the same hole on the other side.
     const recovery = this.recoveries.for(offer.id);
-    const recorded = new Set([...(recovery?.returned ?? []), ...(recovery?.consumed ?? [])]);
+    const recorded = new Set([...(recovery?.returned ?? []), ...(recovery?.consumed ?? []), ...(recovery?.missing ?? [])]);
     for (const c of offer.candidates) {
       if (recorded.has(c.id)) continue;
       c.valence = "offered";

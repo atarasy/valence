@@ -86,6 +86,7 @@ export class RecoveryLedger {
       collected_at: null,
       returned: [],
       consumed: [],
+      missing: [],
     };
     this.rows.set(input.offer, row);
     return row;
@@ -94,15 +95,17 @@ export class RecoveryLedger {
   /**
    * Records a collection.
    *
-   * The presenter reports what came back unopened and what was used. Anything
-   * it does not name is neither, and the deadline in `sweep` is what decides
-   * that case rather than this call, so a presenter cannot make something
-   * `lost` by omitting it from the list.
+   * The presenter reports what came back unopened, what was used, and, since
+   * question 46, what was not in the box. Omitting an item does not make it
+   * `lost`: the deadline does that only while nothing was collected, which is
+   * why the HTTP route requires a first collection to name every undecided
+   * item. `missing` is named on purpose, and it is never billed (§3.2).
    */
   collect(input: {
     offer: string;
     returned: string[];
     consumed: string[];
+    missing?: string[];
     at: number;
   }): Recovery {
     const row = this.rows.get(input.offer);
@@ -110,15 +113,18 @@ export class RecoveryLedger {
     if (row.collected_at !== null) {
       throw conflict("already_collected", "this offer has already been collected");
     }
-    const both = input.returned.filter((id) => input.consumed.includes(id));
+    const missing = input.missing ?? [];
+    const lists = [input.returned, input.consumed, missing];
+    const both = lists.flatMap((list, i) => list.filter((id) => lists.some((other, j) => j !== i && other.includes(id))));
     if (both.length > 0) {
       throw unprocessable(
         "returned_and_consumed",
-        `a candidate cannot be both returned and consumed: ${both.join(", ")}`
+        `a candidate cannot carry two verdicts in one collection: ${[...new Set(both)].join(", ")}`
       );
     }
     row.returned = [...input.returned];
     row.consumed = [...input.consumed];
+    row.missing = [...missing];
     row.collected_at = input.at;
     // A store's map writes through on `set` and cannot see a field being
     // assigned, so the row goes back (see `OfferRegister.commit`).
@@ -145,6 +151,8 @@ export class RecoveryLedger {
         ...row,
         returned: [...row.returned],
         consumed: [...row.consumed],
+        // An export written before question 46 carries no `missing`.
+        missing: [...(row.missing ?? [])],
       });
     }
   }
@@ -182,6 +190,11 @@ export function applyRecovery(
       candidate.decided_at = recovery.collected_at ?? now;
     } else if (recovery?.consumed.includes(candidate.id)) {
       candidate.valence = "consumed";
+      candidate.decided_at = recovery.collected_at ?? now;
+    } else if (recovery?.missing?.includes(candidate.id)) {
+      // Question 46. The route found it gone: the same loss the deadline
+      // records, recorded when it was found rather than when time ran out.
+      candidate.valence = "lost";
       candidate.decided_at = recovery.collected_at ?? now;
     } else if (overdue) {
       candidate.valence = "lost";

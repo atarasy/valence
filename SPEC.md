@@ -618,7 +618,7 @@ The canonical form is the merchant, the version, the product (empty for the stan
 |---|---|
 | recovery | the presenter collects unopened candidates and records `returned` |
 | redistribution | permitted only for unopened, ambient goods within the freshness window, with a temperature record where the category requires it. Local food-safety practice governs. |
-| loss | after the recovery deadline plus a grace period, `lost`. Borne by the stock holder, never billed to the household. |
+| loss | after the recovery deadline plus a grace period, or at the collection for an item named `missing`, `lost`. Borne by the stock holder, never billed to the household. |
 | cadence | monthly settlement |
 
 ### 11.2 Silence does not mean the same thing in the two bindings
@@ -627,14 +627,16 @@ The canonical form is the merchant, the version, the product (empty for the stan
 
 So an undecided physical candidate stays undecided at expiry, and only two things resolve it:
 
-- **the collection**, which records what came back unopened as `returned` and what was used as `consumed`
+- **the collection**, which records what came back unopened as `returned`, what was used as `consumed`, and what was not in the box as `missing`, which makes it `lost`
 - **the deadline**, after which anything neither collected nor decided becomes `lost`
+
+**A first collection MUST resolve every undecided candidate.** `POST /offers/{id}/recovery` takes `returned`, `consumed` and an optional `missing`, and MUST refuse, with `422 collection_incomplete`, a first collection that leaves a candidate still `offered` unnamed in all three, and with `422 candidate_decided` one that names a candidate the household has already decided. Added 2026-09-14 by question 46. The deadline makes an item `lost` only while nothing has been collected, and a second collection is refused, so an item the first collection left out stayed `offered` for good and the offer could neither settle nor be collected again. And a route that found an item gone had no true verdict to record: `consumed` put it on the household's statement and `returned` said goods came back that did not. **`missing` is never billed**, like any `lost`, so a presenter gains nothing by using it falsely against a household, and it is not a verdict a decision may carry.
 
 The grace period after the recovery deadline is a deployment parameter with no recommended figure, as the exploration rate is. An implementation MUST NOT make an uncollected physical candidate `returned`, and MUST NOT bill a household for one that became `lost`.
 
 **Neither `consumed` nor `lost` is a verdict a decision may carry.** `POST /offers/{id}/decisions` MUST refuse a decided set naming either, with `422`. Both are facts the collection or the deadline records about goods in a home, and a household that could declare them would pay cost for what it kept, or nothing for what it lost. This was added on 2026-09-09, after an adversarial pass measured a household signing `consumed` and `lost` over its own goods and paying 2000 of 6000.
 
-A candidate MUST NOT appear in both the returned and the consumed list of one collection, **a collection MUST name only candidates of the offer it is recorded against**, with `422 unknown_candidate` otherwise, and a collection MUST NOT be recorded twice for one offer. The middle rule was added on 2026-09-12: an id belonging to no candidate resolved nothing, and the offer still read as collected with goods used, so §6.5's block held over that household with no line for it to sign.
+A candidate MUST NOT appear in more than one of the returned, consumed and missing lists of one collection, with `422 returned_and_consumed`, **a collection MUST name only candidates of the offer it is recorded against**, with `422 unknown_candidate` otherwise, and a collection MUST NOT be recorded twice for one offer. The middle rule was added on 2026-09-12: an id belonging to no candidate resolved nothing, and the offer still read as collected with goods used, so §6.5's block held over that household with no line for it to sign.
 
 **A cooling window takes back what the person signed, and nothing else.** A physical offer reaches `decided` when the collection resolves its last candidate, so `DELETE /offers/{id}/decisions` (§16.5) MUST leave every candidate the collection named exactly as the collection left it. An implementation that reset them made `consumed` into `offered`, whereupon the household signed `returned` over goods it had used and settled at nothing, on a receipt saying they came back unopened. The rule above would have been true of one route and false of the system.
 

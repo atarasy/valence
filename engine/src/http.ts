@@ -661,10 +661,13 @@ async function route(
       if (method === "POST" && action === "recovery") {
         const raw = strict(
           await body(request),
-          ["returned", "consumed"],
+          ["returned", "consumed", "missing"],
           "recovery"
         );
-        for (const key of ["returned", "consumed"] as const) {
+        // §11.2, question 46. `missing` is optional so a collection written
+        // before it existed still reads; absent means nothing was missing.
+        if (raw.missing === undefined) raw.missing = [];
+        for (const key of ["returned", "consumed", "missing"] as const) {
           const list = raw[key];
           if (!Array.isArray(list) || list.some((x) => typeof x !== "string")) {
             throw badRequest("malformed", `${key} must be an array of candidate ids`);
@@ -675,20 +678,53 @@ async function route(
         // resolved no candidate and still made the offer look collected with
         // goods used, which held §6.5's block over that household until the
         // loss deadline lifted it.
-        const known = new Set(engine.mustGet(id).candidates.map((c) => c.id));
-        const strangers = [...(raw.returned as string[]), ...(raw.consumed as string[])].filter(
-          (candidate) => !known.has(candidate)
-        );
+        const candidates = engine.mustGet(id).candidates;
+        const known = new Set(candidates.map((c) => c.id));
+        const named = [...(raw.returned as string[]), ...(raw.consumed as string[]), ...(raw.missing as string[])];
+        const strangers = named.filter((candidate) => !known.has(candidate));
         if (strangers.length > 0) {
           throw unprocessable(
             "unknown_candidate",
             `not candidates of this offer: ${strangers.join(", ")}`
           );
         }
+        // §11.2, question 46. A repeat is `collect`'s to refuse with
+        // already_collected, so the two rules below read a first collection.
+        // Two verdicts on one item are refused before completeness is read, so
+        // that refusal keeps its own name whatever else the body leaves out.
+        const repeated = named.filter((candidate, i) => named.indexOf(candidate) !== i);
+        if (repeated.length > 0) {
+          throw unprocessable(
+            "returned_and_consumed",
+            `a candidate cannot carry two verdicts in one collection: ${[...new Set(repeated)].join(", ")}`
+          );
+        }
+        if (engine.recoveries.for(id)?.collected_at === null) {
+          // An item the household already decided is its own record, and a
+          // collection that restated it would put two verdicts on one line.
+          const decided = candidates.filter((c) => c.valence !== "offered" && named.includes(c.id));
+          if (decided.length > 0) {
+            throw unprocessable(
+              "candidate_decided",
+              `already decided by the household: ${decided.map((c) => c.id).join(", ")}`
+            );
+          }
+          // The deadline makes an item lost only while nothing was collected,
+          // and a second collection is refused, so an undecided item a
+          // collection leaves unnamed stays `offered` and the box never closes.
+          const unnamed = candidates.filter((c) => c.valence === "offered" && !named.includes(c.id));
+          if (unnamed.length > 0) {
+            throw unprocessable(
+              "collection_incomplete",
+              `name every undecided item as returned, consumed or missing: ${unnamed.map((c) => c.id).join(", ")}`
+            );
+          }
+        }
         const collected = engine.recoveries.collect({
           offer: id,
           returned: raw.returned as string[],
           consumed: raw.consumed as string[],
+          missing: raw.missing as string[],
           at: Date.now(),
         });
         // The collection is what the household never said. Apply it now so a
