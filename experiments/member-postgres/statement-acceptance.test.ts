@@ -2,7 +2,7 @@ import {test,expect} from 'bun:test';
 import {randomUUID} from 'node:crypto';
 import {createPool,initialiseDeployment,postgresStore} from './store.ts';
 import {openPostgresMemberHTTP} from './http.ts';
-import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance} from './device-acceptance.ts';
+import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox} from './device-acceptance.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 import config from './deployment/config.json';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
@@ -37,6 +37,16 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect(submitted.status).toBe(200);const receipt=await submitted.json();expect(receipt.operationState).toBe('committed');
   expect(await (await send(path+'/outcome',undefined,token)).json()).toEqual(receipt);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({statement:{settled:true}});
+  // A further box comes from a new presenter under the same mandate and waits for its own native approval.
+  const box=await unit.run(s=>prepareStatementBox(s,c));
+  expect(box.offer).not.toBe(statement.offer);expect(box.presenter).not.toBe(statement.presenter);
+  await expect(unit.run(s=>prepareStatementBox(s,c))).rejects.toThrow('not settled');
+  expect((await send('/auth/session',undefined,token)).status).toBe(401);
+  const again=await signIn(4);
+  const next=await (await send('/member/statements/prepare',{offer:box.offer,disputed:[]},again)).json();
+  const nextPath='/member/operations/'+next.operationID,approved=await send(nextPath+'/submit',{assertion:key.authenticate(next.publicKey.challenge,c.origin,c.rpID,userHandle,5)},again);
+  expect(approved.status).toBe(200);expect((await approved.json()).operationState).toBe('committed');
+  expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({statement:{offer:box.offer,settled:true}});
  }finally{
   await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id.id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id.id]);await pool.end();
  }

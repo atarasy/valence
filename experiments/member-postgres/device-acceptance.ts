@@ -41,11 +41,34 @@ export function inviteDeviceAcceptance(store:Store,c:MemberRuntimeConfig){
  return r.enrollment.issueInvitation(value.principal);
 }
 /**
+ * One development presenter and merchant with a single-product catalogue, and
+ * one delivered box whose goods the collection marked consumed. A presenter
+ * may never offer a household the same product twice (§5.1), so every box
+ * needs its own presenter. The keys are ephemeral: the catalogue and
+ * disclosure are verified on registration and the private halves are dropped.
+ */
+async function presentBox(r:ReturnType<typeof memberRuntime>,household:string,mandate:string,at:number){
+ const suffix=randomUUID().replaceAll('-','');
+ const ids={presenter:'dev_presenter_'+suffix,merchant:'dev_merchant_'+suffix,product:'dev_goods_'+suffix};
+ const presenterPair=generateKeyPairSync('ed25519'),merchantPair=generateKeyPairSync('ed25519');
+ r.engine.registerIdentity(ids.presenter,presenterPair.publicKey.export({type:'spki',format:'pem'}).toString());
+ r.engine.registerIdentity(ids.merchant,merchantPair.publicKey.export({type:'spki',format:'pem'}).toString());
+ const config={version:'dev-acceptance-'+suffix,presenter:ids.presenter,products:{[ids.product]:{merchant:ids.merchant,maker:'dev_maker_'+suffix,ships:'dev_carrier_'+suffix,price:1200,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}}}};
+ r.engine.registerConfig(config,sign(null,canonicalConfig(config),presenterPair.privateKey).toString('base64'));
+ const disclosure={merchant:ids.merchant,product:null,version:'dev-acceptance-d1',items:[{label:'notice',value:'Development acceptance record. No goods are shipped and no payment is taken.'}]};
+ r.engine.putDisclosure({...disclosure,signature:sign(null,canonicalDisclosure(disclosure),merchantPair.privateKey).toString('base64')});
+ const offer=r.engine.createOffer({binding:'physical',household,purpose:'replenish',config_version:config.version,expires_at:at+DAY_MS,mandate,price_band:null,giver:null,candidates:[{product:ids.product,quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
+ await r.engine.present(offer.id,at);
+ r.deliveries.record({offer:offer.id,carriage:550,code:'dev-acceptance',status:'delivered',now:at});
+ r.engine.recoveries.collect({offer:offer.id,consumed:offer.candidates.map(v=>v.id),returned:[],at});
+ r.engine.applyRecoveryTo(offer.id,at);
+ return {presenter:ids.presenter,merchant:ids.merchant,offer:offer.id};
+}
+/**
  * Trusted operator capability for statement approval on a device. Registers a
- * development presenter, merchant, catalogue and one physical box whose
- * collection is already recorded, under a mandate whose key is the passkey the
- * device registered. Nothing here signs for the household: the statement
- * still needs a native assertion from that passkey.
+ * box as above under a mandate whose key is the passkey the device
+ * registered. Nothing here signs for the household: the statement still needs
+ * a native assertion from that passkey.
  */
 export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConfig,now=Date.now){
  const entries=checked(store,c),value=entries.get('current');if(!value)throw new Error('Acceptance not prepared');
@@ -55,32 +78,38 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  // One passkey only, so the mandate key cannot silently pick among devices.
  const credentials=r.authority.activeCredentialIDs(value.principal);if(credentials.length!==1)throw new Error('Exactly one active acceptance credential required');
  const credential=credentials[0]!,cose=r.login.verifiedPublicKey(credential);if(!cose)throw new Error('Acceptance credential unavailable');
- const mandateKey=createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();
- const suffix=randomUUID().replaceAll('-','');
- const ids={presenter:'dev_presenter_'+suffix,merchant:'dev_merchant_'+suffix,mandate:'dev_mandate_'+suffix,product:'dev_goods_'+suffix};
- // Ephemeral keys: the catalogue and disclosure are verified once on registration and the private halves are dropped.
- const presenterPair=generateKeyPairSync('ed25519'),merchantPair=generateKeyPairSync('ed25519');
- r.engine.registerIdentity(ids.presenter,presenterPair.publicKey.export({type:'spki',format:'pem'}).toString());
- r.engine.registerIdentity(ids.merchant,merchantPair.publicKey.export({type:'spki',format:'pem'}).toString());
- r.engine.registerIdentity(ids.mandate,mandateKey);
- const config={version:'dev-acceptance-'+suffix,presenter:ids.presenter,products:{[ids.product]:{merchant:ids.merchant,maker:'dev_maker_'+suffix,ships:'dev_carrier_'+suffix,price:1200,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}}}};
- r.engine.registerConfig(config,sign(null,canonicalConfig(config),presenterPair.privateKey).toString('base64'));
- const disclosure={merchant:ids.merchant,product:null,version:'dev-acceptance-d1',items:[{label:'notice',value:'Development acceptance record. No goods are shipped and no payment is taken.'}]};
- r.engine.putDisclosure({...disclosure,signature:sign(null,canonicalDisclosure(disclosure),merchantPair.privateKey).toString('base64')});
- r.engine.mandates.importMandate({id:ids.mandate,household:value.household,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
- const offer=r.engine.createOffer({binding:'physical',household:value.household,purpose:'replenish',config_version:config.version,expires_at:at+DAY_MS,mandate:ids.mandate,price_band:null,giver:null,candidates:[{product:ids.product,quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
- await r.engine.present(offer.id,at);
- r.deliveries.record({offer:offer.id,carriage:550,code:'dev-acceptance',status:'delivered',now:at});
- r.engine.recoveries.collect({offer:offer.id,consumed:offer.candidates.map(v=>v.id),returned:[],at});
- r.engine.applyRecoveryTo(offer.id,at);
+ const mandate='dev_mandate_'+randomUUID().replaceAll('-','');
+ r.engine.registerIdentity(mandate,createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
+ r.engine.mandates.importMandate({id:mandate,household:value.household,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
+ const box=await presentBox(r,value.household,mandate,at);
  // Changing grants revokes the device's current session; it signs in again afterwards.
- r.authority.setPresenterGrants(value.principal,[ids.presenter]);
- r.authority.bindResource({kind:'mandate',id:ids.mandate},{household:value.household});
- r.authority.bindResource({kind:'offer',id:offer.id},{household:value.household,presenter:ids.presenter});
+ r.authority.setPresenterGrants(value.principal,[box.presenter]);
+ r.authority.bindResource({kind:'mandate',id:mandate},{household:value.household});
+ r.authority.bindResource({kind:'offer',id:box.offer},{household:value.household,presenter:box.presenter});
  // Binding derives its context from a live session. This one never leaves the locked unit and is revoked before commit.
  const internal=r.authority.createSessionAfterVerification(credential,at+60_000);
- try{r.bindings.bind(internal.token,ids.mandate);}finally{r.authority.revokeSession(internal.id);}
- const record:StatementAcceptance={presenter:ids.presenter,merchant:ids.merchant,mandate:ids.mandate,offer:offer.id,credential,createdAt:at};
+ try{r.bindings.bind(internal.token,mandate);}finally{r.authority.revokeSession(internal.id);}
+ const record:StatementAcceptance={...box,mandate,credential,createdAt:at};
  entries.set('statement',record as unknown as Acceptance);
- return {household:value.household,presenter:ids.presenter,mandate:ids.mandate,offer:offer.id};
+ return {household:value.household,presenter:box.presenter,mandate,offer:box.offer};
+}
+/**
+ * Trusted operator capability for repeated device checks (lost responses,
+ * offline approval). Adds one more box under the existing mandate and its
+ * binding. It refuses while the latest box is unsettled, so at most one
+ * statement waits. The grant moves to the new presenter, which revokes the
+ * device's session: the device signs in again before it sees the box.
+ */
+export async function prepareStatementBox(store:Store,c:MemberRuntimeConfig,now=Date.now){
+ const entries=checked(store,c),value=entries.get('current'),statement=statementEntry(entries);
+ if(!value||!statement)throw new Error('Statement acceptance not prepared');
+ // The engine owns the settlements map, and a PostgreSQL unit opens each namespace only once.
+ const at=now(),r=memberRuntime(store,c,()=>at);
+ if(!r.engine.settlement(statement.offer))throw new Error('Latest acceptance box is not settled');
+ if(!r.authority.matchesActivePrincipalScope(value.principal,value.household,[statement.presenter]))throw new Error('Acceptance principal changed or unavailable');
+ const box=await presentBox(r,value.household,statement.mandate,at);
+ r.authority.setPresenterGrants(value.principal,[box.presenter]);
+ r.authority.bindResource({kind:'offer',id:box.offer},{household:value.household,presenter:box.presenter});
+ entries.set('statement',{...statement,...box,createdAt:at} as unknown as Acceptance);
+ return {household:value.household,presenter:box.presenter,offer:box.offer};
 }
