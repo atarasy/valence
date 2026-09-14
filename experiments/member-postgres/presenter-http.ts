@@ -62,6 +62,11 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
  };
  const b=object(input);
  if(parts.length===1&&parts[0]==='self'&&method==='GET')return reply(200,{presenter});
+ // A shop needs its published catalogues back to compose a box after a restart; only its own are listed.
+ if(parts.length===1&&parts[0]==='configs'&&method==='GET'){
+  if(url.search)return reply(400,{error:'malformed',message:'this route takes no query'});
+  return reply(200,{configs:r.engine.configsForPresenter(presenter).map(c=>({version:c.version,presenter:c.presenter,products:c.products}))});
+ }
  if(parts.length===1&&parts[0]==='configs'&&method==='POST'){
   if(b.presenter!==presenter)return reply(403,{error:'presenter_mismatch',message:'a catalogue must name the presenter this credential belongs to'});
   return forward('/_presenter/configs',input);

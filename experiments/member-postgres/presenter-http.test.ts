@@ -44,6 +44,9 @@ test('a presenter credential publishes, presents, delivers and collects only its
  expect((await s.send('apr1_'+'x'.repeat(43),'/presenter/self')).status).toBe(401);
  expect((await s.send(s.tokenB,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(403);
  expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(201);
+ const listed=await (await s.send(s.tokenA,'/presenter/configs')).json() as {configs:{version:string;presenter:string;products:Record<string,unknown>}[]};
+ expect(listed.configs.map(c=>[c.version,c.presenter,Object.keys(c.products)])).toEqual([['a-1',s.a.presenter.id,['tea-a']]]);
+ expect(await (await s.send(s.tokenB,'/presenter/configs')).json()).toEqual({configs:[]});
  expect((await s.send(s.tokenB,'/presenter/disclosures',s.a.disclosure())).status).toBe(403);
  expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
  expect((await s.send(s.tokenB,'/presenter/offers',s.offerBody('a-1','tea-a'))).status).toBe(403);
