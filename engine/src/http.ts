@@ -197,6 +197,12 @@ async function body(request: Request): Promise<unknown> {
   }
 }
 
+/** §14. The field each keyed list is stored under, which a store binds as its key. */
+const ROW_KEYS = [
+  ["offers", "id"], ["settlements", "offer"], ["notes", "candidate"], ["lineage", "id"],
+  ["collections", "offer"], ["mandates", "id"], ["deliveries", "offer"],
+] as const;
+
 /** §14. The fields of a node export that hold lists, each written row by row. */
 const LISTS_A_NODE_CARRIES = [
   "offers", "settlements", "notes", "lineage", "receipts", "recoveries",
@@ -1181,6 +1187,18 @@ async function route(
         const v = (body_ as Record<string, unknown>)[field];
         if (v !== undefined && (!Array.isArray(v) || v.some((row) => !row || typeof row !== "object"))) {
           throw badRequest("malformed", `${field} must be a list of rows`);
+        }
+      }
+      // A persistent store writes a row to memory and then binds its key to
+      // SQLite, so a key that is not a string fails after the row is already
+      // in memory: a partial import on every deployment that keeps a disk and
+      // on none of the suites, which run in memory. Measured by a refutation
+      // pass on 2026-09-15 with `settlements: [{ offer: { a: 1 } }]`.
+      for (const [field, key] of ROW_KEYS) {
+        for (const row of ((body_ as Record<string, unknown>)[field] as Record<string, unknown>[] | undefined) ?? []) {
+          if (typeof row[key] !== "string" || !row[key]) {
+            throw badRequest("malformed", `each row of ${field} needs a string ${key}`);
+          }
         }
       }
       for (const m of body_.mandates ?? []) {
