@@ -88,7 +88,13 @@ export class DeliveryRegister {
     return offers.map((o) => this.rows.get(o)).filter((d): d is Delivery => d !== undefined);
   }
 
-  importRows(rows: Delivery[]): void {
+  /**
+   * §14.2, question 51. What `importRows` refuses, decided before anything is
+   * written. Two rows for one offer in the same body meet each other as a row
+   * already held would, which is what writing them in order did.
+   */
+  checkRows(rows: readonly Delivery[]): void {
+    const carrying = new Map<string, Delivery>();
     for (const r of rows) {
       // §7.5b. **The same rule as `record`, because the same figure is at
       // stake.** This was a plain overwrite, and `POST /households/{id}/import`
@@ -97,14 +103,19 @@ export class DeliveryRegister {
       // the same night at 500 recorded, 800 refused through `record`, and 800
       // read back after an import. A figure the household was shown before it
       // signed must not move, whichever door it comes through.
-      const before = this.rows.get(r.offer);
+      const before = carrying.get(r.offer) ?? this.rows.get(r.offer);
       if (before && before.carriage !== r.carriage) {
         throw unprocessable(
           "carriage_fixed",
           `this offer's carriage was recorded as ${before.carriage} and is what the household was shown`
         );
       }
-      this.rows.set(r.offer, { ...r });
+      carrying.set(r.offer, r);
     }
+  }
+
+  importRows(rows: Delivery[]): void {
+    this.checkRows(rows);
+    for (const r of rows) this.rows.set(r.offer, { ...r });
   }
 }
