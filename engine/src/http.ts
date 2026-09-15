@@ -1166,6 +1166,17 @@ async function route(
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);
+      // §14.2, question 50. A confirmation names an offer this import carries.
+      // Unscoped, a body carrying only `confirmations` put a token on an offer
+      // the host already held, which unlocked the withdrawal §16.5 refuses and
+      // let the captured signature decide the set again. Checked before any
+      // write. Measured by a refutation pass on 2026-09-15.
+      const carried = new Set((body_.offers ?? []).map((o) => o.id));
+      for (const id of Object.keys(body_.confirmations ?? {})) {
+        if (!carried.has(id)) {
+          throw unprocessable("unscoped_confirmation", `a confirmation names ${id}, which this import does not carry`);
+        }
+      }
       for (const offer of body_.offers ?? []) engine.importOffer(offer, moving);
       for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
       for (const n of body_.notes ?? []) engine.importNote(n);
