@@ -114,8 +114,16 @@ export class PermissionLedger {
   }
 
   importFor(household: string, permissions: Permission[], queries: Query[]): void {
-    if (permissions.length) this.rows.set(household, [...permissions]);
-    if (queries.length) this.queries.set(household, [...queries]);
+    // §14.2, question 52. Adds what this host does not hold. Replacing the
+    // household's rows let a second import revoke nothing and erase everything.
+    const add = <T extends { id: string }>(map: Map<string, T[]>, rows: T[]) => {
+      const held = map.get(household) ?? [];
+      const ids = new Set(held.map((r) => r.id));
+      const added = rows.filter((r) => !ids.has(r.id));
+      if (added.length) map.set(household, [...held, ...added]);
+    };
+    add(this.rows, permissions);
+    add(this.queries, queries);
   }
 
   /**

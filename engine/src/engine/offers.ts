@@ -1765,7 +1765,12 @@ export class ValenceEngine {
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {
-    this.receipts.set(household, structuredClone(rows));
+    // §14.2, question 52. Adds what this host does not hold. It replaced the
+    // household's list, so a second import erased receipts the host recorded.
+    const held = this.receipts.get(household) ?? [];
+    const refs = new Set(held.map((r) => r.ref));
+    const added = rows.filter((r) => !refs.has(r.ref));
+    if (added.length) this.receipts.set(household, [...held, ...structuredClone(added)]);
   }
 
   // ---- reads ---------------------------------------------------------------

@@ -82,7 +82,7 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       // files them under the encoded segment. This assertion failed, reading
       // none: a household id that needs encoding lost its receipts on arrival.
       const { post, receipts } = host(open());
-      const r = await post(encodeURIComponent("h h"), { ...node({}), offers: [], collections: [], deliveries: [], receipts: [{ ref: "r-1", at: 1 }] });
+      const r = await post(encodeURIComponent("h h"), { ...node({}), offers: [], collections: [], deliveries: [], mandates: [], receipts: [{ ref: "r-1", at: 1 }] });
       expect(r.status).toBe(201);
       expect(receipts("h h")).toEqual([{ ref: "r-1", at: 1 }]);
     });

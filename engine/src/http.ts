@@ -197,6 +197,9 @@ async function body(request: Request): Promise<unknown> {
   }
 }
 
+/** §14.2, question 52. The field a household's list rows are told apart by when an import adds to them. */
+const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"]] as const;
+
 /** §14. The field each keyed list is stored under, which a store binds as its key. */
 const ROW_KEYS = [
   ["offers", "id"], ["settlements", "offer"], ["notes", "candidate"], ["lineage", "id"],
@@ -1202,6 +1205,18 @@ async function route(
           }
         }
       }
+      for (const o of body_.offers ?? []) {
+        if (!Array.isArray(o.candidates) || o.candidates.some((c) => !c || typeof c !== "object")) {
+          throw badRequest("malformed", "an offer's candidates must be a list of rows");
+        }
+      }
+      for (const [field, key] of MERGED_KEYS) {
+        for (const row of ((body_ as Record<string, unknown>)[field] as Record<string, unknown>[] | undefined) ?? []) {
+          if (typeof row[key] !== "string" || !row[key]) {
+            throw badRequest("malformed", `each row of ${field} needs a string ${key}`);
+          }
+        }
+      }
       for (const m of body_.mandates ?? []) {
         if (!m || !Array.isArray(m.co_signers)) throw badRequest("malformed", "a mandate's co_signers must be a list");
       }
@@ -1232,6 +1247,33 @@ async function route(
       // attested is enough to refuse, so that happened with nobody at fault.
       engine.checkImport(body_.offers ?? [], moving, body_.lineage ?? []);
       deliveries.checkRows(body_.deliveries ?? []);
+      // §14.2, question 52. Every row names the household on the path or an
+      // offer this body carries, and none replaces a row the host holds. Only
+      // offers and edges were bound before, so an import posted under one
+      // household replaced another's mandate, emptying its co-signers and
+      // lifting its ceiling, overwrote another's settlement, appended notes to
+      // another's candidates, and planted a delivery at any carriage for an
+      // offer not yet held. Measured by a refutation pass on 2026-09-15.
+      const carriedCandidates = new Set((body_.offers ?? []).flatMap((o) => o.candidates.map((c) => c.id)));
+      const notCarried = (what: string, id: string) =>
+        unprocessable("wrong_household", `${what} ${id} names no offer this import carries`);
+      for (const s_ of body_.settlements ?? []) if (!carried.has(s_.offer)) throw notCarried("settlement for", s_.offer);
+      for (const n of body_.notes ?? []) if (!carriedCandidates.has(n.candidate)) throw notCarried("note on", n.candidate);
+      for (const c of body_.collections ?? []) if (!carried.has(c.offer)) throw notCarried("collection for", c.offer);
+      for (const d of body_.deliveries ?? []) if (!carried.has(d.offer)) throw notCarried("delivery for", d.offer);
+      for (const m of body_.mandates ?? []) {
+        if (m.household !== moving) {
+          throw unprocessable("wrong_household", `mandate ${m.id} belongs to ${m.household}`);
+        }
+        if (engine.mandates.get(m.id)) {
+          throw conflict("bad_state", `mandate ${m.id} is already here, and an import does not change what this host holds`);
+        }
+      }
+      for (const r of body_.recoveries ?? []) {
+        if (r.household !== moving) {
+          throw unprocessable("wrong_household", `recovery ${r.id} belongs to ${r.household}`);
+        }
+      }
       const register = body_.confirmations ?? {};
       for (const offer of body_.offers ?? []) {
         engine.importOffer(offer, moving);
