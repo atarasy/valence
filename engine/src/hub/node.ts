@@ -183,7 +183,12 @@ export class RecoveryRegister {
 
   /** Clauses 43 and 52: the log leaves with the node, so it must also arrive with it. Clause 53 is what put a row in it. */
   importLog(household: string, records: RecoveryRecord[]): void {
-    if (records.length) this.log.set(household, [...records]);
+    // §14.2, question 52. Adds what this host does not hold, rather than
+    // replacing the household's log, which a second import could empty.
+    const held = this.log.get(household) ?? [];
+    const ids = new Set(held.map((r) => r.id));
+    const added = records.filter((r) => !ids.has(r.id));
+    if (added.length) this.log.set(household, [...held, ...added]);
   }
 
   logFor(household: string): RecoveryRecord[] {

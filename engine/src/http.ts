@@ -1,3 +1,4 @@
+import { type Mandate } from "./hub/mandates.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
@@ -196,6 +197,21 @@ async function body(request: Request): Promise<unknown> {
     throw badRequest("malformed", "body is not valid JSON");
   }
 }
+
+/** §7.1. The four kinds an edge can name. */
+const LINEAGE_KINDS = ["gift", "return", "regift", "thanks"];
+
+/** A serialisation that does not depend on key order, for telling a row from its own copy. */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+/** §14.2, question 52. The field a household's list rows are told apart by when an import adds to them. */
+const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"]] as const;
 
 /** §14. The field each keyed list is stored under, which a store binds as its key. */
 const ROW_KEYS = [
@@ -1202,6 +1218,51 @@ async function route(
           }
         }
       }
+      for (const o of body_.offers ?? []) {
+        if (!Array.isArray(o.candidates) || o.candidates.some((c) => !c || typeof c !== "object")) {
+          throw badRequest("malformed", "an offer's candidates must be a list of rows");
+        }
+      }
+      for (const [field, key] of MERGED_KEYS) {
+        const seen = new Set<string>();
+        for (const row of ((body_ as Record<string, unknown>)[field] as Record<string, unknown>[] | undefined) ?? []) {
+          const id = row[key];
+          if (typeof id !== "string" || !id) {
+            throw badRequest("malformed", `each row of ${field} needs a string ${key}`);
+          }
+          // §14.2, question 52. One body naming a row twice wrote both, and a
+          // revoked permission beside a live copy of itself reads as revoked
+          // and goes on granting. Measured by a refutation pass on 2026-09-15.
+          if (seen.has(id)) throw badRequest("malformed", `${field} names ${id} twice`);
+          seen.add(id);
+        }
+      }
+      // Clause 9, §14.2. A grant that arrives by a move meets what `grant`
+      // asks of one made here: an aggregate for a computation, no result form
+      // for a party, and never the household as its own grantee (clause 38).
+      for (const g of body_.permissions ?? []) {
+        if (typeof g.expires_at !== "number" || typeof g.grantee !== "string" || !g.grantee) {
+          throw badRequest("malformed", "a permission needs a grantee and an expiry");
+        }
+        if (!Array.isArray(g.scope) || g.scope.length === 0 || g.scope.some((f) => typeof f !== "string")) {
+          throw badRequest("malformed", "scope must name at least one field");
+        }
+        if (g.kind !== undefined && g.kind !== "party" && g.kind !== "computation") {
+          throw badRequest("malformed", "a grant is to a party or a computation");
+        }
+        if (g.grantee === moving) throw unprocessable("own_agent", "the household's own agent is the default recipient, not a grantee");
+        if (g.kind === "computation") {
+          if (g.result_form !== "aggregate") throw unprocessable("no_result_form", "a computation across nodes returns an aggregate and nothing else");
+        } else if (g.result_form !== null && g.result_form !== undefined) {
+          throw unprocessable("result_form_on_party", "a result form belongs to a computation across nodes, not to a party reading a field");
+        }
+      }
+      for (const e of body_.lineage ?? []) {
+        const strings = [e.from, e.to, e.product, e.merchant, e.maker, e.occasion, e.receipt, e.signature];
+        if (strings.some((v) => typeof v !== "string") || !LINEAGE_KINDS.includes(e.kind)) {
+          throw badRequest("malformed", "an edge's fields are strings and its kind is one of the four");
+        }
+      }
       for (const m of body_.mandates ?? []) {
         if (!m || !Array.isArray(m.co_signers)) throw badRequest("malformed", "a mandate's co_signers must be a list");
       }
@@ -1232,6 +1293,69 @@ async function route(
       // attested is enough to refuse, so that happened with nobody at fault.
       engine.checkImport(body_.offers ?? [], moving, body_.lineage ?? []);
       deliveries.checkRows(body_.deliveries ?? []);
+      // §14.2, question 52. Every row names the household on the path or an
+      // offer this body carries, and none replaces a row the host holds. Only
+      // offers and edges were bound before, so an import posted under one
+      // household replaced another's mandate, emptying its co-signers and
+      // lifting its ceiling, overwrote another's settlement, appended notes to
+      // another's candidates, and planted a delivery at any carriage for an
+      // offer not yet held. Measured by a refutation pass on 2026-09-15.
+      const carriedCandidates = new Set((body_.offers ?? []).flatMap((o) => o.candidates.map((c) => c.id)));
+      const notCarried = (what: string, id: string) =>
+        unprocessable("wrong_household", `${what} ${id} names no offer this import carries`);
+      for (const s_ of body_.settlements ?? []) if (!carried.has(s_.offer)) throw notCarried("settlement for", s_.offer);
+      for (const n of body_.notes ?? []) if (!carriedCandidates.has(n.candidate)) throw notCarried("note on", n.candidate);
+      for (const c of body_.collections ?? []) if (!carried.has(c.offer)) throw notCarried("collection for", c.offer);
+      for (const d of body_.deliveries ?? []) if (!carried.has(d.offer)) throw notCarried("delivery for", d.offer);
+      const seenMandates = new Set<string>();
+      const taken = new Set<string>((body_.mandates ?? []).map((m) => m.id));
+      for (const m of body_.mandates ?? []) {
+        if (m.household !== moving) {
+          throw unprocessable("wrong_household", `mandate ${m.id} belongs to ${m.household}`);
+        }
+        // The same mandate arriving again is not a change, which is what a hub
+        // that recorded the mandate before the node moved would send.
+        // §16.1. A move carries no signatures, so the host keeps whichever of
+        // the two it holds is the tighter, and refuses nothing: refusing here
+        // would let a mandate that arrived first block the household's move.
+        // The same shapes `record` requires of a mandate recorded here, so a
+        // move cannot carry a lapse of -5, a version of 1.5 or a missing
+        // ceiling that every later read then trips over.
+        const whole = (v: unknown, min: number, nullable = false) =>
+          (nullable && (v === null || v === undefined)) || (typeof v === "number" && Number.isInteger(v) && v >= min);
+        if (
+          !whole(m.lapses_at, 0) || !whole(m.version, 1) ||
+          !whole(m.ceiling_out_of_network, 0) || !whole(m.ceiling_daily, 0, true) ||
+          !whole(m.cooling_seconds, 0, true) || m.co_signers.some((k) => typeof k !== "string")
+        ) {
+          throw badRequest("malformed", "a mandate's ceilings, window, lapse and version are whole numbers");
+        }
+        if (seenMandates.has(m.id)) throw badRequest("malformed", `mandates names ${m.id} twice`);
+        seenMandates.add(m.id);
+        const held = engine.mandates.get(m.id);
+        // §16.1. A mandate does not change hands, which `record` refuses and
+        // this route did not: an import under one household named another's
+        // mandate id with tighter values and took the mandate with it, after
+        // which the household's own record was refused as the wrong household.
+        // Measured by a refutation pass on 2026-09-15.
+        if (held && held.household !== m.household) {
+          throw conflict("bad_state", `mandate ${m.id} belongs to ${held.household} on this host`);
+        }
+        // §16.1, §14.2. A held mandate is not replaced at all. Taking the
+        // tighter of the two read well and froze a household out: every value
+        // of `{ceiling 0, lapse 1, co_signers + a key nobody holds}` is a
+        // tightening, so it was taken unsigned, and undoing it is a loosening
+        // that needs the signature of a key `keyOf` never resolves. Measured
+        // by a refutation pass on 2026-09-15. A tightening made on another
+        // host does not travel, which is the cost of the rule; the household
+        // records it here with the signatures §16.1 asks for.
+        if (held) taken.delete(m.id);
+      }
+      for (const r of body_.recoveries ?? []) {
+        if (r.household !== moving) {
+          throw unprocessable("wrong_household", `recovery ${r.id} belongs to ${r.household}`);
+        }
+      }
       const register = body_.confirmations ?? {};
       for (const offer of body_.offers ?? []) {
         engine.importOffer(offer, moving);
@@ -1260,7 +1384,7 @@ async function route(
       // Measured by a refutation pass on 2026-09-12.
       engine.recoveries.importRows(body_.collections ?? []);
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
-      for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
+      for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
       deliveries.importRows(body_.deliveries ?? []);
       return json({ imported: true }, 201);
     }
