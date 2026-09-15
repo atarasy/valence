@@ -43,7 +43,7 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * `missing_notes` (question 46), for the same reason. A /4 export is still
  * read: it carries no missing items, and its rows import with none.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/5";
+export const EXPORT_FORMAT_VERSION = "valence-node/6";
 
 export type NodeExport = {
   format: string;

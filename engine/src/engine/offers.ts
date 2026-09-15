@@ -879,10 +879,14 @@ export class ValenceEngine {
         "a collection has recorded what is in the home; dispute the statement rather than withdrawing the decision"
       );
     }
+    // §16.5, §14, question 50, decided 2026-09-15. A set that arrived by a move
+    // with no confirmation recorded is refused here too: the register is what
+    // keeps §10.5 from being replayed once a set is taken back, so a set that
+    // lost it on the way stays as it is rather than reopening that replay.
     if ((this.confirmations.get(offer.id) ?? []).length === 0) {
       throw conflict(
         "not_withdrawable",
-        "this offer was resolved by a collection rather than by a signed set, so there is nothing to withdraw"
+        "no confirmation is recorded for this set, because a collection resolved it or it arrived without one, so there is nothing to withdraw"
       );
     }
     // §16.5, question 47, decided 2026-09-15. **A box past its expiry cannot

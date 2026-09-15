@@ -1160,11 +1160,48 @@ async function route(
       const body_ = (await body(request)) as NodeExport;
       // A /4 export predates question 46 and carries no `missing`; its rows
       // import with none, which is what it recorded.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/4")) {
+      // A /5 export may carry no `confirmations`, which §14 did not name until
+      // /6; an offer it does not name reads as unconfirmed (question 50).
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);
-      for (const offer of body_.offers ?? []) engine.importOffer(offer, moving);
+      // §14.2, question 50. A confirmation names an offer this import carries.
+      // Unscoped, a body carrying only `confirmations` put a token on an offer
+      // the host already held, which unlocked the withdrawal §16.5 refuses and
+      // let the captured signature decide the set again. Checked before any
+      // write. Measured by a refutation pass on 2026-09-15.
+      if (body_.offers !== undefined && !Array.isArray(body_.offers)) {
+        throw badRequest("malformed", "offers must be a list");
+      }
+      const shaped = body_.confirmations;
+      if (
+        shaped !== undefined &&
+        (shaped === null || typeof shaped !== "object" || Array.isArray(shaped) ||
+          Object.values(shaped).some((v) => !Array.isArray(v) || v.some((t) => typeof t !== "string")))
+      ) {
+        throw badRequest("malformed", "confirmations must map offer ids to lists of tokens");
+      }
+      const carried = new Set((body_.offers ?? []).map((o) => o.id));
+      for (const id of Object.keys(body_.confirmations ?? {})) {
+        if (!carried.has(id)) {
+          throw unprocessable("unscoped_confirmation", `a confirmation names ${id}, which this import does not carry`);
+        }
+      }
+      const register = body_.confirmations ?? {};
+      for (const offer of body_.offers ?? []) {
+        engine.importOffer(offer, moving);
+        // §10.5. Without this a move resets the one-use rule, and a confirmation
+        // captured on the sending host decides the moved offer on this one.
+        // Measured 2026-09-11 before the field existed. Each offer takes its
+        // register as it is written because this route is not atomic: an import
+        // refused at a later row left its offers written with no register, a
+        // set moved without one, and the retry was refused as unscoped or as
+        // already held (question 50, measured by a refutation pass 2026-09-15).
+        if (Object.hasOwn(register, offer.id)) {
+          engine.importConfirmations({ [offer.id]: register[offer.id]! });
+        }
+      }
       for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
       for (const n of body_.notes ?? []) engine.importNote(n);
       for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
@@ -1182,10 +1219,6 @@ async function route(
       // the move and the household's next box comes with a statement unsigned.
       // Measured by a refutation pass on 2026-09-12.
       engine.recoveries.importRows(body_.collections ?? []);
-      // §10.5. Without this a move resets the one-use rule, and a confirmation
-      // captured on the sending host decides the moved offer on this one.
-      // Measured 2026-09-11 before the field existed.
-      engine.importConfirmations(body_.confirmations ?? {});
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
       for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
       deliveries.importRows(body_.deliveries ?? []);
