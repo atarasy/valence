@@ -1171,13 +1171,29 @@ async function route(
       // the host already held, which unlocked the withdrawal §16.5 refuses and
       // let the captured signature decide the set again. Checked before any
       // write. Measured by a refutation pass on 2026-09-15.
+      if (body_.offers !== undefined && !Array.isArray(body_.offers)) {
+        throw badRequest("malformed", "offers must be a list");
+      }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
         if (!carried.has(id)) {
           throw unprocessable("unscoped_confirmation", `a confirmation names ${id}, which this import does not carry`);
         }
       }
-      for (const offer of body_.offers ?? []) engine.importOffer(offer, moving);
+      const register = body_.confirmations ?? {};
+      for (const offer of body_.offers ?? []) {
+        engine.importOffer(offer, moving);
+        // §10.5. Without this a move resets the one-use rule, and a confirmation
+        // captured on the sending host decides the moved offer on this one.
+        // Measured 2026-09-11 before the field existed. Each offer takes its
+        // register as it is written because this route is not atomic: an import
+        // refused at a later row left its offers written with no register, a
+        // set moved without one, and the retry was refused as unscoped or as
+        // already held (question 50, measured by a refutation pass 2026-09-15).
+        if (Object.hasOwn(register, offer.id)) {
+          engine.importConfirmations({ [offer.id]: register[offer.id]! });
+        }
+      }
       for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
       for (const n of body_.notes ?? []) engine.importNote(n);
       for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
@@ -1195,10 +1211,6 @@ async function route(
       // the move and the household's next box comes with a statement unsigned.
       // Measured by a refutation pass on 2026-09-12.
       engine.recoveries.importRows(body_.collections ?? []);
-      // §10.5. Without this a move resets the one-use rule, and a confirmation
-      // captured on the sending host decides the moved offer on this one.
-      // Measured 2026-09-11 before the field existed.
-      engine.importConfirmations(body_.confirmations ?? {});
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
       for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
       deliveries.importRows(body_.deliveries ?? []);
