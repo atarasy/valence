@@ -1160,7 +1160,9 @@ async function route(
       const body_ = (await body(request)) as NodeExport;
       // A /4 export predates question 46 and carries no `missing`; its rows
       // import with none, which is what it recorded.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/4")) {
+      // A /5 export may carry no `confirmations`, which §14 did not name until
+      // /6; an offer it does not name reads as unconfirmed (question 50).
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);
