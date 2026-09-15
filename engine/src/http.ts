@@ -197,6 +197,15 @@ async function body(request: Request): Promise<unknown> {
   }
 }
 
+/** A serialisation that does not depend on key order, for telling a row from its own copy. */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
 /** §14.2, question 52. The field a household's list rows are told apart by when an import adds to them. */
 const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"]] as const;
 
@@ -1261,13 +1270,18 @@ async function route(
       for (const n of body_.notes ?? []) if (!carriedCandidates.has(n.candidate)) throw notCarried("note on", n.candidate);
       for (const c of body_.collections ?? []) if (!carried.has(c.offer)) throw notCarried("collection for", c.offer);
       for (const d of body_.deliveries ?? []) if (!carried.has(d.offer)) throw notCarried("delivery for", d.offer);
+      const carryingMandates = new Map<string, unknown>();
       for (const m of body_.mandates ?? []) {
         if (m.household !== moving) {
           throw unprocessable("wrong_household", `mandate ${m.id} belongs to ${m.household}`);
         }
-        if (engine.mandates.get(m.id)) {
+        // The same mandate arriving again is not a change, which is what a hub
+        // that recorded the mandate before the node moved would send.
+        const held = carryingMandates.get(m.id) ?? engine.mandates.get(m.id);
+        if (held && stable(held) !== stable(m)) {
           throw conflict("bad_state", `mandate ${m.id} is already here, and an import does not change what this host holds`);
         }
+        carryingMandates.set(m.id, m);
       }
       for (const r of body_.recoveries ?? []) {
         if (r.household !== moving) {
@@ -1302,7 +1316,7 @@ async function route(
       // Measured by a refutation pass on 2026-09-12.
       engine.recoveries.importRows(body_.collections ?? []);
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
-      for (const m of body_.mandates ?? []) engine.mandates.importMandate(m);
+      for (const m of body_.mandates ?? []) if (!engine.mandates.get(m.id)) engine.mandates.importMandate(m);
       deliveries.importRows(body_.deliveries ?? []);
       return json({ imported: true }, 201);
     }

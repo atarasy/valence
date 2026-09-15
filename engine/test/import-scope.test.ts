@@ -8,6 +8,7 @@ import { DeliveryRegister } from "../src/hub/delivery.js";
 import { RecoveryRegister } from "../src/hub/node.js";
 import { PermissionLedger } from "../src/hub/permissions.js";
 import { Registry } from "../src/shared/registry.js";
+import { signer } from "./helpers.js";
 
 /**
  * §14.2, question 52, decided 2026-09-15. An import writes only rows that name
@@ -114,5 +115,52 @@ describe("§14.2: an import writes only its own household's rows", () => {
     const held = h.permissions.exportFor("h");
     expect(held.permissions.map((p) => p.id)).toEqual(["p-1", "p-2"]);
     expect(held.queries.map((q) => q.id)).toEqual(["q-1", "q-2"]);
+  });
+});
+
+describe("§14.2, §7.1: an imported edge", () => {
+  const edge = (from: string, to: string) => ({
+    from, to, product: "tea-a", merchant: "maker-a", maker: "made-by-tea", kind: "gift" as const, occasion: "", receipt: "r-1",
+  });
+
+  test("never replaces an edge this host holds, and the same edge arriving twice is not a refusal", async () => {
+    // NOTE (mutation check, 2026-09-15): import_edge_replaces_held. The import
+    // under h answered 201 and g's edge to x was gone. The signed bytes carry
+    // no id, so h could sign an edge of its own under g's edge's id.
+    const h = host();
+    const g = signer(); const hh = signer();
+    h.engine.registerIdentity("g", g.pem); h.engine.registerIdentity("h", hh.pem);
+    const theirs = { id: "e-1", ...edge("g", "x"), signature: g.sign(edge("g", "x")), attested: false, created_at: 1 };
+    expect((await h.post("g", { lineage: [theirs] })).status).toBe(201);
+    const forged = { id: "e-1", ...edge("h", "g"), signature: hh.sign(edge("h", "g")), attested: false, created_at: 1 };
+    expect((await h.post("h", { lineage: [forged] })).status).toBe(409);
+    expect(h.engine.edgesTouching("x").map((e) => e.from)).toEqual(["g"]);
+    // x moves too, carrying the same edge: that is not a change.
+    expect((await h.post("x", { lineage: [theirs] })).status).toBe(201);
+  });
+
+  test("takes its attestation from this host, not from the body", async () => {
+    // NOTE (mutation check, 2026-09-15): import_trusts_attested. The edge was
+    // stored as attested, which makes a product known to its recipient
+    // (§5.1) on the word of a key no root endorsed.
+    const h = host();
+    const k = signer();
+    h.engine.registerIdentity("h", k.pem);
+    const claimed = { id: "e-2", ...edge("h", "g"), signature: k.sign(edge("h", "g")), attested: true, created_at: 1 };
+    expect((await h.post("h", { lineage: [claimed] })).status).toBe(201);
+    expect(h.engine.edgesTouching("h")[0]?.attested).toBe(false);
+  });
+});
+
+describe("§14.2: a mandate that arrives again", () => {
+  test("unchanged, it is accepted and left as it was", async () => {
+    // NOTE (mutation check, 2026-09-15): import_mandate_identical_refused. The
+    // second import answered 409: a hub that recorded the mandate before the
+    // node moved could not move the node at all.
+    const h = host();
+    expect((await h.post("victim", { mandates: [mandate("victim")] })).status).toBe(201);
+    const reordered = Object.fromEntries(Object.entries(mandate("victim")).reverse());
+    expect((await h.post("victim", { mandates: [reordered] })).status).toBe(201);
+    expect(h.engine.mandates.get("m-victim")?.co_signers).toEqual(["cs"]);
   });
 });

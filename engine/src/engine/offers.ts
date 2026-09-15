@@ -2,7 +2,7 @@ import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnv
 import { randomUUID, createHash } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
-import { verifyEdge } from "../shared/lineage.js";
+import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
 import { canonicalStatement, disputable, needsStatement, statementLines } from "../shared/statement.js";
 import {
@@ -1729,7 +1729,7 @@ export class ValenceEngine {
   }
 
   /** §14.2, question 51. The same refusals as `importEdge`, written nowhere. */
-  checkImportedEdge(edge: LineageEdge, household: string): void {
+  checkImportedEdge(edge: LineageEdge, household: string, carrying?: Map<string, LineageEdge>): void {
     // Clause 22 holds on a move as it does on arrival: an edge is recognised
     // by the giver's attested key, and an edge that touches neither end of
     // the moving household is not this node's to carry.
@@ -1740,11 +1740,23 @@ export class ValenceEngine {
     if (!publicKey || !verifyEdge(edge, publicKey)) {
       throw unprocessable("bad_signature", `edge ${edge.id} does not verify`);
     }
+    // §14.2, question 52. An edge this host holds is never replaced. The
+    // signed bytes leave out the id, so an import under one household could
+    // sign an edge of its own under the id of another household's edge and
+    // erase it. The same edge arriving again, as it does when both of its
+    // households move, is the same edge and is not a refusal.
+    const held = carrying?.get(edge.id) ?? this.edges.get(edge.id);
+    if (held && !sameEdge(held, edge)) {
+      throw conflict("bad_state", `edge ${edge.id} is already here, and an import does not change what this host holds`);
+    }
   }
 
   importEdge(edge: LineageEdge, household: string): void {
     this.checkImportedEdge(edge, household);
-    this.edges.set(edge.id, edge);
+    if (this.edges.has(edge.id)) return;
+    // §7.1. Whether the giver's key is root-endorsed is this host's to say, as
+    // it is on arrival; the body's `attested` is the sending host's claim.
+    this.edges.set(edge.id, { ...edge, attested: this.rootEndorsed.has(edge.from) });
   }
 
   /**
@@ -1761,7 +1773,11 @@ export class ValenceEngine {
       carrying.offers.add(offer.id);
       for (const c of offer.candidates) carrying.candidates.add(c.id);
     }
-    for (const edge of edges) this.checkImportedEdge(edge, household);
+    const carryingEdges = new Map<string, LineageEdge>();
+    for (const edge of edges) {
+      this.checkImportedEdge(edge, household, carryingEdges);
+      carryingEdges.set(edge.id, edge);
+    }
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {
@@ -1903,4 +1919,9 @@ export class ValenceEngine {
       );
     }
   }
+}
+
+/** §14.2. Two records of one edge: the same signed bytes and the same signature. */
+function sameEdge(a: LineageEdge, b: LineageEdge): boolean {
+  return canonicalEdge(a).equals(canonicalEdge(b)) && a.signature === b.signature;
 }
