@@ -54,6 +54,23 @@ describe("§3: what a collection named each candidate (question 48)", () => {
   });
 });
 
+describe("a recovery row stored before question 46", () => {
+  test("reads with empty missing lists, so the offer view and the next box's hold check do not fail", async () => {
+    const made = makeEngine();
+    const offer = made.engine.createOffer(physical("house-legacy"));
+    await made.engine.present(offer.id);
+    made.deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
+    made.engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [] });
+    const rows = (made.engine.recoveries as unknown as { rows: Map<string, Record<string, unknown>> }).rows;
+    const { missing: _m, missing_notes: _n, ...legacy } = rows.get(offer.id)!;
+    rows.set(offer.id, legacy);
+    const read = made.engine.recoveries.for(offer.id)!;
+    expect([read.missing, read.missing_notes]).toEqual([[], {}]);
+    const next = made.engine.createOffer({ ...physical("house-legacy"), candidates: ["nori-a", "tea-a"].map((product, i) => ({ product, quantity: 1, predicted_conversion: 0.5, is_exploration: i === 0, given_by: null })) });
+    await expect(made.engine.present(next.id)).resolves.toMatchObject({ state: "presented" });
+  });
+});
+
 describe("§11.1: a physical line carries one (question 49)", () => {
   test("a physical offer with a quantity other than one is refused, and a digital one is not", () => {
     const made = makeEngine();

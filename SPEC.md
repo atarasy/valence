@@ -658,7 +658,7 @@ A product is eligible for the physical binding when it is ambient, keeps for at 
 
 **Eligibility is recorded on the presenter's catalogue and checked when the offer is created**, not when the goods are loaded. The presenter is the party that knows whether a product is ambient and how long it keeps, and creation is the last moment at which refusing costs nothing.
 
-**A physical line carries one of its product.** Question 49, decided 2026-09-15. `POST /offers` MUST refuse, with `422 physical_quantity`, a physical offer with a candidate whose `quantity` is not 1. A collection gives a line one verdict, so a line of two with one used was `consumed` and charged for both, and §5's rule of one line per product left no way to record the unused one. Recording part of a line is a change to the collection, the statement the household signs and the settlement, and it is not made here. A digital line may carry any quantity, because a digital line is decided whole.
+**A physical line carries one of its product.** Question 49, decided 2026-09-15. `POST /offers` MUST refuse, with `422 physical_quantity`, a physical offer with a candidate whose `quantity` is greater than 1 (a quantity below 1 is `400 malformed` for every binding). A collection gives a line one verdict, so a line of two with one used was `consumed` and charged for both, and §5's rule of one line per product left no way to record the unused one. Recording part of a line is a change to the collection, the statement the household signs and the settlement, and it is not made here. A digital line may carry any quantity, because a digital line is decided whole.
 
 The digital binding has no eligibility restriction.
 
