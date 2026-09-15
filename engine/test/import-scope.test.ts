@@ -242,3 +242,60 @@ describe("§14.2, clause 9: a grant's scope", () => {
     expect(h.permissions.exportFor("h").permissions).toEqual([]);
   });
 });
+
+describe("§14.2, §16.1: mandates that arrive by a move", () => {
+  test("a body naming one mandate twice is refused, and nothing is written", async () => {
+    // NOTE (mutation check, 2026-09-15): import_mandate_named_twice. The body
+    // answered 201 with no mandate stored at all, because the looser row took
+    // the tighter one out of the import with it: the household landed with no
+    // ceiling, no co-signers and no lapse.
+    const h = host();
+    const r = await h.post("victim", { mandates: [mandate("victim", { ceiling_out_of_network: 10, version: 5 }), mandate("victim", { ceiling_out_of_network: 1e9, co_signers: [], version: 6 })] });
+    expect(r.status).toBe(400);
+    expect(h.engine.mandates.get("m-victim")).toBeUndefined();
+  });
+
+  test("an older version does not replace a newer one", async () => {
+    // NOTE (mutation check, 2026-09-15): import_mandate_older_version_taken.
+    // The host was left at version 1, where a captured version could be
+    // recorded again at the version after it with its own co-signatures.
+    const h = host();
+    expect((await h.post("victim", { mandates: [mandate("victim", { version: 5 })] })).status).toBe(201);
+    expect((await h.post("victim", { mandates: [mandate("victim", { version: 1 })] })).status).toBe(201);
+    expect(h.engine.mandates.get("m-victim")?.version).toBe(5);
+  });
+
+  test("a lapse that is not a number is refused", async () => {
+    // NOTE (mutation check, 2026-09-15): import_mandate_fields_unchecked. The
+    // mandate imported with `lapses_at: "never"`, and nothing ever read it as
+    // lapsed.
+    const h = host();
+    expect((await h.post("victim", { mandates: [mandate("victim", { lapses_at: "never" })] })).status).toBe(400);
+    expect(h.engine.mandates.get("m-victim")).toBeUndefined();
+  });
+});
+
+describe("§7.1: two gifts that sign the same bytes", () => {
+  const body = { from: "h", to: "g", product: "tea-a", merchant: "maker-a", maker: "made-by-tea", kind: "gift" as const, occasion: "", receipt: "" };
+
+  test("are two edges, and a squatted id does not refuse the move", async () => {
+    // NOTE (mutation check, 2026-09-15): import_edge_scan_is_global made the
+    // second gift the first one again, and import_edge_squat_refused answered
+    // 409 for the third import, refusing a whole move over an id.
+    const h = host();
+    const k = signer();
+    h.engine.registerIdentity("h", k.pem);
+    const signed = k.sign(body);
+    const first = { id: "g-1", ...body, signature: signed, attested: false, created_at: 1 };
+    const second = { id: "g-2", ...body, signature: signed, attested: false, created_at: 2 };
+    expect((await h.post("h", { lineage: [first] })).status).toBe(201);
+    expect((await h.post("h", { lineage: [second] })).status).toBe(201);
+    expect(h.engine.edgesTouching("h").length).toBe(2);
+    // A third copy under an id already taken by another edge is filed beside
+    // it rather than refused.
+    const other = { ...body, receipt: "r-other" };
+    const third = { id: "g-1", ...other, signature: k.sign(other), attested: false, created_at: 3 };
+    expect((await h.post("h", { lineage: [third] })).status).toBe(201);
+    expect(h.engine.edgesTouching("h").length).toBe(3);
+  });
+});

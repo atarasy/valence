@@ -3,7 +3,6 @@ import pathlib
 # whose edge was re-keyed once carries the re-keyed copy while its counterparty
 # carries the original, and a host takes both: one squat forks that lineage.
 p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
-old = '    for (const held of [...(carrying?.values() ?? []), ...this.edges.values()]) {\n      if (sameEdge(held, edge)) return null;\n    }\n'
+old = '      if (held && sameEdge(held, edge)) return null;\n'
 assert s.count(old) == 1, "anchor drifted"
-s = s.replace(old, '', 1)
-p.write_text(s)
+p.write_text(s.replace(old, '', 1))

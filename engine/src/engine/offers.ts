@@ -1755,17 +1755,22 @@ export class ValenceEngine {
    */
   importedEdgeKey(edge: LineageEdge, carrying?: Map<string, LineageEdge>): string | null {
     const at = (id: string) => carrying?.get(id) ?? this.edges.get(id);
-    // The same edge is the same edge wherever it is filed. Without this, a
-    // household whose edge had been re-keyed once carried the re-keyed copy
-    // while its counterparty carried the original, and a fresh host took both:
-    // one squat forked that gift's lineage for good. Measured 2026-09-15.
-    for (const held of [...(carrying?.values() ?? []), ...this.edges.values()]) {
-      if (sameEdge(held, edge)) return null;
-    }
-    if (!at(edge.id)) return edge.id;
+    // The same edge is the same edge wherever this host filed it. A copy
+    // re-keyed on one host and the original on another are one edge, and
+    // taking both forked a gift's lineage; two separate gifts that happen to
+    // sign the same bytes are not the same edge, so only the id this edge
+    // arrived under and the ids derived from it are looked at. Both measured
+    // on 2026-09-15.
     const digest = createHash("sha256").update(canonicalEdge(edge)).update(edge.signature).digest("hex");
-    for (const candidate of [`${edge.id}~${digest.slice(0, 16)}`, `${edge.id}~${digest}`]) {
-      if (!at(candidate)) return candidate;
+    const base = edge.id.includes("~") ? edge.id.slice(0, edge.id.indexOf("~")) : edge.id;
+    const derived = (n: number) => (n === 0 ? base : `${base}~${digest.slice(0, 16)}${n === 1 ? "" : `~${n}`}`);
+    // A squat on every id this edge could take would otherwise refuse the
+    // move of the household that holds the edge, which is the same denial the
+    // collision itself was.
+    for (let n = 0; n < 32; n += 1) {
+      const held = at(derived(n));
+      if (held && sameEdge(held, edge)) return null;
+      if (!held) return derived(n);
     }
     throw conflict("bad_state", `edge ${edge.id} cannot be filed`);
   }

@@ -1,4 +1,4 @@
-import type { Mandate } from "./hub/mandates.js";
+import { loosens, type Mandate } from "./hub/mandates.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
@@ -196,24 +196,6 @@ async function body(request: Request): Promise<unknown> {
   } catch {
     throw badRequest("malformed", "body is not valid JSON");
   }
-}
-
-/**
- * §16.1, §14.2. Whether the first mandate gives the household less protection
- * than the second: a higher ceiling, a longer or absent cooling window, fewer
- * co-signers, or a later lapse.
- */
-function looser(a: Mandate, b: Mandate): boolean {
-  const ceiling = (m: Mandate, k: "ceiling_out_of_network" | "ceiling_daily") =>
-    (m[k] ?? Number.POSITIVE_INFINITY) as number;
-  const signers = new Set(b.co_signers);
-  return (
-    ceiling(a, "ceiling_out_of_network") > ceiling(b, "ceiling_out_of_network") ||
-    ceiling(a, "ceiling_daily") > ceiling(b, "ceiling_daily") ||
-    (a.cooling_seconds ?? 0) < (b.cooling_seconds ?? 0) ||
-    a.lapses_at > b.lapses_at ||
-    [...signers].some((s) => !a.co_signers.includes(s))
-  );
 }
 
 /** §7.1. The four kinds an edge can name. */
@@ -1325,7 +1307,7 @@ async function route(
       for (const n of body_.notes ?? []) if (!carriedCandidates.has(n.candidate)) throw notCarried("note on", n.candidate);
       for (const c of body_.collections ?? []) if (!carried.has(c.offer)) throw notCarried("collection for", c.offer);
       for (const d of body_.deliveries ?? []) if (!carried.has(d.offer)) throw notCarried("delivery for", d.offer);
-      const carryingMandates = new Map<string, Mandate>();
+      const seenMandates = new Set<string>();
       const taken = new Set<string>((body_.mandates ?? []).map((m) => m.id));
       for (const m of body_.mandates ?? []) {
         if (m.household !== moving) {
@@ -1336,9 +1318,24 @@ async function route(
         // §16.1. A move carries no signatures, so the host keeps whichever of
         // the two it holds is the tighter, and refuses nothing: refusing here
         // would let a mandate that arrived first block the household's move.
-        const held = carryingMandates.get(m.id) ?? engine.mandates.get(m.id);
-        if (held && looser(m, held)) taken.delete(m.id);
-        else carryingMandates.set(m.id, m);
+        if (
+          typeof m.lapses_at !== "number" || typeof m.version !== "number" ||
+          (m.ceiling_out_of_network !== null && typeof m.ceiling_out_of_network !== "number") ||
+          (m.ceiling_daily !== null && typeof m.ceiling_daily !== "number") ||
+          (m.cooling_seconds !== null && typeof m.cooling_seconds !== "number") ||
+          m.co_signers.some((k) => typeof k !== "string")
+        ) {
+          throw badRequest("malformed", "a mandate's ceilings, window, lapse and version are numbers");
+        }
+        if (seenMandates.has(m.id)) throw badRequest("malformed", `mandates names ${m.id} twice`);
+        seenMandates.add(m.id);
+        const held = engine.mandates.get(m.id);
+        // §16.1. A move carries no signatures, so the host keeps whichever of
+        // the two it holds is the tighter, and an older version does not
+        // replace a newer one, which would put a captured version back in
+        // play. Refusing instead would let a mandate that arrived first block
+        // the household's move.
+        if (held && (loosens(held, m) || m.version < held.version)) taken.delete(m.id);
       }
       for (const r of body_.recoveries ?? []) {
         if (r.household !== moving) {
