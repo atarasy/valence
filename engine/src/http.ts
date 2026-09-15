@@ -1,3 +1,4 @@
+import type { Mandate } from "./hub/mandates.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
@@ -195,6 +196,24 @@ async function body(request: Request): Promise<unknown> {
   } catch {
     throw badRequest("malformed", "body is not valid JSON");
   }
+}
+
+/**
+ * §16.1, §14.2. Whether the first mandate gives the household less protection
+ * than the second: a higher ceiling, a longer or absent cooling window, fewer
+ * co-signers, or a later lapse.
+ */
+function looser(a: Mandate, b: Mandate): boolean {
+  const ceiling = (m: Mandate, k: "ceiling_out_of_network" | "ceiling_daily") =>
+    (m[k] ?? Number.POSITIVE_INFINITY) as number;
+  const signers = new Set(b.co_signers);
+  return (
+    ceiling(a, "ceiling_out_of_network") > ceiling(b, "ceiling_out_of_network") ||
+    ceiling(a, "ceiling_daily") > ceiling(b, "ceiling_daily") ||
+    (a.cooling_seconds ?? 0) < (b.cooling_seconds ?? 0) ||
+    a.lapses_at > b.lapses_at ||
+    [...signers].some((s) => !a.co_signers.includes(s))
+  );
 }
 
 /** §7.1. The four kinds an edge can name. */
@@ -1243,6 +1262,12 @@ async function route(
         if (typeof g.expires_at !== "number" || typeof g.grantee !== "string" || !g.grantee) {
           throw badRequest("malformed", "a permission needs a grantee and an expiry");
         }
+        if (!Array.isArray(g.scope) || g.scope.length === 0 || g.scope.some((f) => typeof f !== "string")) {
+          throw badRequest("malformed", "scope must name at least one field");
+        }
+        if (g.kind !== undefined && g.kind !== "party" && g.kind !== "computation") {
+          throw badRequest("malformed", "a grant is to a party or a computation");
+        }
         if (g.grantee === moving) throw unprocessable("own_agent", "the household's own agent is the default recipient, not a grantee");
         if (g.kind === "computation") {
           if (g.result_form !== "aggregate") throw unprocessable("no_result_form", "a computation across nodes returns an aggregate and nothing else");
@@ -1300,20 +1325,20 @@ async function route(
       for (const n of body_.notes ?? []) if (!carriedCandidates.has(n.candidate)) throw notCarried("note on", n.candidate);
       for (const c of body_.collections ?? []) if (!carried.has(c.offer)) throw notCarried("collection for", c.offer);
       for (const d of body_.deliveries ?? []) if (!carried.has(d.offer)) throw notCarried("delivery for", d.offer);
-      const carryingMandates = new Map<string, unknown>();
+      const carryingMandates = new Map<string, Mandate>();
+      const taken = new Set<string>((body_.mandates ?? []).map((m) => m.id));
       for (const m of body_.mandates ?? []) {
         if (m.household !== moving) {
           throw unprocessable("wrong_household", `mandate ${m.id} belongs to ${m.household}`);
         }
         // The same mandate arriving again is not a change, which is what a hub
         // that recorded the mandate before the node moved would send.
-        const held = (carryingMandates.get(m.id) ?? engine.mandates.get(m.id)) as { version?: number } | undefined;
-        // A host holding a later version keeps it: the move carries no
-        // signatures, and §16.1 gives a version its own.
-        if (held && stable(held) !== stable(m) && (held.version ?? 0) < (m.version ?? 0)) {
-          throw conflict("bad_state", `mandate ${m.id} is already here, and an import does not change what this host holds`);
-        }
-        carryingMandates.set(m.id, m);
+        // §16.1. A move carries no signatures, so the host keeps whichever of
+        // the two it holds is the tighter, and refuses nothing: refusing here
+        // would let a mandate that arrived first block the household's move.
+        const held = carryingMandates.get(m.id) ?? engine.mandates.get(m.id);
+        if (held && looser(m, held)) taken.delete(m.id);
+        else carryingMandates.set(m.id, m);
       }
       for (const r of body_.recoveries ?? []) {
         if (r.household !== moving) {
@@ -1348,7 +1373,7 @@ async function route(
       // Measured by a refutation pass on 2026-09-12.
       engine.recoveries.importRows(body_.collections ?? []);
       permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
-      for (const m of body_.mandates ?? []) if (!engine.mandates.get(m.id)) engine.mandates.importMandate(m);
+      for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
       deliveries.importRows(body_.deliveries ?? []);
       return json({ imported: true }, 201);
     }

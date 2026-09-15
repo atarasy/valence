@@ -1755,13 +1755,19 @@ export class ValenceEngine {
    */
   importedEdgeKey(edge: LineageEdge, carrying?: Map<string, LineageEdge>): string | null {
     const at = (id: string) => carrying?.get(id) ?? this.edges.get(id);
-    const held = at(edge.id);
-    if (!held) return edge.id;
-    if (sameEdge(held, edge)) return null;
-    const derived = `${edge.id}~${createHash("sha256").update(canonicalEdge(edge)).update(edge.signature).digest("hex").slice(0, 16)}`;
-    const there = at(derived);
-    if (there && sameEdge(there, edge)) return null;
-    return derived;
+    // The same edge is the same edge wherever it is filed. Without this, a
+    // household whose edge had been re-keyed once carried the re-keyed copy
+    // while its counterparty carried the original, and a fresh host took both:
+    // one squat forked that gift's lineage for good. Measured 2026-09-15.
+    for (const held of [...(carrying?.values() ?? []), ...this.edges.values()]) {
+      if (sameEdge(held, edge)) return null;
+    }
+    if (!at(edge.id)) return edge.id;
+    const digest = createHash("sha256").update(canonicalEdge(edge)).update(edge.signature).digest("hex");
+    for (const candidate of [`${edge.id}~${digest.slice(0, 16)}`, `${edge.id}~${digest}`]) {
+      if (!at(candidate)) return candidate;
+    }
+    throw conflict("bad_state", `edge ${edge.id} cannot be filed`);
   }
 
   importEdge(edge: LineageEdge, household: string): void {

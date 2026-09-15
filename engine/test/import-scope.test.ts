@@ -53,7 +53,7 @@ describe("§14.2: an import writes only its own household's rows", () => {
 
   test("a mandate this host already holds is not replaced, even by its own household", async () => {
     // NOTE (mutation check, 2026-09-15): import_mandate_replaces_held. The
-    // later version was written and the co-signers were gone.
+    // looser version was written and the co-signers were gone.
     //
     // A version this host already has the equal of is kept as it is; a later
     // version is refused outright, because loosening needs the co-signers
@@ -63,9 +63,15 @@ describe("§14.2: an import writes only its own household's rows", () => {
     const same = await h.post("victim", { mandates: [mandate("victim", { co_signers: [] })] });
     expect(same.status).toBe(201);
     expect(h.engine.mandates.get("m-victim")?.co_signers).toEqual(["cs"]);
-    const later = await h.post("victim", { mandates: [mandate("victim", { co_signers: [], version: 4 })] });
-    expect(later.status).toBe(409);
-    expect(h.engine.mandates.get("m-victim")?.co_signers).toEqual(["cs"]);
+    // A later version that gives the household less is kept out without a
+    // refusal, because refusing would let a mandate that arrived first block
+    // the household's move. A later version that gives it more is taken.
+    const looser = await h.post("victim", { mandates: [mandate("victim", { co_signers: [], version: 4 })] });
+    expect(looser.status).toBe(201);
+    expect(h.engine.mandates.get("m-victim")).toMatchObject({ co_signers: ["cs"], version: 3 });
+    const tighter = await h.post("victim", { mandates: [mandate("victim", { co_signers: ["cs", "cs2"], ceiling_out_of_network: 500, version: 4 })] });
+    expect(tighter.status).toBe(201);
+    expect(h.engine.mandates.get("m-victim")).toMatchObject({ co_signers: ["cs", "cs2"], ceiling_out_of_network: 500, version: 4 });
   });
 
   test("a settlement, a note, a collection and a delivery must name an offer the import carries", async () => {
@@ -106,13 +112,13 @@ describe("§14.2: an import writes only its own household's rows", () => {
     const first = {
       receipts: [{ ref: "r-1", at: 1 }],
       recoveries: [{ id: "l-1", household: "h", initiated_by: "x", at: 1, notified: [] }],
-      permissions: [{ id: "p-1", kind: "party", grantee: "g", scope: [], purpose: "p", expires_at: 9e15, asked_from: "a", granted_at: 1, result_form: null, revoked_at: null }],
+      permissions: [{ id: "p-1", kind: "party", grantee: "g", scope: ["kept_as"], purpose: "p", expires_at: 9e15, asked_from: "a", granted_at: 1, result_form: null, revoked_at: null }],
       queries: [{ id: "q-1", asked_by: "g", product: "p", answered: false, at: 1 }],
     };
     const second = {
       receipts: [{ ref: "r-2", at: 2 }],
       recoveries: [{ id: "l-2", household: "h", initiated_by: "x", at: 2, notified: [] }],
-      permissions: [{ id: "p-2", kind: "party", grantee: "g", scope: [], purpose: "p", expires_at: 9e15, asked_from: "a", granted_at: 2, result_form: null, revoked_at: null }],
+      permissions: [{ id: "p-2", kind: "party", grantee: "g", scope: ["kept_as"], purpose: "p", expires_at: 9e15, asked_from: "a", granted_at: 2, result_form: null, revoked_at: null }],
       queries: [{ id: "q-2", asked_by: "g", product: "p", answered: false, at: 2 }],
     };
     expect((await h.post("h", first)).status).toBe(201);
@@ -148,8 +154,12 @@ describe("§14.2, §7.1: an imported edge", () => {
     const mine = h.engine.edgesTouching("h");
     expect(mine.length).toBe(1);
     expect(mine[0]!.id.startsWith("e-1~")).toBe(true);
-    // x moves too, carrying the same edge: that is not a change.
+    // x moves too, carrying the same edge: that is not a change, and the same
+    // edge is not filed twice because one of the two copies was re-keyed.
+    // NOTE (mutation check, 2026-09-15): import_edge_filed_twice. x held two
+    // rows for one gift.
     expect((await h.post("x", { lineage: [theirs] })).status).toBe(201);
+    expect(h.engine.edgesTouching("x").length).toBe(1);
   });
 
   test("takes its attestation from this host, not from the body", async () => {
@@ -180,7 +190,7 @@ describe("§14.2: a mandate that arrives again", () => {
 
 describe("§14.2, clause 9: what an import may not carry", () => {
   const grant = (over: Record<string, unknown> = {}) => ({
-    id: "p-1", kind: "party", grantee: "g", scope: [], purpose: "p", expires_at: 9e15,
+    id: "p-1", kind: "party", grantee: "g", scope: ["kept_as"], purpose: "p", expires_at: 9e15,
     asked_from: "a", granted_at: 1, result_form: null, revoked_at: null, ...over,
   });
 
@@ -216,5 +226,19 @@ describe("§14.2, clause 9: what an import may not carry", () => {
     const listed = { id: "e-9", ...body, kind: ["gift"], signature: k.sign(body), attested: false, created_at: 1 };
     expect((await h.post("h", { lineage: [listed] })).status).toBe(400);
     expect(h.engine.edgesTouching("h")).toEqual([]);
+  });
+});
+
+describe("§14.2, clause 9: a grant's scope", () => {
+  test("a grant whose scope names nothing is refused", async () => {
+    // NOTE (mutation check, 2026-09-15): import_grant_without_scope. The
+    // import answered 201, and reading that household's permissions then
+    // raised for good: `grant` refuses the same row, and no revocation can
+    // remove one that arrived by a move.
+    const h = host();
+    const grant = { id: "p-9", kind: "party", grantee: "g", purpose: "p", expires_at: 9e15, asked_from: "a", granted_at: 1, result_form: null, revoked_at: null };
+    expect((await h.post("h", { permissions: [{ ...grant, scope: [] }] })).status).toBe(400);
+    expect((await h.post("h", { permissions: [{ ...grant, scope: "kept_as" }] })).status).toBe(400);
+    expect(h.permissions.exportFor("h").permissions).toEqual([]);
   });
 });
