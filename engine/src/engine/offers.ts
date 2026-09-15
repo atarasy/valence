@@ -873,6 +873,13 @@ export class ValenceEngine {
     // Before this, the guard refused only a box with no confirmation at all,
     // which caught a box resolved purely by a collection and missed one the
     // household had also signed a line of.
+    //
+    // That older guard, below, is now reached by no input: a box decided with
+    // no confirmation was decided by a collection, which the guard here
+    // refuses, or by the deadline, which only runs past expiry and the
+    // question 47 guard refuses. It stays so that loosening either of those
+    // does not silently reopen question 43. Its mutation was retired on
+    // 2026-09-15 for having nothing left to catch.
     if (offer.binding === "physical" && this.recoveries.for(offer.id)?.collected_at != null) {
       throw conflict(
         "not_withdrawable",
