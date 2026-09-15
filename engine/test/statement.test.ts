@@ -192,11 +192,13 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
    * found no `consumed` line, asked for no statement, and charged nothing. The
    * receipt said the goods came back unopened.
    */
-  const cooling = (seconds: number | null) => ({
+  // §16, question 54. A mandate reaches only its own household's offers, so
+  // the fixture names the household the test makes its offer for.
+  const cooling = (seconds: number | null, household = "house-s") => ({
     async get() {
       return {
         id: "mandate-1",
-        household: "house-s",
+        household,
         ceiling_out_of_network: 1_000_000,
         ceiling_daily: null,
         cooling_seconds: seconds,
@@ -238,7 +240,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
 
   test("what the household signed is still taken back", async () => {
     const { engine } = makeEngine();
-    engine.readMandatesFrom(cooling(3600));
+    engine.readMandatesFrom(cooling(3600, "house-mix"));
     const offer = engine.createOffer(physical("house-mix", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(offer.id);
     await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
