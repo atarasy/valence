@@ -33,7 +33,9 @@ function host(store: Store) {
     collection: engine.recoveries.for("o-1") !== undefined,
     delivery: deliveries.forHousehold(["o-1"]).length > 0,
   });
-  return { post, holds };
+  const receipts = (household: string) =>
+    (engine as unknown as { receipts: Map<string, unknown> }).receipts.get(household);
+  return { post, holds, receipts };
 }
 
 const offer = { id: "o-1", household: "h", candidates: [{ id: "c-1" }] };
@@ -54,12 +56,35 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       // NOTE (mutation check, 2026-09-15): import_row_keys_unchecked. On disk
       // the import answered 500 with the offer written; in memory it answered
       // 201. Either way this assertion failed.
-      for (const extra of [{ settlements: [{ offer: { a: 1 } }] }, { mandates: [{ id: ["m"], co_signers: [] }] }]) {
+      const bad: Record<string, unknown>[] = [
+        { offers: [{ ...offer, id: { a: 1 } }] },
+        { settlements: [{ offer: { a: 1 } }] },
+        { notes: [{ candidate: 5, author: "a", text: "t", shared_with: [], created_at: 1 }] },
+        { lineage: [{ id: null, from: "h", to: "g" }] },
+        { collections: [{ offer: [], due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [] }] },
+        { mandates: [{ id: ["m"], co_signers: [] }] },
+        { deliveries: [{ offer: true, carriage: 1, code: "c", status: "placed", updated_at: 1 }] },
+        // A lone surrogate is a string and binds, and bun:sqlite reads it back
+        // as the empty string, so rows written under two such keys collapse
+        // into one on the next start. Measured 2026-09-15.
+        { settlements: [{ offer: "\ud800" }] },
+      ];
+      for (const extra of bad) {
         const { post, holds } = host(open());
         const r = await post("h", node(extra));
-        expect(r.status).toBe(400);
+        expect([Object.keys(extra)[0], r.status]).toEqual([Object.keys(extra)[0], 400]);
         expect(holds()).toEqual(nothing);
       }
+    });
+
+    test("receipts arrive under the household, not under the path as it was written", async () => {
+      // NOTE (mutation check, 2026-09-15): import_receipts_use_the_raw_path
+      // files them under the encoded segment. This assertion failed, reading
+      // none: a household id that needs encoding lost its receipts on arrival.
+      const { post, receipts } = host(open());
+      const r = await post(encodeURIComponent("h h"), { ...node({}), offers: [], collections: [], deliveries: [], receipts: [{ ref: "r-1", at: 1 }] });
+      expect(r.status).toBe(201);
+      expect(receipts("h h")).toEqual([{ ref: "r-1", at: 1 }]);
     });
 
     test("an offer named twice in one body", async () => {

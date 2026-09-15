@@ -1196,7 +1196,8 @@ async function route(
       // pass on 2026-09-15 with `settlements: [{ offer: { a: 1 } }]`.
       for (const [field, key] of ROW_KEYS) {
         for (const row of ((body_ as Record<string, unknown>)[field] as Record<string, unknown>[] | undefined) ?? []) {
-          if (typeof row[key] !== "string" || !row[key]) {
+          const id = row[key];
+          if (typeof id !== "string" || !id || !id.isWellFormed()) {
             throw badRequest("malformed", `each row of ${field} needs a string ${key}`);
           }
         }
@@ -1244,7 +1245,7 @@ async function route(
       for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
       for (const n of body_.notes ?? []) engine.importNote(n);
       for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
-      engine.importReceipts(parts[1], body_.receipts ?? []);
+      engine.importReceipts(moving, body_.receipts ?? []);
       // Until 2026-09-09 the loop stopped above. The export already carried the
       // recovery log, and this end dropped it; the ledger, the queries and the
       // mandates were in neither end. A member who moved kept their offers and

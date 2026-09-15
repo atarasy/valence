@@ -3,7 +3,7 @@ import pathlib
 # so on a persistent store the key fails to bind after the row is in memory
 # and the import is left half written.
 p = pathlib.Path('src/http.ts'); s = p.read_text()
-old = '          if (typeof row[key] !== "string" || !row[key]) {\n'
+old = '          if (typeof id !== "string" || !id || !id.isWellFormed()) {\n'
 assert s.count(old) == 1, "anchor drifted"
 s = s.replace(old, '          if (false) {\n', 1)
 p.write_text(s)
