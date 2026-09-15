@@ -1174,6 +1174,14 @@ async function route(
       if (body_.offers !== undefined && !Array.isArray(body_.offers)) {
         throw badRequest("malformed", "offers must be a list");
       }
+      const shaped = body_.confirmations;
+      if (
+        shaped !== undefined &&
+        (shaped === null || typeof shaped !== "object" || Array.isArray(shaped) ||
+          Object.values(shaped).some((v) => !Array.isArray(v) || v.some((t) => typeof t !== "string")))
+      ) {
+        throw badRequest("malformed", "confirmations must map offer ids to lists of tokens");
+      }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
         if (!carried.has(id)) {
