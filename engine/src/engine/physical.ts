@@ -194,7 +194,13 @@ export class RecoveryLedger {
   }
 
   for(offer: string): Recovery | undefined {
-    return this.rows.get(offer);
+    const row = this.rows.get(offer);
+    // A row collected before question 46 was stored with no `missing` list or
+    // notes, and a store that outlived the change holds such rows. Readers
+    // assumed both: the offer views and `present`'s hold check each failed on
+    // one in the development store on 2026-09-15.
+    if (!row || (row.missing !== undefined && row.missing_notes !== undefined)) return row;
+    return { ...row, missing: row.missing ?? [], missing_notes: row.missing_notes ?? {} };
   }
 
   /**

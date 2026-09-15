@@ -12,11 +12,16 @@ TESTS="${ATARAXIA_TESTS:-$HOME/Documents/GitHub/ataraxia/tests}"
 PORT="${PORT:-8788}"
 BASE="http://localhost:${PORT}"
 
-if lsof -ti ":${PORT}" >/dev/null 2>&1; then
-  echo "port ${PORT} is already in use; a previous run is still listening" >&2
-  echo "stop it, or set PORT to a free one" >&2
-  exit 1
-fi
+# Four servers listen, on PORT and the next three hundreds. A stray listener on
+# a side port answers the role-split probes instead of this run's server, which
+# turns them red or, worse, passes them against the wrong role.
+for offset in 0 100 200 300; do
+  if lsof -ti ":$((PORT + offset))" >/dev/null 2>&1; then
+    echo "port $((PORT + offset)) is already in use; a previous run is still listening" >&2
+    echo "stop it, or set PORT to a free one" >&2
+    exit 1
+  fi
+done
 
 if [ ! -d "$TESTS" ]; then
   echo "conformance suites not found at $TESTS" >&2
