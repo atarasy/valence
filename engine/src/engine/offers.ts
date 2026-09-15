@@ -17,6 +17,7 @@ import {
 } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
+import type { Mandate } from "../hub/mandates.js";
 import { LocalDay, type DaySource } from "./day-source.js";
 import { type DeliverySource } from "./delivery-source.js";
 import type { Delivery } from "../hub/delivery.js";
@@ -160,6 +161,19 @@ export class ValenceEngine {
   readonly householdLedger: HouseholdLedger;
   private daySource: DaySource;
   private deliverySource: DeliverySource;
+
+  /**
+   * §16, question 54. The mandate an offer names, read as the offer's
+   * household's. Nothing bound the two until 2026-09-16: an offer named any
+   * mandate id and read its ceilings, its cooling window and its co-signers
+   * through it, whoever they belonged to. A mandate of another household is no
+   * mandate here, which §16.2 already says an unknown mandate is.
+   */
+  private async mandateFor(offer: Offer): Promise<Mandate | undefined> {
+    const mandate = await this.mandateSource.get(offer.mandate);
+    if (mandate && mandate.household !== offer.household) return undefined;
+    return mandate;
+  }
 
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
@@ -629,7 +643,7 @@ export class ValenceEngine {
     // record is left alone, because a deployment may carry mandates outside
     // this engine, and refusing every offer would be a gate rather than a
     // protection.
-    const mandate = await this.mandateSource.get(offer.mandate);
+    const mandate = await this.mandateFor(offer);
     if (mandate) {
       if (mandate.lapses_at <= now) {
         throw unprocessable("mandate_lapsed", `mandate ${offer.mandate} lapsed and was not renewed`);
@@ -904,7 +918,7 @@ export class ValenceEngine {
         "this box is past its expiry, so the signed set stands; what was kept is settled as kept"
       );
     }
-    const mandate = await this.mandateSource.get(offer.mandate);
+    const mandate = await this.mandateFor(offer);
     const cooling = mandate?.cooling_seconds ?? null;
     if (cooling === null) {
       throw unprocessable(
@@ -1164,7 +1178,7 @@ export class ValenceEngine {
     // §16.5 and §16.3. Both refusals name themselves: four refusals in this
     // section share a status code, and a `422` that says only "unprocessable"
     // is one a person cannot act on and a probe cannot tell from another.
-    const mandate = await this.mandateSource.get(offer.mandate);
+    const mandate = await this.mandateFor(offer);
     // §16.5, question 42, decided 2026-09-13. **A cooling window belongs to a
     // set the household signed and to nothing else.** §11 moves a box out of
     // `presented` when a collection resolves its last line, stamping
