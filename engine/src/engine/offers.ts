@@ -1740,23 +1740,37 @@ export class ValenceEngine {
     if (!publicKey || !verifyEdge(edge, publicKey)) {
       throw unprocessable("bad_signature", `edge ${edge.id} does not verify`);
     }
-    // §14.2, question 52. An edge this host holds is never replaced. The
-    // signed bytes leave out the id, so an import under one household could
-    // sign an edge of its own under the id of another household's edge and
-    // erase it. The same edge arriving again, as it does when both of its
-    // households move, is the same edge and is not a refusal.
-    const held = carrying?.get(edge.id) ?? this.edges.get(edge.id);
-    if (held && !sameEdge(held, edge)) {
-      throw conflict("bad_state", `edge ${edge.id} is already here, and an import does not change what this host holds`);
-    }
+  }
+
+  /**
+   * §14.2, question 52. Where an imported edge is written, or nothing when
+   * this host already holds it.
+   *
+   * The signed bytes leave out the id, so an import under one household can
+   * sign an edge of its own under the id of another household's edge. Writing
+   * it there erased that edge; refusing the import let one household squat an
+   * id and block another household's move, which is clause 52 the other way
+   * up. So a different edge under a held id is written under an id this host
+   * derives from the edge itself. Both measured, on 2026-09-15.
+   */
+  importedEdgeKey(edge: LineageEdge, carrying?: Map<string, LineageEdge>): string | null {
+    const at = (id: string) => carrying?.get(id) ?? this.edges.get(id);
+    const held = at(edge.id);
+    if (!held) return edge.id;
+    if (sameEdge(held, edge)) return null;
+    const derived = `${edge.id}~${createHash("sha256").update(canonicalEdge(edge)).update(edge.signature).digest("hex").slice(0, 16)}`;
+    const there = at(derived);
+    if (there && sameEdge(there, edge)) return null;
+    return derived;
   }
 
   importEdge(edge: LineageEdge, household: string): void {
     this.checkImportedEdge(edge, household);
-    if (this.edges.has(edge.id)) return;
+    const key = this.importedEdgeKey(edge);
+    if (key === null) return;
     // §7.1. Whether the giver's key is root-endorsed is this host's to say, as
     // it is on arrival; the body's `attested` is the sending host's claim.
-    this.edges.set(edge.id, { ...edge, attested: this.rootEndorsed.has(edge.from) });
+    this.edges.set(key, { ...edge, id: key, attested: this.rootEndorsed.has(edge.from) });
   }
 
   /**
@@ -1776,7 +1790,8 @@ export class ValenceEngine {
     const carryingEdges = new Map<string, LineageEdge>();
     for (const edge of edges) {
       this.checkImportedEdge(edge, household, carryingEdges);
-      carryingEdges.set(edge.id, edge);
+      const key = this.importedEdgeKey(edge, carryingEdges);
+      if (key !== null) carryingEdges.set(key, edge);
     }
   }
 

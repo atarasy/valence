@@ -197,6 +197,9 @@ async function body(request: Request): Promise<unknown> {
   }
 }
 
+/** §7.1. The four kinds an edge can name. */
+const LINEAGE_KINDS = ["gift", "return", "regift", "thanks"];
+
 /** A serialisation that does not depend on key order, for telling a row from its own copy. */
 function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
@@ -1220,10 +1223,37 @@ async function route(
         }
       }
       for (const [field, key] of MERGED_KEYS) {
+        const seen = new Set<string>();
         for (const row of ((body_ as Record<string, unknown>)[field] as Record<string, unknown>[] | undefined) ?? []) {
-          if (typeof row[key] !== "string" || !row[key]) {
+          const id = row[key];
+          if (typeof id !== "string" || !id) {
             throw badRequest("malformed", `each row of ${field} needs a string ${key}`);
           }
+          // §14.2, question 52. One body naming a row twice wrote both, and a
+          // revoked permission beside a live copy of itself reads as revoked
+          // and goes on granting. Measured by a refutation pass on 2026-09-15.
+          if (seen.has(id)) throw badRequest("malformed", `${field} names ${id} twice`);
+          seen.add(id);
+        }
+      }
+      // Clause 9, §14.2. A grant that arrives by a move meets what `grant`
+      // asks of one made here: an aggregate for a computation, no result form
+      // for a party, and never the household as its own grantee (clause 38).
+      for (const g of body_.permissions ?? []) {
+        if (typeof g.expires_at !== "number" || typeof g.grantee !== "string" || !g.grantee) {
+          throw badRequest("malformed", "a permission needs a grantee and an expiry");
+        }
+        if (g.grantee === moving) throw unprocessable("own_agent", "the household's own agent is the default recipient, not a grantee");
+        if (g.kind === "computation") {
+          if (g.result_form !== "aggregate") throw unprocessable("no_result_form", "a computation across nodes returns an aggregate and nothing else");
+        } else if (g.result_form !== null && g.result_form !== undefined) {
+          throw unprocessable("result_form_on_party", "a result form belongs to a computation across nodes, not to a party reading a field");
+        }
+      }
+      for (const e of body_.lineage ?? []) {
+        const strings = [e.from, e.to, e.product, e.merchant, e.maker, e.occasion, e.receipt, e.signature];
+        if (strings.some((v) => typeof v !== "string") || !LINEAGE_KINDS.includes(e.kind)) {
+          throw badRequest("malformed", "an edge's fields are strings and its kind is one of the four");
         }
       }
       for (const m of body_.mandates ?? []) {
@@ -1277,8 +1307,10 @@ async function route(
         }
         // The same mandate arriving again is not a change, which is what a hub
         // that recorded the mandate before the node moved would send.
-        const held = carryingMandates.get(m.id) ?? engine.mandates.get(m.id);
-        if (held && stable(held) !== stable(m)) {
+        const held = (carryingMandates.get(m.id) ?? engine.mandates.get(m.id)) as { version?: number } | undefined;
+        // A host holding a later version keeps it: the move carries no
+        // signatures, and §16.1 gives a version its own.
+        if (held && stable(held) !== stable(m) && (held.version ?? 0) < (m.version ?? 0)) {
           throw conflict("bad_state", `mandate ${m.id} is already here, and an import does not change what this host holds`);
         }
         carryingMandates.set(m.id, m);
