@@ -258,7 +258,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     // statement, not withdrawal.
     const made = makeEngine();
     const { engine, deliveries } = made;
-    engine.readMandatesFrom(cooling(3600));
+    engine.readMandatesFrom(cooling(3600, "house-mixed-withdrawal"));
     const offer = engine.createOffer(physical("house-mixed-withdrawal", [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(offer.id);
     deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
