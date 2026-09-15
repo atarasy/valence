@@ -12,7 +12,7 @@ p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 a = """    if ((this.confirmations.get(offer.id) ?? []).length === 0) {
       throw conflict(
         "not_withdrawable",
-        "this offer was resolved by a collection rather than by a signed set, so there is nothing to withdraw"
+        "no confirmation is recorded for this set, because a collection resolved it or it arrived without one, so there is nothing to withdraw"
       );
     }
 """
