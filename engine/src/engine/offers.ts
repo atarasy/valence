@@ -1762,7 +1762,11 @@ export class ValenceEngine {
     // arrived under and the ids derived from it are looked at. Both measured
     // on 2026-09-15.
     const digest = createHash("sha256").update(canonicalEdge(edge)).update(edge.signature).digest("hex");
-    const base = edge.id.includes("~") ? edge.id.slice(0, edge.id.indexOf("~")) : edge.id;
+    // Only a suffix this host could have written counts as one: an edge whose
+    // own id holds a tilde, which nobody signs or checks, was otherwise filed
+    // under the part before it and stayed renamed through every later move.
+    const derivedForm = /^(.*)~[0-9a-f]{16}(?:~\d+)?$/.exec(edge.id);
+    const base = derivedForm ? derivedForm[1]! : edge.id;
     const derived = (n: number) => (n === 0 ? base : `${base}~${digest.slice(0, 16)}${n === 1 ? "" : `~${n}`}`);
     // A squat on every id this edge could take would otherwise refuse the
     // move of the household that holds the edge, which is the same denial the

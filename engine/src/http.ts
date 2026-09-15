@@ -1318,18 +1318,29 @@ async function route(
         // §16.1. A move carries no signatures, so the host keeps whichever of
         // the two it holds is the tighter, and refuses nothing: refusing here
         // would let a mandate that arrived first block the household's move.
+        // The same shapes `record` requires of a mandate recorded here, so a
+        // move cannot carry a lapse of -5, a version of 1.5 or a missing
+        // ceiling that every later read then trips over.
+        const whole = (v: unknown, min: number, nullable = false) =>
+          (nullable && v === null) || (typeof v === "number" && Number.isInteger(v) && v >= min);
         if (
-          typeof m.lapses_at !== "number" || typeof m.version !== "number" ||
-          (m.ceiling_out_of_network !== null && typeof m.ceiling_out_of_network !== "number") ||
-          (m.ceiling_daily !== null && typeof m.ceiling_daily !== "number") ||
-          (m.cooling_seconds !== null && typeof m.cooling_seconds !== "number") ||
-          m.co_signers.some((k) => typeof k !== "string")
+          !whole(m.lapses_at, 0) || !whole(m.version, 1) ||
+          !whole(m.ceiling_out_of_network, 0) || !whole(m.ceiling_daily, 0, true) ||
+          !whole(m.cooling_seconds, 0, true) || m.co_signers.some((k) => typeof k !== "string")
         ) {
-          throw badRequest("malformed", "a mandate's ceilings, window, lapse and version are numbers");
+          throw badRequest("malformed", "a mandate's ceilings, window, lapse and version are whole numbers");
         }
         if (seenMandates.has(m.id)) throw badRequest("malformed", `mandates names ${m.id} twice`);
         seenMandates.add(m.id);
         const held = engine.mandates.get(m.id);
+        // §16.1. A mandate does not change hands, which `record` refuses and
+        // this route did not: an import under one household named another's
+        // mandate id with tighter values and took the mandate with it, after
+        // which the household's own record was refused as the wrong household.
+        // Measured by a refutation pass on 2026-09-15.
+        if (held && held.household !== m.household) {
+          throw conflict("bad_state", `mandate ${m.id} belongs to ${held.household} on this host`);
+        }
         // §16.1. A move carries no signatures, so the host keeps whichever of
         // the two it holds is the tighter, and an older version does not
         // replace a newer one, which would put a captured version back in

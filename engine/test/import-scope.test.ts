@@ -299,3 +299,43 @@ describe("§7.1: two gifts that sign the same bytes", () => {
     expect(h.engine.edgesTouching("h").length).toBe(3);
   });
 });
+
+describe("§16.1: a mandate does not change hands", () => {
+  test("an import under one household cannot take another's mandate id", async () => {
+    // NOTE (mutation check, 2026-09-15): import_mandate_changes_hands. The
+    // import answered 201, the victim's mandate was gone from its own list,
+    // and the victim's own record was then refused as the wrong household.
+    // Every value the attacker needs is tighter, so it can be chosen blind.
+    const h = host();
+    expect((await h.post("victim", { mandates: [mandate("victim")] })).status).toBe(201);
+    const taken = await h.post("attacker", { mandates: [mandate("attacker", { ceiling_out_of_network: 1, co_signers: ["cs", "x"], cooling_seconds: 99999, lapses_at: 1, version: 9 })] });
+    expect(taken.status).toBe(409);
+    expect(h.engine.mandates.forHousehold("victim").map((m) => m.id)).toEqual(["m-victim"]);
+    expect(h.engine.mandates.forHousehold("attacker")).toEqual([]);
+  });
+
+  test("a mandate's numbers are whole and in range", async () => {
+    // NOTE (mutation check, 2026-09-15): import_mandate_numbers_unchecked.
+    // A lapse of -5, a version of 1.5 and a null out-of-network ceiling all
+    // imported, while `record` refuses each of them.
+    const h = host();
+    for (const bad of [{ lapses_at: -5 }, { version: 1.5 }, { ceiling_out_of_network: null }]) {
+      expect([Object.keys(bad)[0], (await h.post("victim", { mandates: [mandate("victim", bad)] })).status]).toEqual([Object.keys(bad)[0], 400]);
+    }
+    expect(h.engine.mandates.get("m-victim")).toBeUndefined();
+  });
+});
+
+describe("§7.1: an edge whose own id holds a tilde", () => {
+  test("keeps its id", async () => {
+    // NOTE (mutation check, 2026-09-15): import_edge_id_split_anywhere filed
+    // it under the part before the tilde, and it stayed renamed through every
+    // later move. Nobody signs an id, so nothing else would have caught it.
+    const h = host();
+    const k = signer();
+    h.engine.registerIdentity("h", k.pem);
+    const body = { from: "h", to: "g", product: "tea-a", merchant: "maker-a", maker: "made-by-tea", kind: "gift" as const, occasion: "", receipt: "r-tilde" };
+    expect((await h.post("h", { lineage: [{ id: "gift~2026", ...body, signature: k.sign(body), attested: false, created_at: 1 }] })).status).toBe(201);
+    expect(h.engine.edgesTouching("h").map((e) => e.id)).toEqual(["gift~2026"]);
+  });
+});
