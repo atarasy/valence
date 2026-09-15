@@ -1,4 +1,5 @@
 import { type Mandate } from "./hub/mandates.js";
+import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
@@ -1356,36 +1357,43 @@ async function route(
           throw unprocessable("wrong_household", `recovery ${r.id} belongs to ${r.household}`);
         }
       }
-      const register = body_.confirmations ?? {};
-      for (const offer of body_.offers ?? []) {
-        engine.importOffer(offer, moving);
-        // §10.5. Without this a move resets the one-use rule, and a confirmation
-        // captured on the sending host decides the moved offer on this one.
-        // Measured 2026-09-11 before the field existed.
-        if (Object.hasOwn(register, offer.id)) {
-          engine.importConfirmations({ [offer.id]: register[offer.id]! });
+      // §14.2, question 53. The writes stand together or not at all. Every
+      // refusal is decided above, and what can still fail here is the store
+      // itself: a locked database, a full disk, a process killed between two
+      // rows. Written a statement at a time, any of those left a move half
+      // written, its offers held and its collections and mandates lost.
+      atomically(() => {
+        const register = body_.confirmations ?? {};
+        for (const offer of body_.offers ?? []) {
+          engine.importOffer(offer, moving);
+          // §10.5. Without this a move resets the one-use rule, and a confirmation
+          // captured on the sending host decides the moved offer on this one.
+          // Measured 2026-09-11 before the field existed.
+          if (Object.hasOwn(register, offer.id)) {
+            engine.importConfirmations({ [offer.id]: register[offer.id]! });
+          }
         }
-      }
-      for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
-      for (const n of body_.notes ?? []) engine.importNote(n);
-      for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
-      engine.importReceipts(moving, body_.receipts ?? []);
-      // Until 2026-09-09 the loop stopped above. The export already carried the
-      // recovery log, and this end dropped it; the ledger, the queries and the
-      // mandates were in neither end. A member who moved kept their offers and
-      // arrived with no ceiling, no co-signers, no lapse, no permissions and no
-      // record of who had recovered their node, while every probe stayed green
-      // because none of them asked.
-      recovery.importLog(moving, body_.recoveries ?? []);
-      // §6.5, §11. What the route found in each physical box. Without it the
-      // moved offers keep their `consumed` valences and the receiving host has
-      // no record that a collection happened, so the block of §6.5 lifts on
-      // the move and the household's next box comes with a statement unsigned.
-      // Measured by a refutation pass on 2026-09-12.
-      engine.recoveries.importRows(body_.collections ?? []);
-      permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
-      for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
-      deliveries.importRows(body_.deliveries ?? []);
+        for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
+        for (const n of body_.notes ?? []) engine.importNote(n);
+        for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
+        engine.importReceipts(moving, body_.receipts ?? []);
+        // Until 2026-09-09 the loop stopped above. The export already carried the
+        // recovery log, and this end dropped it; the ledger, the queries and the
+        // mandates were in neither end. A member who moved kept their offers and
+        // arrived with no ceiling, no co-signers, no lapse, no permissions and no
+        // record of who had recovered their node, while every probe stayed green
+        // because none of them asked.
+        recovery.importLog(moving, body_.recoveries ?? []);
+        // §6.5, §11. What the route found in each physical box. Without it the
+        // moved offers keep their `consumed` valences and the receiving host has
+        // no record that a collection happened, so the block of §6.5 lifts on
+        // the move and the household's next box comes with a statement unsigned.
+        // Measured by a refutation pass on 2026-09-12.
+        engine.recoveries.importRows(body_.collections ?? []);
+        permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
+        for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
+        deliveries.importRows(body_.deliveries ?? []);
+      });
       return json({ imported: true }, 201);
     }
   }

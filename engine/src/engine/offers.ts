@@ -21,7 +21,7 @@ import type { Mandate } from "../hub/mandates.js";
 import { LocalDay, type DaySource } from "./day-source.js";
 import { type DeliverySource } from "./delivery-source.js";
 import type { Delivery } from "../hub/delivery.js";
-import { inMemoryStore, type Store } from "../common/store.js";
+import { inMemoryStore, type Store, transientMap } from "../common/store.js";
 import { HouseholdLedger } from "../hub/household-ledger.js";
 import {
   applyRecovery,
@@ -138,7 +138,8 @@ export class ValenceEngine {
    * fact. Nothing resolves this token, and no route accepts it.
    */
   private readonly receipts: Map<string, { ref: string; at: number }[]>;
-  private readonly candidateIndex = new Map<string, string>();
+  // Journaled, because it is derived from the offers an atomic block may take back.
+  private readonly candidateIndex = transientMap<string>();
 
   /**
    * §11. The physical binding's operations. Empty for a digital-only
@@ -1737,9 +1738,9 @@ export class ValenceEngine {
   }
 
   importNote(note: Note): void {
-    const list = this.notes.get(note.candidate) ?? [];
-    list.push(note);
-    this.notes.set(note.candidate, list);
+    // A new list rather than a push, so an atomic block that takes this write
+    // back restores the list as it was (question 53).
+    this.notes.set(note.candidate, [...(this.notes.get(note.candidate) ?? []), note]);
   }
 
   /** §14.2, question 51. The same refusals as `importEdge`, written nowhere. */
