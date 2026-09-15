@@ -69,14 +69,16 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
     store.close();
 
     // And a second process reads the whole move, once.
-    const again = host(openStore(path));
+    const reopened = openStore(path);
+    const again = host(reopened);
     expect((again.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1")).toBe(true);
     expect(again.engine.notesFor("c-1").length).toBe(1);
     expect(again.engine.mandates.get("m-1")).toBeDefined();
     expect(again.deliveries.forHousehold(["o-1"]).length).toBe(1);
+    reopened.close();
   });
 
-  test("a process that stops partway leaves the disk as it was", async () => {
+  test("a failure partway leaves the disk as it was for the next process", async () => {
     // NOTE (mutation check, 2026-09-16): atomic_block_skips_the_database. The
     // rows written before the failure were on disk for the next process to
     // read, although memory had been put back.
@@ -86,9 +88,11 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
     h.deliveries.importRows = () => { throw new Error("killed"); };
     expect((await h.post(node)).status).toBe(500);
     store.close();
-    const after = host(openStore(path));
+    const reopened = openStore(path);
+    const after = host(reopened);
     expect((after.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1")).toBe(false);
     expect(after.engine.mandates.get("m-1")).toBeUndefined();
+    reopened.close();
   });
 });
 

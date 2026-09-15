@@ -80,8 +80,15 @@ class JournalMap<T> extends Map<string, T> {
  * written with its offers held and its collections and mandates lost.
  *
  * `fn` must be synchronous: a block that awaited would let another request
- * write inside it. Blocks do not nest. Across two databases the commit is two
- * commits, which the reference never opens.
+ * write inside it, and the check for a promise runs only after `fn` returns,
+ * so writes after an `await` would land outside the block. Blocks do not nest.
+ *
+ * **Across two databases the commit is two commits.** The reference opens one
+ * store; a deployment that opens two can have the second commit fail after the
+ * first succeeded, and memory is then put back while the first database keeps
+ * its rows. The block also takes a write lock on every database the process
+ * holds, not only those the block writes, which is why each waits on a busy
+ * database rather than failing at once.
  */
 export function atomically<R>(fn: () => R): R {
   if (journal) throw new Error("store: an atomic block is already open");
@@ -119,7 +126,9 @@ class WriteThroughMap<T> extends JournalMap<T> {
     // it is given, and `set` here reaches `this.db`, which the field
     // initialisers have not assigned yet when the constructor runs.
     super();
-    for (const [k, v] of rows) super.set(k, v);
+    // Loaded past the journal: these rows are already on disk, and a block that
+    // rolled back must not take them out of memory.
+    for (const [k, v] of rows) Map.prototype.set.call(this, k, v);
   }
 
   override set(key: string, value: T): this {
@@ -168,6 +177,10 @@ export function openStore(path: string): Store {
   // worse than a settlement that took a millisecond longer.
   db.run("pragma journal_mode = wal");
   db.run("pragma synchronous = full");
+  // An atomic block opens a transaction on every database the process holds,
+  // so a writer holding another one briefly should make it wait rather than
+  // fail the import (question 53).
+  db.run("pragma busy_timeout = 5000");
   const seen = new Set<string>();
   return {
     map<T>(table: string): Map<string, T> {
