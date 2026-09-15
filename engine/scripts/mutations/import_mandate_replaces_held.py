@@ -1,7 +1,8 @@
 import pathlib
-# §16.1, question 52. Let a mandate that gives the household less replace the
-# one the host holds, which needs the co-signers a move cannot carry.
+# §16.1, question 52. Let an import write a mandate this host already holds. A
+# body of tightenings alone is then taken unsigned, and a co-signer whose key
+# nobody holds freezes the household out of its own mandate for good.
 p = pathlib.Path('src/http.ts'); s = p.read_text()
-old = 'loosens(held, m) || '
+old = '        if (held) taken.delete(m.id);\n'
 assert s.count(old) == 1, "anchor drifted"
 p.write_text(s.replace(old, '', 1))

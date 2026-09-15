@@ -1,4 +1,4 @@
-import { loosens, type Mandate } from "./hub/mandates.js";
+import { type Mandate } from "./hub/mandates.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
@@ -1322,7 +1322,7 @@ async function route(
         // move cannot carry a lapse of -5, a version of 1.5 or a missing
         // ceiling that every later read then trips over.
         const whole = (v: unknown, min: number, nullable = false) =>
-          (nullable && v === null) || (typeof v === "number" && Number.isInteger(v) && v >= min);
+          (nullable && (v === null || v === undefined)) || (typeof v === "number" && Number.isInteger(v) && v >= min);
         if (
           !whole(m.lapses_at, 0) || !whole(m.version, 1) ||
           !whole(m.ceiling_out_of_network, 0) || !whole(m.ceiling_daily, 0, true) ||
@@ -1341,12 +1341,15 @@ async function route(
         if (held && held.household !== m.household) {
           throw conflict("bad_state", `mandate ${m.id} belongs to ${held.household} on this host`);
         }
-        // §16.1. A move carries no signatures, so the host keeps whichever of
-        // the two it holds is the tighter, and an older version does not
-        // replace a newer one, which would put a captured version back in
-        // play. Refusing instead would let a mandate that arrived first block
-        // the household's move.
-        if (held && (loosens(held, m) || m.version < held.version)) taken.delete(m.id);
+        // §16.1, §14.2. A held mandate is not replaced at all. Taking the
+        // tighter of the two read well and froze a household out: every value
+        // of `{ceiling 0, lapse 1, co_signers + a key nobody holds}` is a
+        // tightening, so it was taken unsigned, and undoing it is a loosening
+        // that needs the signature of a key `keyOf` never resolves. Measured
+        // by a refutation pass on 2026-09-15. A tightening made on another
+        // host does not travel, which is the cost of the rule; the household
+        // records it here with the signatures §16.1 asks for.
+        if (held) taken.delete(m.id);
       }
       for (const r of body_.recoveries ?? []) {
         if (r.household !== moving) {

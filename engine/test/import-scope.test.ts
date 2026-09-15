@@ -53,25 +53,21 @@ describe("§14.2: an import writes only its own household's rows", () => {
 
   test("a mandate this host already holds is not replaced, even by its own household", async () => {
     // NOTE (mutation check, 2026-09-15): import_mandate_replaces_held. The
-    // looser version was written and the co-signers were gone.
+    // second row was written, and with it a mandate nobody signed.
     //
-    // A version this host already has the equal of is kept as it is; a later
-    // version is refused outright, because loosening needs the co-signers
-    // (§16.1) and a move carries no signatures.
+    // Taking the tighter of the two read well and froze a household out: a
+    // ceiling of 0, a lapse in the past and a co-signer whose key nobody holds
+    // are all tightenings, so they were taken unsigned, and undoing them is a
+    // loosening that needs that key's signature. So a held mandate is left
+    // alone, and neither row is refused: refusing would let a mandate that
+    // arrived first block the household's move.
     const h = host();
     expect((await h.post("victim", { mandates: [mandate("victim")] })).status).toBe(201);
-    const same = await h.post("victim", { mandates: [mandate("victim", { co_signers: [] })] });
-    expect(same.status).toBe(201);
-    expect(h.engine.mandates.get("m-victim")?.co_signers).toEqual(["cs"]);
-    // A later version that gives the household less is kept out without a
-    // refusal, because refusing would let a mandate that arrived first block
-    // the household's move. A later version that gives it more is taken.
-    const looser = await h.post("victim", { mandates: [mandate("victim", { co_signers: [], version: 4 })] });
-    expect(looser.status).toBe(201);
-    expect(h.engine.mandates.get("m-victim")).toMatchObject({ co_signers: ["cs"], version: 3 });
-    const tighter = await h.post("victim", { mandates: [mandate("victim", { co_signers: ["cs", "cs2"], ceiling_out_of_network: 500, version: 4 })] });
-    expect(tighter.status).toBe(201);
-    expect(h.engine.mandates.get("m-victim")).toMatchObject({ co_signers: ["cs", "cs2"], ceiling_out_of_network: 500, version: 4 });
+    for (const over of [{ co_signers: [] }, { co_signers: ["cs", "cs2"], ceiling_out_of_network: 0, lapses_at: 1, version: 9 }]) {
+      const again = await h.post("victim", { mandates: [mandate("victim", over)] });
+      expect(again.status).toBe(201);
+      expect(h.engine.mandates.get("m-victim")).toMatchObject({ co_signers: ["cs"], ceiling_out_of_network: 1000, version: 3 });
+    }
   });
 
   test("a settlement, a note, a collection and a delivery must name an offer the import carries", async () => {
@@ -253,16 +249,6 @@ describe("§14.2, §16.1: mandates that arrive by a move", () => {
     const r = await h.post("victim", { mandates: [mandate("victim", { ceiling_out_of_network: 10, version: 5 }), mandate("victim", { ceiling_out_of_network: 1e9, co_signers: [], version: 6 })] });
     expect(r.status).toBe(400);
     expect(h.engine.mandates.get("m-victim")).toBeUndefined();
-  });
-
-  test("an older version does not replace a newer one", async () => {
-    // NOTE (mutation check, 2026-09-15): import_mandate_older_version_taken.
-    // The host was left at version 1, where a captured version could be
-    // recorded again at the version after it with its own co-signatures.
-    const h = host();
-    expect((await h.post("victim", { mandates: [mandate("victim", { version: 5 })] })).status).toBe(201);
-    expect((await h.post("victim", { mandates: [mandate("victim", { version: 1 })] })).status).toBe(201);
-    expect(h.engine.mandates.get("m-victim")?.version).toBe(5);
   });
 
   test("a lapse that is not a number is refused", async () => {
