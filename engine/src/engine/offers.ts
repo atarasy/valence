@@ -1657,7 +1657,18 @@ export class ValenceEngine {
   }
 
   /** Restores an exported node into an empty engine. Clause 52. */
-  importOffer(offer: Offer, household: string): void {
+  /**
+   * §14.2, question 51. What an import of this offer is refused for, decided
+   * without writing anything, so the route can verify a whole body before it
+   * writes any of it. `carrying` holds what the same body has already been
+   * verified as bringing, because two offers in one body meet each other's
+   * identifiers as surely as they meet the host's.
+   */
+  checkImportedOffer(
+    offer: Offer,
+    household: string,
+    carrying?: { offers: Set<string>; candidates: Set<string> }
+  ): void {
     if (offer.household !== household) {
       throw unprocessable("wrong_household", `offer ${offer.id} belongs to ${offer.household}`);
     }
@@ -1682,15 +1693,25 @@ export class ValenceEngine {
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
     }
-    this.assertCandidateIdentifiers(offer);
+    if (carrying?.offers.has(offer.id)) {
+      throw conflict(
+        "bad_state",
+        `offer ${offer.id} is already here, and an import does not change what this host holds`
+      );
+    }
+    this.assertCandidateIdentifiers(offer, carrying?.candidates);
+  }
+
+  importOffer(offer: Offer, household: string): void {
+    this.checkImportedOffer(offer, household);
     this.offers.set(offer.id, offer);
     for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);
   }
 
-  private assertCandidateIdentifiers(offer: Offer): void {
+  private assertCandidateIdentifiers(offer: Offer, carrying?: Set<string>): void {
     const seen = new Set<string>();
     for (const candidate of offer.candidates) {
-      if (typeof candidate.id !== 'string' || !candidate.id || seen.has(candidate.id) || this.candidateIndex.has(candidate.id)) {
+      if (typeof candidate.id !== 'string' || !candidate.id || seen.has(candidate.id) || carrying?.has(candidate.id) || this.candidateIndex.has(candidate.id)) {
         throw conflict('candidate_conflict', 'Candidate identifiers must have one unambiguous owner.');
       }
       seen.add(candidate.id);
@@ -1707,7 +1728,8 @@ export class ValenceEngine {
     this.notes.set(note.candidate, list);
   }
 
-  importEdge(edge: LineageEdge, household: string): void {
+  /** §14.2, question 51. The same refusals as `importEdge`, written nowhere. */
+  checkImportedEdge(edge: LineageEdge, household: string): void {
     // Clause 22 holds on a move as it does on arrival: an edge is recognised
     // by the giver's attested key, and an edge that touches neither end of
     // the moving household is not this node's to carry.
@@ -1718,7 +1740,28 @@ export class ValenceEngine {
     if (!publicKey || !verifyEdge(edge, publicKey)) {
       throw unprocessable("bad_signature", `edge ${edge.id} does not verify`);
     }
+  }
+
+  importEdge(edge: LineageEdge, household: string): void {
+    this.checkImportedEdge(edge, household);
     this.edges.set(edge.id, edge);
+  }
+
+  /**
+   * §14.2, question 51. Everything a body's offers and edges are refused for,
+   * decided before the route writes a row. The import was written in order and
+   * stopped at the first refusal, so a move refused at an edge kept the offers
+   * written before it and lost the collections and mandates after it, and the
+   * retry was refused because those offers were now held.
+   */
+  checkImport(offers: readonly Offer[], household: string, edges: readonly LineageEdge[]): void {
+    const carrying = { offers: new Set<string>(), candidates: new Set<string>() };
+    for (const offer of offers) {
+      this.checkImportedOffer(offer, household, carrying);
+      carrying.offers.add(offer.id);
+      for (const c of offer.candidates) carrying.candidates.add(c.id);
+    }
+    for (const edge of edges) this.checkImportedEdge(edge, household);
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {

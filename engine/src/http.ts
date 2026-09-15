@@ -197,6 +197,12 @@ async function body(request: Request): Promise<unknown> {
   }
 }
 
+/** §14. The fields of a node export that hold lists, each written row by row. */
+const LISTS_A_NODE_CARRIES = [
+  "offers", "settlements", "notes", "lineage", "receipts", "recoveries",
+  "collections", "permissions", "queries", "mandates", "deliveries",
+] as const;
+
 async function route(
   engine: ValenceEngine,
   hub: Hub,
@@ -1171,8 +1177,19 @@ async function route(
       // the host already held, which unlocked the withdrawal §16.5 refuses and
       // let the captured signature decide the set again. Checked before any
       // write. Measured by a refutation pass on 2026-09-15.
-      if (body_.offers !== undefined && !Array.isArray(body_.offers)) {
-        throw badRequest("malformed", "offers must be a list");
+      for (const field of LISTS_A_NODE_CARRIES) {
+        const v = (body_ as Record<string, unknown>)[field];
+        if (v !== undefined && (!Array.isArray(v) || v.some((row) => !row || typeof row !== "object"))) {
+          throw badRequest("malformed", `${field} must be a list of rows`);
+        }
+      }
+      for (const m of body_.mandates ?? []) {
+        if (!m || !Array.isArray(m.co_signers)) throw badRequest("malformed", "a mandate's co_signers must be a list");
+      }
+      for (const c of body_.collections ?? []) {
+        if (!c || !Array.isArray(c.returned) || !Array.isArray(c.consumed) || (c.missing !== undefined && !Array.isArray(c.missing))) {
+          throw badRequest("malformed", "a collection's lines must be lists");
+        }
       }
       const shaped = body_.confirmations;
       if (
@@ -1188,16 +1205,20 @@ async function route(
           throw unprocessable("unscoped_confirmation", `a confirmation names ${id}, which this import does not carry`);
         }
       }
+      // §14.2, question 51. Every refusal the rows below can give is decided
+      // here, before the first write. The route wrote in order and stopped at
+      // the first refusal, so a move refused at an edge kept its offers, lost
+      // its collections and mandates, and could not be retried because those
+      // offers were now held. An edge whose giver's key this host has not
+      // attested is enough to refuse, so that happened with nobody at fault.
+      engine.checkImport(body_.offers ?? [], moving, body_.lineage ?? []);
+      deliveries.checkRows(body_.deliveries ?? []);
       const register = body_.confirmations ?? {};
       for (const offer of body_.offers ?? []) {
         engine.importOffer(offer, moving);
         // §10.5. Without this a move resets the one-use rule, and a confirmation
         // captured on the sending host decides the moved offer on this one.
-        // Measured 2026-09-11 before the field existed. Each offer takes its
-        // register as it is written because this route is not atomic: an import
-        // refused at a later row left its offers written with no register, a
-        // set moved without one, and the retry was refused as unscoped or as
-        // already held (question 50, measured by a refutation pass 2026-09-15).
+        // Measured 2026-09-11 before the field existed.
         if (Object.hasOwn(register, offer.id)) {
           engine.importConfirmations({ [offer.id]: register[offer.id]! });
         }

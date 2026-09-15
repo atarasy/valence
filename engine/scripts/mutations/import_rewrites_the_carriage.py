@@ -4,10 +4,11 @@ import pathlib
 # the rule `record` enforces. **This is what the register did until
 # 2026-09-13**, so the guard written the day before was true of one door and
 # false of the other: measured at 500 recorded, 800 refused through `record`,
-# and 800 read back after an import carrying it.
+# and 800 read back after an import carrying it. Re-anchored 2026-09-15 when
+# the check moved into `checkRows` (question 51).
 
 p = pathlib.Path("src/hub/delivery.ts"); s = p.read_text()
-a = """      const before = this.rows.get(r.offer);
+a = """      const before = carrying.get(r.offer) ?? this.rows.get(r.offer);
       if (before && before.carriage !== r.carriage) {
         throw unprocessable(
           "carriage_fixed",
