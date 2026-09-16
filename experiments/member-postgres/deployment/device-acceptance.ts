@@ -1,9 +1,8 @@
 import {openSync,writeFileSync,closeSync} from 'node:fs';
 import {isAbsolute} from 'node:path';
 import {createPool,postgresStore} from '../store.ts';
-import {DatabaseError} from 'pg';
 import {ValenceError} from '../../../engine/src/common/errors.ts';
-import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox,grantVoxPresenter,retireUnprovenCredentials} from '../device-acceptance.ts';
+import {AcceptanceError,prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox,grantVoxPresenter,retireUnprovenCredentials} from '../device-acceptance.ts';
 import type {MemberRuntimeConfig} from '../config.ts';
 import config from './config.json';
 const [action,output,...extra]=process.argv.slice(2);
@@ -35,14 +34,11 @@ try{
  // and its text has held a role name and a connection failure, so it is not
  // printed: a fourth refutation pass measured `password authentication failed
  // for user ...` reaching the operator's terminal through a bare message read.
- // The filter names the driver rather than guessing from `code`: a fifth pass
- // measured that `ValenceError` carries one too, so every engine refusal,
- // including `name_is_not_the_key`, printed as unknown. That refusal is the
- // last thing standing behind the household rule, so hiding it is the worst
- // case this line has.
- const ours=error instanceof Error&&typeof error.message==='string'
-  &&!(error instanceof DatabaseError)&&(error as {severity?:unknown}).severity===undefined
-  &&(error.constructor===Error||error instanceof ValenceError);
+ // An allow-list of two classes, not a guess. Guessing from `code` hid every
+ // engine refusal including `name_is_not_the_key`, which is the last thing
+ // standing behind the household rule; guessing from the constructor printed
+ // the driver's own text for the failures `pg` raises as a plain `Error`.
+ const ours=(error instanceof AcceptanceError||error instanceof ValenceError)&&typeof error.message==='string';
  const reason=ours?error.message:'unknown (the failure did not come from this tool)';
  console.error('Acceptance command failed; inspect status before retrying. No automatic retry. Reason: '+reason);
  process.exitCode=1;}

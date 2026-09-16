@@ -121,6 +121,14 @@ export function openMemberAuthority(path: Records, options: Options) {
       db.transaction(() => {
         const p = principal(principalID);
         if (!p || p.disabled !== 0) throw new Error('Principal unavailable');
+        // §13.2, question 55. **A household is named by one key.** Once a
+        // principal has adopted one, no further credential joins it: a sixth
+        // refutation pass on 2026-09-16 held an enrolment ceremony open across
+        // the acceptance step, finished it afterwards, and read that
+        // household's session, offers, settlement statement and mandate terms
+        // with a key that had proved nothing. Checking the count at the step
+        // could not see it; the invariant belongs on the route that adds one.
+        if (p.household !== null) throw new Error('This principal has a household and takes no further credential');
         credentials.insert(id,{id,principal:principalID,revoked:0,proven:0});
       }).immediate();
     },

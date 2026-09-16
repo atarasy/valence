@@ -41,7 +41,14 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // `retire` undoes the whole enrolment step, signed-in credentials included,
   // because nothing has been adopted yet and a deployment with two signed-in
   // credentials was one no command could leave.
-  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:2,signedIn:1,unproven:1});
+  // An invitation outstanding when the enrolment is undone becomes a credential
+  // afterwards unless it is dropped with the rest.
+  const stranded=await unit.run(s=>inviteDeviceAcceptance(s,c));
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:2,signedIn:1,unproven:1,cancelled:1});
+  expect((await send('/auth/enrollment/options',{invitation:stranded.token})).status).toBe(401);
+  // The counts are computed before anything is revoked, so the rows are read
+  // back: an earlier version returned the same object and revoked less.
+  expect(await unit.run(s=>{const rows=s.map<{revoked:number}>('member_credentials');return [...rows.values()].every(v=>v.revoked===1);})).toBe(true);
   const invitation=await unit.run(s=>inviteDeviceAcceptance(s,c)),key=syntheticAuthenticator();
   const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
   expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
@@ -55,7 +62,17 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect((await send('/auth/logout',{},unclaimed)).status).toBe(204);
   expect(await unit.run(s=>[...s.map<{revoked:number}>('member_sessions').values()].filter(v=>v.revoked===0).length)).toBe(0);
   const before=await signIn(2);
+  // A ceremony held open across the step that adopts the household: the check
+  // at the step counts credentials and cannot see one arriving after it, so the
+  // route that adds a credential is where the invariant lives. Measured open by
+  // a sixth refutation pass, which then read the household's mandate terms.
+  const late=syntheticAuthenticator(),lateInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
+  const lateFlow=await (await send('/auth/enrollment/options',{invitation:lateInvite.token})).json();
   const statement=await unit.run(s=>prepareStatementAcceptance(s,c));
+  expect((await send('/auth/enrollment/verify',{id:lateFlow.id,response:late.register(lateFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
+  expect(await unit.run(s=>s.map('member_passkeys').has(late.id))).toBe(false);
+  // And retire refuses once a statement exists, which had no test at all.
+  await expect(unit.run(s=>retireUnprovenCredentials(s,c))).rejects.toThrow('already prepared');
   // The household is adopted from the registered passkey, and the mandate is
   // that identifier with a label, so nothing is registered under a mandate's name.
   expect(isHouseholdName(statement.household)).toBe(true);

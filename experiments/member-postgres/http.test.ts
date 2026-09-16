@@ -8,7 +8,7 @@ import {createPool,initialiseDeployment,postgresStore,type Identity} from './sto
 import {migrateDatabase} from './migrate.ts';
 import {openPostgresMemberHTTP} from './http.ts';
 import {credentialSPKI} from '../member-login/credential-key.ts';
-import {isHouseholdName} from '../../engine/src/common/names.ts';
+import {isHouseholdName,nameOf} from '../../engine/src/common/names.ts';
 import {memberRuntime} from './runtime.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 import {seedUnified,loginResponse} from '../member-transactions/unified-fixture.ts';
@@ -92,6 +92,11 @@ test('PostgreSQL registration persists login across independent composition and 
  expect((await fresh.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'})).status).toBe(401);
  const adopted=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);});
  expect(isHouseholdName(adopted)).toBe(true);
+ // The authority's own return, not the engine's later refusal: for four commits
+ // the name came from the caller, and `name_is_not_the_key` in `registerIdentity`
+ // was what stood behind it. Nothing in that path runs here.
+ expect(await s.unit.run(store=>{const row=store.map<{public_key:number[]}>('member_passkeys').get(key.id)!;
+  return nameOf(createPublicKey({key:credentialSPKI(new Uint8Array(row.public_key)),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());})).toBe(adopted);
  const after=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
  const session=await after.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'});
  expect(session.status).toBe(200);expect((await session.json()).household).toBe(adopted);
