@@ -84,6 +84,14 @@ describe("§13.2, question 55: a name is its key", () => {
     expect(() => engine.registerIdentity("merchant-2", folded)).not.toThrow();
     expect(() => engine.registerIdentity("merchant-2", pemOf(generateKeyPairSync("ed25519").publicKey)))
       .toThrow(expect.objectContaining({ code: "identity_exists" }));
+    // NOTE (mutation check, 2026-09-16): identity_junk_pem_overwrites. A PEM
+    // that does not parse has no key, and comparing keys made two such equal
+    // to each other, so the second overwrote the first under a free name.
+    // Found by reading this change's own diff.
+    engine.registerIdentity("merchant-3", "not a key at all");
+    expect(() => engine.registerIdentity("merchant-3", "some other rubbish"))
+      .toThrow(expect.objectContaining({ code: "identity_exists" }));
+    expect(() => engine.registerIdentity("merchant-3", "not a key at all")).not.toThrow();
   });
 
   test("a mandate is not recorded under an identifier that is not its household's", () => {

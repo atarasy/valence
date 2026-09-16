@@ -352,13 +352,22 @@ export class ValenceEngine {
     return structuredClone(frozen);
   }
 
-  /** Whether two PEMs carry the same key, whatever their line breaks. */
-  private static sameKeyDer(pem: string): string | undefined {
-    try {
-      return createPublicKey(pem).export({ type: "spki", format: "der" }).toString("base64");
-    } catch {
-      return undefined;
-    }
+  /**
+   * Whether two PEMs carry the same key, whatever their line breaks. A PEM
+   * that does not parse has no key, and two such are compared as the text
+   * they are: without that they were equal to each other, and the second
+   * overwrote the first under a free name.
+   */
+  private static sameKey(a: string, b: string): boolean {
+    const der = (pem: string) => {
+      try {
+        return createPublicKey(pem).export({ type: "spki", format: "der" }).toString("base64");
+      } catch {
+        return undefined;
+      }
+    };
+    const one = der(a), two = der(b);
+    return one === undefined || two === undefined ? a === b : one === two;
   }
 
   registerIdentity(key: string, publicKeyPem: string, attested = false): void {
@@ -382,7 +391,7 @@ export class ValenceEngine {
     // household's public key could file it re-wrapped and the household's own
     // enrolment then failed, taking nothing but stopping the member. Found by
     // a review pass on 2026-09-16.
-    if (existing !== undefined && ValenceEngine.sameKeyDer(existing) !== ValenceEngine.sameKeyDer(publicKeyPem)) {
+    if (existing !== undefined && !ValenceEngine.sameKey(existing, publicKeyPem)) {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
     }
     this.identities.set(key, publicKeyPem);
