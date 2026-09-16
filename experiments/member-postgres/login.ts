@@ -61,6 +61,8 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       if (counter > 0xffffffff) throw new Error('Invalid authenticator counter');
       const updated = passkeys.updateWhere(credentialID,v=>v.revision===credential.revision&&v.active===1,{counter,revision:credential.revision+1});
       if (updated.changes !== 1) throw new Error('Credential changed during verification');
+      // This key has now signed something, which registration never established.
+      authority.markCredentialProven(credentialID);
       return { counter };
     },
     begin() {
@@ -90,6 +92,7 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       integer(result.authenticationInfo.newCounter);
       const updated = passkeys.updateWhere(credential.id,v=>v.revision===credential.revision,{counter:result.authenticationInfo.newCounter,revision:credential.revision+1});
       if (updated.changes !== 1) throw new Error('Login changed during verification');
+      authority.markCredentialProven(credential.id);
       const expiry = now() + sessionLifetimeMs; integer(expiry);
       // Authoritative lifecycle checks run again here. If issuance fails, the attempt stays spent.
       return authority.createSessionAfterVerification(credential.id, expiry);

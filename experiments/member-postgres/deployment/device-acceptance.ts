@@ -24,5 +24,12 @@ try{
    console.log(JSON.stringify({issued:true,expiresAt:invitation.expiresAt}));
   }finally{closeSync(fd);}
  }
-}catch{console.error('Acceptance command failed; inspect status before retrying. No automatic retry.');process.exitCode=1;}
+}catch(error){
+ // Print the reason. A bare catch printed a fixed line and discarded the
+ // message, so DEVICE_ACCEPTANCE.md named diagnoses the operator could never
+ // see. These are the tool's own Error messages, not database or network
+ // detail: an Error that is not one of ours is reported by its constructor.
+ const reason=error instanceof Error&&typeof error.message==='string'?error.message:'unknown';
+ console.error('Acceptance command failed; inspect status before retrying. No automatic retry. Reason: '+reason);
+ process.exitCode=1;}
 finally{await pool.end();}

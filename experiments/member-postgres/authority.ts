@@ -74,6 +74,9 @@ export function openMemberAuthority(path: Records, options: Options) {
      * argument and checked only its shape, and a refutation pass adopted a
      * freshly generated key's name onto a principal with no credential at all.
      *
+     * The credential must have **proven possession** of that key by verifying an
+     * assertion, because enrolment alone does not: see `markCredentialProven`.
+     *
      * There is deliberately **no uniqueness check**. A second version refused a
      * household any principal held, and a second pass measured what that
      * bought: a row planted by `provisionPrincipal`, which proves nothing about
@@ -85,9 +88,11 @@ export function openMemberAuthority(path: Records, options: Options) {
     adoptHousehold(id: string, credentialID: string, keyOf: (credential: string) => string | undefined) {
       name(id); name(credentialID);
       return db.transaction(() => {
-        const c = credentials.get(credentialID) as { principal: string; revoked: number } | null;
+        const c = credentials.get(credentialID) as { principal: string; revoked: number; proven?: number } | null;
         const p = principal(id);
         if (!c || c.revoked !== 0 || c.principal !== id || !p || p.disabled !== 0) throw new Error('Credential is not this principal\'s');
+        // A key that has never signed anything is a key the client chose.
+        if (c.proven !== 1) throw new Error('Credential has proven no key');
         const pem = keyOf(credentialID);
         if (!pem) throw new Error('Credential key unavailable');
         const household = nameOf(pem);
@@ -101,7 +106,7 @@ export function openMemberAuthority(path: Records, options: Options) {
       db.transaction(() => {
         const p = principal(principalID);
         if (!p || p.disabled !== 0) throw new Error('Principal unavailable');
-        credentials.insert(id,{id,principal:principalID,revoked:0});
+        credentials.insert(id,{id,principal:principalID,revoked:0,proven:0});
       }).immediate();
     },
     /** Trusted operator lookup only. Never exposed by the member HTTP handler. */
@@ -126,6 +131,20 @@ export function openMemberAuthority(path: Records, options: Options) {
         principals.patch(id,{disabled:1});
         revokePrincipalSessions(id);
       }).immediate();
+    },
+    /**
+     * §10.5 and §13.2, question 55. **Registration proves nothing.** Enrolment
+     * runs with `attestationType: 'none'`, so the credential public key is a
+     * value the client sends and no signature covers it; possession is proven
+     * only when that key verifies an assertion. A refutation pass on 2026-09-16
+     * enrolled a key whose private half it never held, adopted that key's
+     * household and read the real holder's offers, statement and mandate. So a
+     * credential carries whether it has ever signed anything, and the household
+     * adoption below reads it.
+     */
+    markCredentialProven(id: string) {
+      name(id);
+      credentials.updateWhere(id, c => c.revoked === 0, { proven: 1 });
     },
     revokeCredential(id: string) {
       name(id);
