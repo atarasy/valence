@@ -6,6 +6,6 @@ import pathlib
 # the daily ceiling and the cooling window all stop applying at once, and the
 # presenter records nothing, imports nothing and forges nothing.
 p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
-old = '      const held = await this.mandateSource.forHousehold(offer.household);\n      if (held.length > 0) {\n'
+old = '    if (mandate === undefined && (await this.mandateSource.holdsAny(offer.household))) {\n'
 assert s.count(old) == 1, "anchor drifted"
-p.write_text(s.replace(old, '      const held: unknown[] = [];\n      if (held.length > 0) {\n', 1))
+p.write_text(s.replace(old, '    if (false) {\n', 1))

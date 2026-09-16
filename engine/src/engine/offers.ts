@@ -192,14 +192,11 @@ export class ValenceEngine {
     // presenter had only to present first. §16.5 already says a window is
     // read when a set is taken back or settled and not when it was signed, so
     // the mandate has to be the household's wherever it is read.
-    if (mandate === undefined) {
-      const held = await this.mandateSource.forHousehold(offer.household);
-      if (held.length > 0) {
-        throw unprocessable(
-          "mandate_unknown",
-          `this household has ${held.length === 1 ? "a mandate" : "mandates"} here and this offer names ${offer.mandate}, which is not one of them`
-        );
-      }
+    if (mandate === undefined && (await this.mandateSource.holdsAny(offer.household))) {
+      throw unprocessable(
+        "mandate_unknown",
+        `this household has a mandate here and this offer names ${offer.mandate}, which is not one of them`
+      );
     }
     return mandate;
   }

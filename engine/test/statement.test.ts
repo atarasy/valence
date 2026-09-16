@@ -207,12 +207,12 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
         version: 1,
       } as never;
     },
-    async forHousehold(h: string) {
+    async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
       // whose it is, or an offer of that household naming another label is
       // refused before the stub is read.
       const m = (await this.get("")) as { household?: string } | undefined;
-      return m && m.household === h ? [m as never] : [];
+      return m?.household === h;
     },
   });
 
@@ -395,12 +395,12 @@ describe("§6, §16.3: nothing is written on refusal, at the ledger as well", ()
         version: 1,
       } as never;
     },
-    async forHousehold(h: string) {
+    async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
       // whose it is, or an offer of that household naming another label is
       // refused before the stub is read.
       const m = (await this.get("")) as { household?: string } | undefined;
-      return m && m.household === h ? [m as never] : [];
+      return m?.household === h;
     },
   });
 

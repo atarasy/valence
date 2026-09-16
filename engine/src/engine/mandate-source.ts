@@ -19,13 +19,16 @@ import type { Mandate } from "../hub/mandates.js";
 export type MandateSource = {
   get(id: string): Promise<Mandate | undefined>;
   /**
-   * §16.2, question 56. Which mandates this household has here, so that an
-   * offer naming one it does not have can be refused. `get` alone cannot say:
+   * §16.2, question 56. **Whether this household has any mandate here**, and
+   * nothing more than whether: the route that carries this between two parties
+   * is reachable by whoever holds a household identifier, which every merchant
+   * does, and a mandate's contents were behind its own unguessable label.
+   * An offer naming a mandate the household does not have is refused. `get` alone cannot say:
    * an unknown mandate is left alone, and a presenter that named a label the
    * household never recorded got an offer with no ceiling and no cooling
    * window, having recorded nothing and forged nothing. Measured 2026-09-16.
    */
-  forHousehold(household: string): Promise<Mandate[]>;
+  holdsAny(household: string): Promise<boolean>;
 };
 
 /** The register in this process. What the reference runs when it presents both roles. */
@@ -39,8 +42,8 @@ export class LocalMandates implements MandateSource {
   async get(id: string): Promise<Mandate | undefined> {
     return this.rows.get(id);
   }
-  async forHousehold(household: string): Promise<Mandate[]> {
-    return this.rows.forHousehold(household);
+  async holdsAny(household: string): Promise<boolean> {
+    return this.rows.forHousehold(household).length > 0;
   }
 }
 
@@ -88,11 +91,12 @@ export class RemoteMandates implements MandateSource {
   }
 
   /**
-   * §16.2, question 56. The hub answers which mandates a household has, over
-   * `GET /_node/mandates?household={id}`. A hub that cannot be reached is not
+   * §16.2, question 56. The hub answers whether a household has any mandate,
+   * over `GET /_node/mandates?household={id}`, which carries `has` and not the
+   * rows. A hub that cannot be reached is not
    * a hub that says there are none, for the reason `get` gives.
    */
-  async forHousehold(household: string): Promise<Mandate[]> {
+  async holdsAny(household: string): Promise<boolean> {
     let response: Response;
     try {
       response = await this.fetchImpl(
@@ -111,6 +115,6 @@ export class RemoteMandates implements MandateSource {
         `the hub answered ${response.status} for the mandates of ${household}`
       );
     }
-    return ((await response.json()) as { mandates?: Mandate[] }).mandates ?? [];
+    return ((await response.json()) as { has?: boolean }).has === true;
   }
 }

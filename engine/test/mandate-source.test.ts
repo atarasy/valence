@@ -23,8 +23,8 @@ describe("§13.1: where the engine reads a protection from", () => {
     expect(await source.get("m-1")).toEqual(mandate);
     expect(await source.get("m-2")).toBeUndefined();
     // §16.2, question 56. Which mandates a household has here.
-    expect(await source.forHousehold(mandate.household)).toEqual([mandate]);
-    expect(await source.forHousehold("somebody-else")).toEqual([]);
+    expect(await source.holdsAny(mandate.household)).toBe(true);
+    expect(await source.holdsAny("somebody-else")).toBe(false);
   });
 
   test("the remote source asks the hub over the endpoint the specification defines", async () => {

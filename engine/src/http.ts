@@ -1122,12 +1122,15 @@ async function route(
     );
   }
 
-  // §16.2, question 56. Which mandates a household has here, so that an engine
-  // that is not this process can refuse an offer naming one it does not.
+  // §16.2, question 56. Whether a household has any mandate here, so that an
+  // engine that is not this process can refuse an offer naming one it does not.
   if (parts[0] === "_node" && parts[1] === "mandates" && parts.length === 2 && method === "GET") {
     const household = url.searchParams.get("household");
     if (!household) throw badRequest("malformed", "household query parameter required");
-    return json({ mandates: engine.mandates.forHousehold(household) });
+    // One bit and not the rows: this route is reachable by whoever holds a
+    // household identifier, which every merchant does, and a mandate's
+    // contents were behind its own unguessable label until now.
+    return json({ has: engine.mandates.forHousehold(household).length > 0 });
   }
 
   if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {
