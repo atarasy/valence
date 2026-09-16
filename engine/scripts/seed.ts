@@ -39,6 +39,7 @@ const OTHER = nameOf(pemOf(otherPair));
 
 import { canonical } from "../src/shared/lineage.js";
 import { nameOf } from "../src/common/names.js";
+import { canonicalMandate } from "../src/hub/mandates.js";
 import { canonicalEntry } from "../src/shared/registry.js";
 import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { ownerOf } from "../src/common/roles.js";
@@ -413,23 +414,13 @@ const baseMandate = {
   lapses_at: Date.now() + 365 * 86_400_000,
   version: 1,
 };
-const canonicalMandate = (m: typeof baseMandate) =>
-  Buffer.from(
-    [
-      m.id,
-      m.household,
-      String(m.ceiling_out_of_network),
-      m.ceiling_daily === null ? "" : String(m.ceiling_daily),
-      m.cooling_seconds === null ? "" : String(m.cooling_seconds),
-      // Escaped exactly as `canonicalMandate` in the engine escapes it. The
-      // seed joined raw until 2026-09-12, which agreed only because no key
-      // here holds a character that changes under it.
-      [...m.co_signers].sort().map(encodeURIComponent).join(","),
-      String(m.lapses_at),
-      String(m.version),
-    ].join("\n"),
-    "utf8"
-  );
+// §16.1. The engine's own canonical form, imported rather than written again.
+// The seed kept a copy, "escaped exactly as the engine escapes it", and that
+// copy is what an engine mutation is measured against: when a co-signer became
+// a `key:` name on 2026-09-16 the copy and the engine disagreed under
+// `mandate_form_is_malleable`, the seed died, and a mutation that a probe
+// catches was reported as one that aborts. The seed is deployment plumbing and
+// the independent implementation of this form is the suite's.
 await post("/_node/mandates", {
   ...baseMandate,
   signatures: {
