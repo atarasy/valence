@@ -7,7 +7,7 @@ import type {MemberRuntimeConfig} from './config.ts';
 import {memberRuntime} from './runtime.ts';
 import config from './deployment/config.json';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
-import {isHouseholdName,householdOfMandate} from '../../engine/src/common/names.ts';
+import {isHouseholdName,householdOfMandate,nameOf} from '../../engine/src/common/names.ts';
 import {credentialSPKI} from '../member-login/credential-key.ts';
 test('trusted statement acceptance lets the registered passkey approve one physical statement through HTTP',async()=>{
  const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
@@ -28,7 +28,20 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const spentFlow=await (await send('/auth/enrollment/options',{invitation:wrong.token})).json();
   expect((await send('/auth/enrollment/verify',{id:spentFlow.id,response:spent.register(spentFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('0 have signed in and 1 have not');
-  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:1,remaining:0});
+  // A second credential beside a signed-in one is the state a fifth pass
+  // measured: the step proceeded silently, adopted whichever had signed in, and
+  // left the other reading the household with nothing proven and no way to
+  // remove it. One credential, and it must have signed.
+  const spentToken=await (async()=>{const f=await (await send('/auth/login/options',{})).json();const r=await send('/auth/login/verify',{id:f.id,response:spent.authenticate(f.publicKey.challenge,c.origin,c.rpID,spentFlow.publicKey.user.id,1)});expect(r.status).toBe(200);return (await r.json()).token as string;})();
+  expect((await send('/auth/session',undefined,spentToken)).status).toBe(401);
+  const extra=syntheticAuthenticator(),extraInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
+  const extraFlow=await (await send('/auth/enrollment/options',{invitation:extraInvite.token})).json();
+  expect((await send('/auth/enrollment/verify',{id:extraFlow.id,response:extra.register(extraFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
+  await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('1 have signed in and 1 have not');
+  // `retire` undoes the whole enrolment step, signed-in credentials included,
+  // because nothing has been adopted yet and a deployment with two signed-in
+  // credentials was one no command could leave.
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:2,signedIn:1,unproven:1});
   const invitation=await unit.run(s=>inviteDeviceAcceptance(s,c)),key=syntheticAuthenticator();
   const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
   expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
@@ -46,6 +59,12 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // The household is adopted from the registered passkey, and the mandate is
   // that identifier with a label, so nothing is registered under a mandate's name.
   expect(isHouseholdName(statement.household)).toBe(true);
+  // The adopted name is this credential's stored key and not any other value:
+  // for four commits the authority took the name from its caller instead.
+  expect(await unit.run(s=>{const row=s.map<{public_key:number[]}>('member_passkeys').get(key.id)!;
+   return nameOf(createPublicKey({key:credentialSPKI(new Uint8Array(row.public_key)),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());})).toBe(statement.household);
+  // The key reader is bound once, by the login that holds the passkeys.
+  await expect(unit.run(s=>memberRuntime(s,c).authority.useCredentialKeys(()=>'not a key'))).rejects.toThrow('already bound');
   expect(householdOfMandate(statement.mandate)).toBe(statement.household);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({household:statement.household});
   // Nobody signed this mandate, and it is written under a real key's name. The

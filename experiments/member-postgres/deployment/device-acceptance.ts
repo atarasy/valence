@@ -1,6 +1,8 @@
 import {openSync,writeFileSync,closeSync} from 'node:fs';
 import {isAbsolute} from 'node:path';
 import {createPool,postgresStore} from '../store.ts';
+import {DatabaseError} from 'pg';
+import {ValenceError} from '../../../engine/src/common/errors.ts';
 import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox,grantVoxPresenter,retireUnprovenCredentials} from '../device-acceptance.ts';
 import type {MemberRuntimeConfig} from '../config.ts';
 import config from './config.json';
@@ -33,8 +35,14 @@ try{
  // and its text has held a role name and a connection failure, so it is not
  // printed: a fourth refutation pass measured `password authentication failed
  // for user ...` reaching the operator's terminal through a bare message read.
- const ours=error instanceof Error&&error.constructor===Error&&typeof error.message==='string'
-  &&(error as {code?:unknown}).code===undefined&&(error as {severity?:unknown}).severity===undefined;
+ // The filter names the driver rather than guessing from `code`: a fifth pass
+ // measured that `ValenceError` carries one too, so every engine refusal,
+ // including `name_is_not_the_key`, printed as unknown. That refusal is the
+ // last thing standing behind the household rule, so hiding it is the worst
+ // case this line has.
+ const ours=error instanceof Error&&typeof error.message==='string'
+  &&!(error instanceof DatabaseError)&&(error as {severity?:unknown}).severity===undefined
+  &&(error.constructor===Error||error instanceof ValenceError);
  const reason=ours?error.message:'unknown (the failure did not come from this tool)';
  console.error('Acceptance command failed; inspect status before retrying. No automatic retry. Reason: '+reason);
  process.exitCode=1;}

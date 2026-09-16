@@ -89,7 +89,7 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  // that counted active credentials instead refused for ever as soon as one
  // device registered and did not sign in, with no command that cleared it.
  const {proven,unproven}=r.authority.credentialProof(value.principal);
- if(proven.length!==1)throw new Error(`Exactly one signed-in acceptance credential required; ${proven.length} have signed in and ${unproven.length} have not. Sign in on the device, or run \`retire\` to revoke the ones that have not.`);
+ if(proven.length!==1||unproven.length!==0)throw new Error(`Exactly one acceptance credential is required and it must have signed in; ${proven.length} have signed in and ${unproven.length} have not. Sign in on the device, or run \`retire\` and enrol it again.`);
  const credentials=proven;
  const credential=credentials[0]!,cose=r.login.verifiedPublicKey(credential);if(!cose)throw new Error('Acceptance credential unavailable');
  // The key is registered under the household's own name, not the mandate's:
@@ -161,20 +161,26 @@ export async function prepareStatementBox(store:Store,c:MemberRuntimeConfig,now=
  * the device's session like any grant change.
  */
 /**
- * Trusted operator capability for the case a registration leaves a credential
- * that has never signed anything: a device that enrolled and did not sign in,
- * or an invitation used by the wrong party. It revokes those and only those,
- * so the operator can issue another invitation. It never touches a credential
- * that has proven a key, and it refuses once a statement exists, because after
- * that the household is adopted and revoking is not what is wanted.
+ * Trusted operator capability that undoes the enrolment step. A registration
+ * proves nothing (§10.5), so a device that enrols and does not sign in, or an
+ * invitation used by the wrong party, leaves a credential the statement step
+ * refuses to proceed past. This revokes **every** active credential of the
+ * acceptance principal so the operator can invite again.
+ *
+ * It refuses once a statement exists, because by then a household has been
+ * adopted from one of these keys and revoking is not what is wanted. Before
+ * that, nothing has been adopted and no credential means anything, which is why
+ * revoking all of them is safe and why leaving the proven one behind is not:
+ * a fifth refutation pass measured a deployment with two signed-in credentials
+ * that no command could leave.
  */
 export function retireUnprovenCredentials(store:Store,c:MemberRuntimeConfig){
  const entries=checked(store,c),value=entries.get('current');if(!value)throw new Error('Acceptance not prepared');
  if(statementEntry(entries))throw new Error('Statement acceptance already prepared; inspect status');
  const r=memberRuntime(store,c);
  const {proven,unproven}=r.authority.credentialProof(value.principal);
- for(const id of unproven)r.authority.revokeCredential(id);
- return {retired:unproven.length,remaining:proven.length};
+ for(const id of [...proven,...unproven])r.authority.revokeCredential(id);
+ return {retired:proven.length+unproven.length,signedIn:proven.length,unproven:unproven.length};
 }
 export function grantVoxPresenter(store:Store,c:MemberRuntimeConfig,presenter:string,now=Date.now){
  const entries=checked(store,c),value=entries.get('current'),statement=statementEntry(entries);
