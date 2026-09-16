@@ -87,14 +87,29 @@ export class RemoteMandates implements MandateSource {
         `the hub answered ${response.status} for mandate ${id}`
       );
     }
-    return (await response.json()) as Mandate;
+    // The same reading as `holdsAny` below: a body this engine cannot parse is
+    // not a mandate, and reading it as one leaves every field undefined, which
+    // is a mandate that refuses nothing.
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered mandate ${id} in a form this engine could not read`
+      );
+    }
+    if (!body || typeof body !== "object" || typeof (body as Mandate).household !== "string") {
+      throw unprocessable("hub_refused", `the hub answered mandate ${id} without a household`);
+    }
+    return body as Mandate;
   }
 
   /**
    * §16.2, question 56. The hub answers whether a household has any mandate,
    * over `GET /_node/mandates?household={id}`, which carries `has` and not the
-   * rows. A hub that cannot be reached is not
-   * a hub that says there are none, for the reason `get` gives.
+   * rows. A hub that cannot be reached, and one that answers in a shape this
+   * engine cannot read, are neither of them a hub that says there are none.
    */
   async holdsAny(household: string): Promise<boolean> {
     let response: Response;
@@ -115,6 +130,27 @@ export class RemoteMandates implements MandateSource {
         `the hub answered ${response.status} for the mandates of ${household}`
       );
     }
-    return ((await response.json()) as { has?: boolean }).has === true;
+    // **A 200 of the wrong shape is not an answer either.** The sentence above
+    // is about a hub that cannot be reached; a hub that answered `{}`, or a
+    // page of HTML, would otherwise be read as one saying there are none, and
+    // that is the direction that drops the protection. Named by a refutation
+    // pass on 2026-09-16, which measured `200 {}` reading as none.
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates in a form this engine could not read`
+      );
+    }
+    const has = (body as { has?: unknown } | null)?.has;
+    if (typeof has !== "boolean") {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates without saying whether there are any`
+      );
+    }
+    return has;
   }
 }

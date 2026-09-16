@@ -182,6 +182,12 @@ export class ValenceEngine {
     return household === undefined ? undefined : this.identities.get(household);
   }
 
+  /**
+   * **This returns a mandate or nothing, and it also throws.** §16.2's
+   * `mandate_unknown` is refused here rather than at each caller, because the
+   * refusal belongs wherever the mandate is read; a caller added later
+   * inherits it from a name that does not say so.
+   */
   private async mandateFor(offer: Offer): Promise<Mandate | undefined> {
     const mandate = await this.mandateSource.get(offer.mandate);
     if (mandate && mandate.household !== offer.household) return undefined;
