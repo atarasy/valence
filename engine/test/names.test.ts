@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, houseFor, makeEngine } from "./helpers.js";
 import { canonicalMandate } from "../src/hub/mandates.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
 import { createApp } from "../src/http.js";
@@ -196,6 +196,37 @@ describe("§16.2, question 56: an offer names a mandate this household has", () 
     const stranger = houseFor("no-mandate-yet");
     const theirs = engine.createOffer({ ...offerFor(`${stranger.household}.1`, "coffee-a"), household: stranger.household } as never);
     expect((await engine.present(theirs.id)).state).toBe("presented");
+  });
+
+  test("a mandate recorded after an offer was presented still reaches it", async () => {
+    // NOTE (mutation check, 2026-09-16): offer_names_any_label. The offer
+    // settled, with the cooling window the household had set unapplied.
+    //
+    // The refusal belongs wherever the mandate is read and not at presentation
+    // alone. It was at presentation alone for an hour: a presenter had only to
+    // present before the household set its first protection, which is the
+    // ordinary order for a new member.
+    const { engine } = makeEngine();
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "replenish",
+      config_version: CONFIG_VERSION, expires_at: Date.now() + HOUR,
+      mandate: `${HOUSEHOLD}.presenter-chose-this`, price_band: null, giver: null,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    expect((await engine.present(offer.id)).state).toBe("presented");
+    const m = {
+      id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000,
+      ceiling_daily: 0, cooling_seconds: 86_400, co_signers: [],
+      lapses_at: Date.now() + 10 * HOUR, version: 1,
+    };
+    engine.mandates.record({
+      mandate: m as never,
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+      assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
+    });
+    const c = engine.mustGet(offer.id).candidates[0]!;
+    await decideSigned(engine, offer.id, [{ candidate: c.id, valence: "kept", kept_as: "self" }] as never);
+    await expect(engine.settle(offer.id, Date.now())).rejects.toMatchObject({ code: "mandate_unknown" });
   });
 });
 
