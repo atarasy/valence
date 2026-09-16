@@ -1,6 +1,7 @@
 import { records, type Records } from './records.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Ownership, Resource, Session } from '../member-read/gate.ts';
+import { isHouseholdName } from '../../engine/src/common/names.ts';
 
 type Options = { environment: string; audience: string; maxSessionLifetimeMs: number; now?: () => number };
 function name(value: unknown): asserts value is string {
@@ -39,14 +40,32 @@ export function openMemberAuthority(path: Records, options: Options) {
   return path.register({
     scope: Object.freeze({ environment, audience }),
     isActivePrincipal(id: string) { name(id); return principal(id)?.disabled === 0; },
-    matchesActivePrincipalScope(id: string, household: string, presenters: readonly string[]) {
-      name(id); name(household); const encoded=grants(presenters), p=principal(id);
+    matchesActivePrincipalScope(id: string, household: string | null, presenters: readonly string[]) {
+      name(id); if (household !== null) name(household); const encoded=grants(presenters), p=principal(id);
       return p?.disabled===0 && p.household===household && p.presenters===encoded;
     },
     provisionPrincipal(id: string, household: string, presenters: readonly string[]) {
       name(id); name(household); const encoded = grants(presenters);
       // INSERT only: no rebind, revive or silent overwrite of an existing principal.
       principals.insert(id,{id,household,presenters:encoded,disabled:0});
+    },
+    /**
+     * §13.2, question 55. A household's identifier is the name of the key its
+     * statements are signed with, and on this service that key is the device's
+     * own passkey, which does not exist until the device enrols. So a principal
+     * invited before enrolment is provisioned without a household and adopts one
+     * afterwards. The transition runs once, from unclaimed to a key, and there
+     * is no route back: a principal that has a household keeps it.
+     */
+    provisionUnclaimedPrincipal(id: string, presenters: readonly string[]) {
+      name(id); const encoded = grants(presenters);
+      principals.insert(id,{id,household:null,presenters:encoded,disabled:0});
+    },
+    adoptHousehold(id: string, household: string) {
+      name(id); name(household);
+      if (!isHouseholdName(household)) throw new Error('A household identifier is the name of its key');
+      const changed = principals.updateWhere(id, p => p.household === null && p.disabled === 0, { household });
+      if (!changed.changes) throw new Error('Principal has a household or is unavailable');
     },
     registerCredential(id: string, principalID: string) {
       name(id); name(principalID);

@@ -49,6 +49,16 @@ Member record references are validated in application code under one PostgreSQL 
 
 Local verification now covers 13 tests and 54 assertions. Neon first ran the original 11 tests (48 assertions); two additional tests cover database-enforced operation uniqueness and expired/wrong-challenge assertions. Keep the separate run logs rather than implying one larger cloud run. Native signing, actual member provisioning, workload capacity and a populated-database rollback rehearsal remain separate acceptance work.
 
+## Question 55: the household is the name of its key
+
+Measured 2026-09-16 against merged valence `7dd1781`, on a throwaway local PostgreSQL: **12 of this package's 20 tests failed**. A household's identifier is now `key:` and the base64url SHA-256 of its public key, and a mandate's is that identifier with a label, so the fixtures' `house` and `mandate-1` were refused at `createOffer` with `422 name_is_not_the_key`. The tests carried the old shape; the deployed bundle still built, which is why a build is not evidence here.
+
+Two of the three causes were fixtures: `http.test.ts` now takes the household and mandate the unified fixture derives from its own pair, and `presenter-http.test.ts` derives both from a pair of its own.
+
+The third was the acceptance flow and is a change to the service. `prepareDeviceAcceptance` used to invent `dev_house_<uuid>` and provision a principal with it, and `prepareStatementAcceptance` registered the device's passkey under a mandate's own name. Neither survives: the key a mandate's operations are checked against is the household's, the identifier names it, and that key is the passkey, which does not exist when the invitation is issued. **A principal is now provisioned without a household and adopts one at the first statement**, from the registered credential. `adoptHousehold` runs once, only from unclaimed and only to a name that is the name of a key; both refusals are asserted. After the change: **20 tests pass with 143 assertions**, where before the change the same 20 held 50.
+
+This package has no mutation scripts and no conformance probe, so its rules are proven here or nowhere.
+
 ## Physical-device acceptance preparation
 
 [Trusted operator procedure](deployment/DEVICE_ACCEPTANCE.md) prepares a separate authentication-only test account. Its helpers are absent from the deployed HTTP entry. The preparation does not create a real member household, mandate or merchant grant. See `device-acceptance.test.ts` for the isolated public-registration verification.

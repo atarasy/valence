@@ -3,9 +3,10 @@ import type {Store} from '../../engine/src/common/store.ts';
 import {canonicalConfig} from '../../engine/src/engine/offers.ts';
 import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
 import {credentialSPKI} from '../member-login/credential-key.ts';
+import {nameOf} from '../../engine/src/common/names.ts';
 import {memberRuntimeIdentity,type MemberRuntimeConfig} from './config.ts';
 import {memberRuntime} from './runtime.ts';
-type Acceptance={principal:string;household:string;createdAt:number};
+type Acceptance={principal:string;household:string|null;createdAt:number};
 type StatementAcceptance={presenter:string;merchant:string;mandate:string;offer:string;credential:string;createdAt:number};
 const DAY_MS=86_400_000;
 function checked(store:Store,c:MemberRuntimeConfig){
@@ -18,15 +19,18 @@ function statementEntry(entries:ReturnType<typeof checked>){return entries.get('
 /** Trusted operator capability. Not imported by the deployed HTTP entry. */
 export function prepareDeviceAcceptance(store:Store,c:MemberRuntimeConfig){
  const entries=checked(store,c);if(entries.has('current'))throw new Error('Acceptance already prepared; inspect status');
- const value={principal:'dev_member_'+randomUUID().replaceAll('-',''),household:'dev_house_'+randomUUID().replaceAll('-',''),createdAt:Date.now()};
- memberRuntime(store,c).authority.provisionPrincipal(value.principal,value.household,[]);
+ // §13.2, question 55. The household's identifier is the name of the key its
+ // statements are signed with, which here is the passkey the device registers,
+ // so preparation cannot name a household: it is adopted at the first statement.
+ const value:Acceptance={principal:'dev_member_'+randomUUID().replaceAll('-',''),household:null,createdAt:Date.now()};
+ memberRuntime(store,c).authority.provisionUnclaimedPrincipal(value.principal,[]);
  entries.set('current',value);return value;
 }
 export function deviceAcceptanceStatus(store:Store,c:MemberRuntimeConfig){
  const entries=checked(store,c),value=entries.get('current');if(!value)return {prepared:false as const};
  const statement=statementEntry(entries),vox=entries.get('vox') as unknown as {presenter:string}|undefined;
  const grants=vox?[vox.presenter]:statement?[statement.presenter]:[];
- const principal=store.map<{household:string;presenters:string;disabled:number}>('member_principals').get(value.principal);
+ const principal=store.map<{household:string|null;presenters:string;disabled:number}>('member_principals').get(value.principal);
  if(!principal||principal.household!==value.household||principal.presenters!==JSON.stringify(grants)||principal.disabled!==0)throw new Error('Acceptance principal changed or unavailable');
  const credentials=store.map<{principal:string;revoked:number}>('member_credentials');
  const base={prepared:true as const,...value,presenterGrants:grants.length,activeCredentials:[...credentials.values()].filter(v=>v.principal===value.principal&&v.revoked===0).length};
@@ -79,20 +83,26 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  // One passkey only, so the mandate key cannot silently pick among devices.
  const credentials=r.authority.activeCredentialIDs(value.principal);if(credentials.length!==1)throw new Error('Exactly one active acceptance credential required');
  const credential=credentials[0]!,cose=r.login.verifiedPublicKey(credential);if(!cose)throw new Error('Acceptance credential unavailable');
- const mandate='dev_mandate_'+randomUUID().replaceAll('-','');
- r.engine.registerIdentity(mandate,createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
- r.engine.mandates.importMandate({id:mandate,household:value.household,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
- const box=await presentBox(r,value.household,mandate,at);
+ // The key is registered under the household's own name, not the mandate's:
+ // a mandate has no key, and its identifier is the household's with a label.
+ const pem=createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();
+ const household=nameOf(pem);
+ if(value.household===null){r.authority.adoptHousehold(value.principal,household);entries.set('current',{...value,household});}
+ else if(value.household!==household)throw new Error('Acceptance household is not this credential');
+ const mandate=household+'.1';
+ r.engine.registerIdentity(household,pem);
+ r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
+ const box=await presentBox(r,household,mandate,at);
  // Changing grants revokes the device's current session; it signs in again afterwards.
  r.authority.setPresenterGrants(value.principal,[box.presenter]);
- r.authority.bindResource({kind:'mandate',id:mandate},{household:value.household});
- r.authority.bindResource({kind:'offer',id:box.offer},{household:value.household,presenter:box.presenter});
+ r.authority.bindResource({kind:'mandate',id:mandate},{household});
+ r.authority.bindResource({kind:'offer',id:box.offer},{household,presenter:box.presenter});
  // Binding derives its context from a live session. This one never leaves the locked unit and is revoked before commit.
  const internal=r.authority.createSessionAfterVerification(credential,at+60_000);
  try{r.bindings.bind(internal.token,mandate);}finally{r.authority.revokeSession(internal.id);}
  const record:StatementAcceptance={...box,mandate,credential,createdAt:at};
  entries.set('statement',record as unknown as Acceptance);
- return {household:value.household,presenter:box.presenter,mandate,offer:box.offer};
+ return {household,presenter:box.presenter,mandate,offer:box.offer};
 }
 /**
  * Trusted operator capability for repeated device checks (lost responses,
@@ -103,16 +113,17 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  */
 export async function prepareStatementBox(store:Store,c:MemberRuntimeConfig,now=Date.now){
  const entries=checked(store,c),value=entries.get('current'),statement=statementEntry(entries);
- if(!value||!statement)throw new Error('Statement acceptance not prepared');
+ if(!value||!statement||value.household===null)throw new Error('Statement acceptance not prepared');
+ const household=value.household;
  // The engine owns the settlements map, and a PostgreSQL unit opens each namespace only once.
  const at=now(),r=memberRuntime(store,c,()=>at);
  if(!r.engine.settlement(statement.offer))throw new Error('Latest acceptance box is not settled');
  if(!r.authority.matchesActivePrincipalScope(value.principal,value.household,[statement.presenter]))throw new Error('Acceptance principal changed or unavailable');
- const box=await presentBox(r,value.household,statement.mandate,at);
+ const box=await presentBox(r,household,statement.mandate,at);
  r.authority.setPresenterGrants(value.principal,[box.presenter]);
- r.authority.bindResource({kind:'offer',id:box.offer},{household:value.household,presenter:box.presenter});
+ r.authority.bindResource({kind:'offer',id:box.offer},{household,presenter:box.presenter});
  entries.set('statement',{...statement,...box,createdAt:at} as unknown as Acceptance);
- return {household:value.household,presenter:box.presenter,offer:box.offer};
+ return {household,presenter:box.presenter,offer:box.offer};
 }
 /**
  * Trusted operator capability standing in for the household's own grant: lets

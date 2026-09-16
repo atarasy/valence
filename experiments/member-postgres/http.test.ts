@@ -1,5 +1,5 @@
 import {beforeAll,afterAll,expect,test} from 'bun:test';
-import {randomUUID} from 'node:crypto';
+import {generateKeyPairSync,randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -10,12 +10,14 @@ import {openPostgresMemberHTTP} from './http.ts';
 import {memberRuntime} from './runtime.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 import {seedUnified,loginResponse} from '../member-transactions/unified-fixture.ts';
-import {fixtureTime} from '../member-transactions/atomic-fixture.ts';
+import {fixtureTime,houseOf} from '../member-transactions/atomic-fixture.ts';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
 const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
 const now=()=>fixtureTime+1;
+// The invited member is a second household, so its identifier is a second key (§13.2, question 55).
+const INVITED_HOUSE=houseOf(generateKeyPairSync('ed25519'));
 beforeAll(()=>migrateDatabase(url));afterAll(async()=>{for(const id of ids){await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await pool.end();});
 async function setup(overrides:Partial<MemberRuntimeConfig>={}){
  const identity:Identity={id:'http_'+randomUUID().replaceAll('-',''),environment:'test',origin:config.origin,epoch:1};ids.push(identity.id);await initialiseDeployment(pool,identity);
@@ -26,16 +28,16 @@ async function setup(overrides:Partial<MemberRuntimeConfig>={}){
  await unit.run(store=>{const maps=new Map<string,Map<string,unknown>>();for(const r of rows){let map=maps.get(r.namespace);if(!map){map=store.map(r.namespace);maps.set(r.namespace,map);}map.set(r.k,JSON.parse(r.v));}});
  }finally{db.close();}}finally{rmSync(dir,{recursive:true,force:true});}
  const jwk=seeded.pair.publicKey.export({format:'jwk'}),cose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);
- const grant=await unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionPrincipal('member','house',['merchant-1']);r.authority.registerCredential(seeded.input.credential,'member');r.login.provisionVerifiedPasskey(seeded.input.credential,cose,1,seeded.user);r.authority.bindResource({kind:'mandate',id:'mandate-1'},{household:'house'});r.authority.bindResource({kind:'offer',id:seeded.input.statement.offer},{household:'house',presenter:'merchant-1'});const grant=r.authority.createSessionAfterVerification(seeded.input.credential,now()+90000);r.bindings.bind(grant.token,'mandate-1');return grant;});
+ const grant=await unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionPrincipal('member',seeded.input.house,['merchant-1']);r.authority.registerCredential(seeded.input.credential,'member');r.login.provisionVerifiedPasskey(seeded.input.credential,cose,1,seeded.user);r.authority.bindResource({kind:'mandate',id:seeded.input.mandate},{household:seeded.input.house});r.authority.bindResource({kind:'offer',id:seeded.input.statement.offer},{household:seeded.input.house,presenter:'merchant-1'});const grant=r.authority.createSessionAfterVerification(seeded.input.credential,now()+90000);r.bindings.bind(grant.token,seeded.input.mandate);return grant;});
  const request=(path:string,body?:unknown,token?:string)=>new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const send=(path:string,body?:unknown,token=grant.token)=>app.fetch(request(path,body,token),{peer:'fixture-peer'});
- const invite=()=>unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionPrincipal('new-member','house',['merchant-1']);return r.enrollment.issueInvitation('new-member');});
+ const invite=()=>unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionPrincipal('new-member',INVITED_HOUSE,['merchant-1']);return r.enrollment.issueInvitation('new-member');});
  return {identity,c,unit,app,grant,request,send,invite,...seeded};
 }
 test('PostgreSQL HTTP signs in reads approves reconciles identical retries and logs out',async()=>{
  const s=await setup(),flow=await (await s.send('/auth/login/options',{})).json();const signed=loginResponse(s.pair,s.input.credential,s.user,flow.publicKey.challenge,2);
  const login=await s.send('/auth/login/verify',{id:flow.id,response:signed});expect(login.status).toBe(200);const grant=await login.json();
- for(const path of ['/auth/session','/offers?household=house&presenter=merchant-1','/offers/'+s.input.statement.offer,'/offers/'+s.input.statement.offer+'/statement'])expect((await s.send(path,undefined,grant.token)).status).toBe(200);
+ for(const path of ['/auth/session','/offers?household='+encodeURIComponent(s.input.house)+'&presenter=merchant-1','/offers/'+s.input.statement.offer,'/offers/'+s.input.statement.offer+'/statement'])expect((await s.send(path,undefined,grant.token)).status).toBe(200);
  const reply=await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]},grant.token);expect(reply.status).toBe(200);const p=await reply.json();
  const assertion=loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3),path='/member/operations/'+p.operationID;
  const second=await openPostgresMemberHTTP(pool,s.identity,s.c,now);

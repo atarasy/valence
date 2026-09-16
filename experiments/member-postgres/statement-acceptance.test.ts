@@ -4,8 +4,10 @@ import {createPool,initialiseDeployment,postgresStore} from './store.ts';
 import {openPostgresMemberHTTP} from './http.ts';
 import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox} from './device-acceptance.ts';
 import type {MemberRuntimeConfig} from './config.ts';
+import {memberRuntime} from './runtime.ts';
 import config from './deployment/config.json';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
+import {isHouseholdName,householdOfMandate} from '../../engine/src/common/names.ts';
 test('trusted statement acceptance lets the registered passkey approve one physical statement through HTTP',async()=>{
  const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
  const pool=createPool(url),c=config as MemberRuntimeConfig,id={id:'statement_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1},unit=postgresStore(pool,id);
@@ -13,6 +15,9 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   await initialiseDeployment(pool,id);const app=await openPostgresMemberHTTP(pool,id,c);
   const send=(path:string,body?:unknown,token?:string)=>app.fetch(new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}),{peer:'statement-test'});
   const prepared=await unit.run(s=>prepareDeviceAcceptance(s,c));
+  // §13.2, question 55. Preparation cannot name the household: its identifier is
+  // the name of the passkey the device has not registered yet.
+  expect(prepared.household).toBeNull();
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('Exactly one active acceptance credential');
   const invitation=await unit.run(s=>inviteDeviceAcceptance(s,c)),key=syntheticAuthenticator();
   const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
@@ -20,7 +25,16 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const userHandle=flow.publicKey.user.id,signIn=async(counter:number)=>{const f=await (await send('/auth/login/options',{})).json();const reply=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,userHandle,counter)});expect(reply.status).toBe(200);return (await reply.json()).token as string;};
   const before=await signIn(1);
   const statement=await unit.run(s=>prepareStatementAcceptance(s,c));
-  expect(statement.household).toBe(prepared.household);
+  // The household is adopted from the registered passkey, and the mandate is
+  // that identifier with a label, so nothing is registered under a mandate's name.
+  expect(isHouseholdName(statement.household)).toBe(true);
+  expect(householdOfMandate(statement.mandate)).toBe(statement.household);
+  expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({household:statement.household});
+  await expect(unit.run(s=>s.map<{household:string}>('member_principals').get(prepared.principal)?.household)).resolves.toBe(statement.household);
+  // The transition runs once and only to a key: a second adoption is refused,
+  // and so is a name that is not the name of any key.
+  await expect(unit.run(s=>memberRuntime(s,c).authority.adoptHousehold(prepared.principal,statement.household))).rejects.toThrow('Principal has a household');
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_unclaimed',[]);r.authority.adoptHousehold('dev_member_unclaimed','dev_house_plain');})).rejects.toThrow('the name of its key');
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('already prepared');
   // The grant change revokes the earlier session and the internal binding session leaves nothing live.
   expect((await send('/auth/session',undefined,before)).status).toBe(401);
@@ -28,7 +42,7 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({activeCredentials:1,presenterGrants:1,statement:{offer:statement.offer,mandate:statement.mandate,presenter:statement.presenter,settled:false}});
   const token=await signIn(2);
   expect((await (await send('/auth/session',undefined,token)).json()).presenters).toEqual([statement.presenter]);
-  const list=await (await send('/offers?household='+prepared.household+'&presenter='+statement.presenter,undefined,token)).json();
+  const list=await (await send('/offers?household='+encodeURIComponent(statement.household)+'&presenter='+statement.presenter,undefined,token)).json();
   expect(list.offers.map((o:{id:string})=>o.id)).toEqual([statement.offer]);
   expect((await send('/offers/'+statement.offer+'/statement',undefined,token)).status).toBe(200);
   const p=await (await send('/member/statements/prepare',{offer:statement.offer,disputed:[]},token)).json();
