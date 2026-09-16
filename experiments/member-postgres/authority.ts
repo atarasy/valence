@@ -61,11 +61,25 @@ export function openMemberAuthority(path: Records, options: Options) {
       name(id); const encoded = grants(presenters);
       principals.insert(id,{id,household:null,presenters:encoded,disabled:0});
     },
+    /**
+     * **This checks the shape of the name and that nobody else holds it. It does
+     * not check that the key is this principal's**, which the caller does by
+     * deriving the name from that principal's own credential. A refutation pass
+     * on 2026-09-16 adopted a freshly generated key's name onto a principal with
+     * no credential at all, so the sentence is here rather than left implied.
+     *
+     * The uniqueness check is the half that belongs here: `permitted()` keys a
+     * read on the session's household alone, so two principals holding one
+     * household is one read scope, and the same pass measured it.
+     */
     adoptHousehold(id: string, household: string) {
       name(id); name(household);
       if (!isHouseholdName(household)) throw new Error('A household identifier is the name of its key');
-      const changed = principals.updateWhere(id, p => p.household === null && p.disabled === 0, { household });
-      if (!changed.changes) throw new Error('Principal has a household or is unavailable');
+      db.transaction(() => {
+        if (principals.find(p => p.household === household)) throw new Error('Household already held');
+        const changed = principals.updateWhere(id, p => p.household === null && p.disabled === 0, { household });
+        if (!changed.changes) throw new Error('Principal has a household or is unavailable');
+      }).immediate();
     },
     registerCredential(id: string, principalID: string) {
       name(id); name(principalID);
@@ -120,10 +134,31 @@ export function openMemberAuthority(path: Records, options: Options) {
     revokeSession(id: string) {
       name(id); sessions.patch(id,{revoked:1});
     },
+    /**
+     * Ending a session must not depend on reading it. `resolveSession` answers
+     * nothing for a principal that has not adopted a household (§13.2, question
+     * 55), and a logout that revoked only what it could resolve answered 204
+     * and left that session live for its full hour. Measured by a refutation
+     * pass on 2026-09-16.
+     */
+    endSession(token: string): boolean {
+      if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return false;
+      const d=digest(token);
+      return db.transaction(() => {
+        const row = sessions.find(v=>v.digest===d&&v.revoked===0);
+        if (!row) return false;
+        sessions.patch(row.id,{revoked:1});
+        return true;
+      }).immediate();
+    },
     async resolveSession(token: string): Promise<Session | undefined> {
       if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;
-      const row = activeSession(digest(token),now()) as { id: string; expires: number; household: string; presenters: string } | null;
-      if (!row) return;
+      const row = activeSession(digest(token),now()) as { id: string; expires: number; household: string | null; presenters: string } | null;
+      // A principal that has not adopted a household has no session to resolve.
+      // Returning rather than throwing is what lets the holder log out: the
+      // transport swallows a throw, so the revoke never ran and the session
+      // stayed live for its full hour. Measured by a refutation pass 2026-09-16.
+      if (!row || row.household === null) return;
       const presenters: unknown = JSON.parse(row.presenters);
       if (!Array.isArray(presenters) || grants(presenters) !== row.presenters) throw new Error('Invalid stored grants');
       name(row.household); timestamp(row.expires);

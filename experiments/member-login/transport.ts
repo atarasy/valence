@@ -73,8 +73,10 @@ export function memberTransport(deps: Deps) {
       if (path === '/auth/enrollment/verify') return json(201, await deps.enrollment.finish(input.id as string, input.response as unknown as RegistrationResponseJSON));
       const token = request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];
       if (!token) return refused(401);
-      const session = await deps.authority.resolveSession(token);
-      if (session) deps.authority.revokeSession(session.id);
+      // Revoke by the token, not by a resolved session: a session whose
+      // principal has not adopted a household resolves to nothing and used to
+      // survive its own logout.
+      deps.authority.endSession(token);
       return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
     } catch { return refused(401); }
   };

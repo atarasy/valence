@@ -111,6 +111,17 @@ export function openMemberAuthority(path: DatabaseTarget, options: Options) {
     revokeSession(id: string) {
       name(id); db.query('UPDATE sessions SET revoked=1 WHERE id=?').run(id);
     },
+    /**
+     * Ending a session must not depend on reading it. `resolveSession` answers
+     * nothing for a principal that has not adopted a household (§13.2, question
+     * 55), and a logout that revoked only what it could resolve answered 204
+     * and left that session live for its full hour. Measured by a refutation
+     * pass on 2026-09-16.
+     */
+    endSession(token: string): boolean {
+      if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return false;
+      return db.query('UPDATE sessions SET revoked=1 WHERE digest=? AND revoked=0').run(digest(token)).changes > 0;
+    },
     async resolveSession(token: string): Promise<Session | undefined> {
       if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;
       const row = db.query(`SELECT s.id, s.expires, p.household, p.presenters FROM sessions s

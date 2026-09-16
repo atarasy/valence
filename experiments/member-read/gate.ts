@@ -1,4 +1,5 @@
 import { validProjection } from './projection.ts';
+import { householdOfMandate } from '../../engine/src/common/names.ts';
 /** Opt-in read boundary. Trusted adapters are required; this is not a token verifier. */
 export type Session = {
   id: string; environment: string; household: string; presenters: readonly string[];
@@ -19,8 +20,10 @@ const headers = { 'content-type': 'application/json', 'cache-control': 'no-store
 const fail = (status: number, code: string) => new Response(JSON.stringify({ error: code, message: status === 401 ? 'Session unavailable.' : 'Resource unavailable.' }), { status, headers });
 const pathID = /^[A-Za-z0-9_-]+$/;
 // §13.2, question 55. A mandate's identifier is its household's, a full stop
-// and a label, so it carries a colon that a path may percent-encode.
-const mandateID = /^key:[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{1,64}$/;
+// and a label, so it carries a colon that a path may percent-encode. The form
+// is read from the engine and not restated here: a second copy accepted
+// `key:` and 42 `A`s and a `B`, which is the name of no key at all.
+const mandateID = (id: string) => householdOfMandate(id) !== undefined;
 const decoded = (segment: string): string | undefined => {
   try { return decodeURIComponent(segment); } catch { return undefined; }
 };
@@ -37,7 +40,7 @@ function route(request: Request, origin: string): Route | undefined {
   if ([...url.searchParams].length) return;
   if (parts.length === 4 && parts[1] === '_node' && parts[2] === 'mandates') {
     const id = decoded(parts[3]!);
-    if (id !== undefined && mandateID.test(id)) return { kind: 'resource', resource: { kind: 'mandate', id } };
+    if (id !== undefined && mandateID(id)) return { kind: 'resource', resource: { kind: 'mandate', id } };
     return;
   }
   if (parts[1] !== 'offers' || !pathID.test(parts[2] ?? '')) return;

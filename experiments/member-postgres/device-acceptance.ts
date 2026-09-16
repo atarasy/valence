@@ -9,6 +9,8 @@ import {memberRuntime} from './runtime.ts';
 type Acceptance={principal:string;household:string|null;createdAt:number};
 type StatementAcceptance={presenter:string;merchant:string;mandate:string;offer:string;credential:string;createdAt:number};
 const DAY_MS=86_400_000;
+// One acceptance box: the catalogue price below plus the carriage recorded with it.
+const ACCEPTANCE_PRICE=1200,ACCEPTANCE_CARRIAGE=550,ACCEPTANCE_BOX_TOTAL=ACCEPTANCE_PRICE+ACCEPTANCE_CARRIAGE;
 function checked(store:Store,c:MemberRuntimeConfig){
  const expected=memberRuntimeIdentity(c),bound=store.map<typeof expected>('member_config').get('current');
  if(c.environment!=='development'||!bound||bound.profile!==expected.profile||bound.fingerprint!==expected.fingerprint||memberRuntimeIdentity(bound.config).fingerprint!==expected.fingerprint)throw new Error('Acceptance configuration unavailable');
@@ -58,13 +60,13 @@ async function presentBox(r:ReturnType<typeof memberRuntime>,household:string,ma
  const presenterPair=generateKeyPairSync('ed25519'),merchantPair=generateKeyPairSync('ed25519');
  r.engine.registerIdentity(ids.presenter,presenterPair.publicKey.export({type:'spki',format:'pem'}).toString());
  r.engine.registerIdentity(ids.merchant,merchantPair.publicKey.export({type:'spki',format:'pem'}).toString());
- const config={version:'dev-acceptance-'+suffix,presenter:ids.presenter,products:{[ids.product]:{merchant:ids.merchant,maker:'dev_maker_'+suffix,ships:'dev_carrier_'+suffix,price:1200,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}}}};
+ const config={version:'dev-acceptance-'+suffix,presenter:ids.presenter,products:{[ids.product]:{merchant:ids.merchant,maker:'dev_maker_'+suffix,ships:'dev_carrier_'+suffix,price:ACCEPTANCE_PRICE,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}}}};
  r.engine.registerConfig(config,sign(null,canonicalConfig(config),presenterPair.privateKey).toString('base64'));
  const disclosure={merchant:ids.merchant,product:null,version:'dev-acceptance-d1',items:[{label:'notice',value:'Development acceptance record. No goods are shipped and no payment is taken.'}]};
  r.engine.putDisclosure({...disclosure,signature:sign(null,canonicalDisclosure(disclosure),merchantPair.privateKey).toString('base64')});
  const offer=r.engine.createOffer({binding:'physical',household,purpose:'replenish',config_version:config.version,expires_at:at+DAY_MS,mandate,price_band:null,giver:null,candidates:[{product:ids.product,quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
  await r.engine.present(offer.id,at);
- r.deliveries.record({offer:offer.id,carriage:550,code:'dev-acceptance',status:'delivered',now:at});
+ r.deliveries.record({offer:offer.id,carriage:ACCEPTANCE_CARRIAGE,code:'dev-acceptance',status:'delivered',now:at});
  r.engine.collect({offer:offer.id,consumed:offer.candidates.map(v=>v.id),returned:[],at});
  r.engine.applyRecoveryTo(offer.id,at);
  return {presenter:ids.presenter,merchant:ids.merchant,offer:offer.id};
@@ -91,7 +93,16 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  else if(value.household!==household)throw new Error('Acceptance household is not this credential');
  const mandate=household+'.1';
  r.engine.registerIdentity(household,pem);
- r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
+ // **Nobody signed this mandate.** §16.1's signed route is `record`; this is
+ // `importMandate`, which checks no signature, name or version, and the
+ // household is now the real name of a real key, so what it writes is a
+ // version 1 the key's holder never agreed to and can only ever build a
+ // version 2 on top of. Named by a refutation pass on 2026-09-16 and open as
+ // the second half of question 56. Until the device records its own mandate
+ // through an assertion, the terms here are the narrowest the acceptance box
+ // needs rather than the widest the shape allows: one box's price and
+ // carriage, and a week.
+ r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:ACCEPTANCE_BOX_TOTAL,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
  const box=await presentBox(r,household,mandate,at);
  // Changing grants revokes the device's current session; it signs in again afterwards.
  r.authority.setPresenterGrants(value.principal,[box.presenter]);

@@ -1,5 +1,5 @@
 import {test,expect} from 'bun:test';
-import {randomUUID} from 'node:crypto';
+import {generateKeyPairSync,randomUUID} from 'node:crypto';
 import {createPool,initialiseDeployment,postgresStore} from './store.ts';
 import {openPostgresMemberHTTP} from './http.ts';
 import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox} from './device-acceptance.ts';
@@ -7,7 +7,7 @@ import type {MemberRuntimeConfig} from './config.ts';
 import {memberRuntime} from './runtime.ts';
 import config from './deployment/config.json';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
-import {isHouseholdName,householdOfMandate} from '../../engine/src/common/names.ts';
+import {isHouseholdName,householdOfMandate,nameOf} from '../../engine/src/common/names.ts';
 test('trusted statement acceptance lets the registered passkey approve one physical statement through HTTP',async()=>{
  const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
  const pool=createPool(url),c=config as MemberRuntimeConfig,id={id:'statement_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1},unit=postgresStore(pool,id);
@@ -23,31 +23,47 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
   expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
   const userHandle=flow.publicKey.user.id,signIn=async(counter:number)=>{const f=await (await send('/auth/login/options',{})).json();const reply=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,userHandle,counter)});expect(reply.status).toBe(200);return (await reply.json()).token as string;};
-  const before=await signIn(1);
+  // A device that has enrolled but whose principal has not adopted a household
+  // holds a session it can end. A refutation pass measured the opposite: the
+  // resolver threw, the transport swallowed the throw, and the revoke never
+  // ran, so the session stayed live for its full hour.
+  const unclaimed=await signIn(1);
+  expect((await send('/auth/session',undefined,unclaimed)).status).toBe(401);
+  expect((await send('/auth/logout',{},unclaimed)).status).toBe(204);
+  expect(await unit.run(s=>[...s.map<{revoked:number}>('member_sessions').values()].filter(v=>v.revoked===0).length)).toBe(0);
+  const before=await signIn(2);
   const statement=await unit.run(s=>prepareStatementAcceptance(s,c));
   // The household is adopted from the registered passkey, and the mandate is
   // that identifier with a label, so nothing is registered under a mandate's name.
   expect(isHouseholdName(statement.household)).toBe(true);
   expect(householdOfMandate(statement.mandate)).toBe(statement.household);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({household:statement.household});
+  // Nobody signed this mandate, so its terms are the narrowest the acceptance
+  // box needs. If it is ever widened, it is widened under a real key's name.
+  expect(await unit.run(s=>s.map<{household:string;ceiling_out_of_network:number;ceiling_daily:number|null;co_signers:string[];version:number}>('mandates').get(statement.mandate)))
+   .toMatchObject({household:statement.household,ceiling_out_of_network:1750,co_signers:[],version:1});
   await expect(unit.run(s=>s.map<{household:string}>('member_principals').get(prepared.principal)?.household)).resolves.toBe(statement.household);
-  // The transition runs once and only to a key: a second adoption is refused,
-  // and so is a name that is not the name of any key.
-  await expect(unit.run(s=>memberRuntime(s,c).authority.adoptHousehold(prepared.principal,statement.household))).rejects.toThrow('Principal has a household');
+  // The transition runs once, only to a key, and only to a key nobody else
+  // holds. The last of the three was measured open by a refutation pass: two
+  // principals held one household and `permitted()` keys a read on the
+  // household alone, so that was one read scope.
+  const other=nameOf(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}).toString());
+  await expect(unit.run(s=>memberRuntime(s,c).authority.adoptHousehold(prepared.principal,other))).rejects.toThrow('Principal has a household');
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);r.authority.adoptHousehold('dev_member_second',statement.household);})).rejects.toThrow('Household already held');
   await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_unclaimed',[]);r.authority.adoptHousehold('dev_member_unclaimed','dev_house_plain');})).rejects.toThrow('the name of its key');
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('already prepared');
   // The grant change revokes the earlier session and the internal binding session leaves nothing live.
   expect((await send('/auth/session',undefined,before)).status).toBe(401);
   expect(await unit.run(s=>[...s.map<{credential:string;revoked:number}>('member_sessions').values()].filter(v=>v.revoked===0).length)).toBe(0);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({activeCredentials:1,presenterGrants:1,statement:{offer:statement.offer,mandate:statement.mandate,presenter:statement.presenter,settled:false}});
-  const token=await signIn(2);
+  const token=await signIn(3);
   expect((await (await send('/auth/session',undefined,token)).json()).presenters).toEqual([statement.presenter]);
   const list=await (await send('/offers?household='+encodeURIComponent(statement.household)+'&presenter='+statement.presenter,undefined,token)).json();
   expect(list.offers.map((o:{id:string})=>o.id)).toEqual([statement.offer]);
   expect((await send('/offers/'+statement.offer+'/statement',undefined,token)).status).toBe(200);
   const p=await (await send('/member/statements/prepare',{offer:statement.offer,disputed:[]},token)).json();
   expect(p.publicKey.allowCredentials).toEqual([{type:'public-key',id:key.id}]);
-  const path='/member/operations/'+p.operationID,submitted=await send(path+'/submit',{assertion:key.authenticate(p.publicKey.challenge,c.origin,c.rpID,userHandle,3)},token);
+  const path='/member/operations/'+p.operationID,submitted=await send(path+'/submit',{assertion:key.authenticate(p.publicKey.challenge,c.origin,c.rpID,userHandle,4)},token);
   expect(submitted.status).toBe(200);const receipt=await submitted.json();expect(receipt.operationState).toBe('committed');
   expect(await (await send(path+'/outcome',undefined,token)).json()).toEqual(receipt);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({statement:{settled:true}});
@@ -56,9 +72,9 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect(box.offer).not.toBe(statement.offer);expect(box.presenter).not.toBe(statement.presenter);
   await expect(unit.run(s=>prepareStatementBox(s,c))).rejects.toThrow('not settled');
   expect((await send('/auth/session',undefined,token)).status).toBe(401);
-  const again=await signIn(4);
+  const again=await signIn(5);
   const next=await (await send('/member/statements/prepare',{offer:box.offer,disputed:[]},again)).json();
-  const nextPath='/member/operations/'+next.operationID,approved=await send(nextPath+'/submit',{assertion:key.authenticate(next.publicKey.challenge,c.origin,c.rpID,userHandle,5)},again);
+  const nextPath='/member/operations/'+next.operationID,approved=await send(nextPath+'/submit',{assertion:key.authenticate(next.publicKey.challenge,c.origin,c.rpID,userHandle,6)},again);
   expect(approved.status).toBe(200);expect((await approved.json()).operationState).toBe('committed');
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({statement:{offer:box.offer,settled:true}});
  }finally{
