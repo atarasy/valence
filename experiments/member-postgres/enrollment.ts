@@ -15,6 +15,21 @@ export function openEnrollment(path: Records, authority: ReturnType<typeof openM
   const db=path,shared=true,handles=records<any>(path,'member_handles'),invitations=records<any>(path,'member_invitations'),flows=records<any>(path,'member_flows');
   const digest = (token: string) => createHash('sha256').update(JSON.stringify(['atarasy.enrollment.1', scope, token])).digest('hex');
   return path.register({
+    /**
+     * Trusted administration only. Drops every invitation and half-finished
+     * ceremony a principal has outstanding, so that undoing an enrolment step
+     * undoes what is in flight as well as what has landed. A sixth refutation
+     * pass held a ceremony open across the step that adopts a household and
+     * finished it afterwards.
+     */
+    cancelEnrolment(principal: string) {
+      return db.transaction(() => {
+        let dropped = 0;
+        invitations.deleteWhere(v => { if (v.principal === principal) { dropped++; return true; } return false; });
+        flows.deleteWhere(v => { if (v.principal === principal) { dropped++; return true; } return false; });
+        return dropped;
+      }).immediate();
+    },
     /** Trusted administration only. The bearer invitation selects the principal. */
     issueInvitation(principal: string) {
       if (!authority.isActivePrincipal(principal)) throw new Error('Principal unavailable');

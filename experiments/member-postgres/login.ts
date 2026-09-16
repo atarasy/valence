@@ -1,7 +1,8 @@
 import { records, type Records } from './records.ts';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createPublicKey, randomBytes, randomUUID } from 'node:crypto';
 import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { openMemberAuthority } from './authority.ts';
+import { credentialSPKI } from '../member-login/credential-key.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
 type Policy = { environment: string; origin: string; rpID: string; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
@@ -20,6 +21,15 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
   const now = () => { const at = clock(); integer(at); return at; };
   const db=path,shared=true,passkeys=records<any>(path,'member_passkeys'),challenges=records<any>(path,'member_challenges');
   path.assert(authority);
+  // The authority names a household after a credential's key, and this module is
+  // what holds that key, so it hands over the reader once at construction rather
+  // than letting a caller pass one per adoption.
+  authority.useCredentialKeys((id: string) => {
+    if (!b64(id)) return undefined;
+    const row = passkeys.get(id);
+    if (!row || row.active !== 1) return undefined;
+    return createPublicKey({ key: credentialSPKI(new Uint8Array(row.public_key)), format: 'der', type: 'spki' }).export({ type: 'spki', format: 'pem' }).toString();
+  });
   function activeKey(id:string){const v=passkeys.get(id);return v?.active===1?v:null;}
   return path.register({
     scope: Object.freeze({ environment, origin, rpID }),
@@ -33,10 +43,26 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
     enrolVerifiedPasskey(principal: string, id: string, publicKey: Uint8Array, counter: number, userHandle: string) {
       if (!b64(id) || !b64(userHandle) || !(publicKey instanceof Uint8Array) || !publicKey.length || publicKey.length > 4096) throw new Error('Invalid enrolled credential');
       integer(counter); if (counter > 0xffffffff) throw new Error('Invalid authenticator counter');
-      passkeys.insert(id,{id,public_key:Array.from(publicKey),counter,user_handle:userHandle,revision:0,active:0});
+      // The authority's refusals run before anything is written. The order was
+      // the other way and the caller's savepoint was what kept a refused
+      // enrolment from leaving a passkey row; a seventh refutation pass on
+      // 2026-09-16 named the dependence even though it measured it clean.
       authority.registerCredential(id, principal);
+      passkeys.insert(id,{id,public_key:Array.from(publicKey),counter,user_handle:userHandle,revision:0,active:0});
       const changed = passkeys.updateWhere(id,v=>v.active===0,{active:1});
       if (changed.changes !== 1) throw new Error('Enrollment activation failed');
+    },
+    /**
+     * Trusted administration only. Removes an enrolled passkey outright rather
+     * than marking it inactive, because a row left behind makes the same device
+     * unable to enrol again: `insert` refuses a duplicate id and the user handle
+     * persists. Measured by a seventh refutation pass on 2026-09-16, which found
+     * the tool telling the operator to enrol again after an operation that made
+     * enrolling again impossible.
+     */
+    removeEnrolledPasskey(id: string) {
+      if (!b64(id)) throw new Error('Invalid enrolled credential');
+      passkeys.delete(id);
     },
     /** Detached active public-key data for trusted internal mandate binding only. */
     verifiedPublicKey(id: string): Uint8Array | undefined {
@@ -61,6 +87,8 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       if (counter > 0xffffffff) throw new Error('Invalid authenticator counter');
       const updated = passkeys.updateWhere(credentialID,v=>v.revision===credential.revision&&v.active===1,{counter,revision:credential.revision+1});
       if (updated.changes !== 1) throw new Error('Credential changed during verification');
+      // This key has now signed something, which registration never established.
+      authority.markCredentialProven(credentialID);
       return { counter };
     },
     begin() {
@@ -90,6 +118,7 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       integer(result.authenticationInfo.newCounter);
       const updated = passkeys.updateWhere(credential.id,v=>v.revision===credential.revision,{counter:result.authenticationInfo.newCounter,revision:credential.revision+1});
       if (updated.changes !== 1) throw new Error('Login changed during verification');
+      authority.markCredentialProven(credential.id);
       const expiry = now() + sessionLifetimeMs; integer(expiry);
       // Authoritative lifecycle checks run again here. If issuance fails, the attempt stays spent.
       return authority.createSessionAfterVerification(credential.id, expiry);

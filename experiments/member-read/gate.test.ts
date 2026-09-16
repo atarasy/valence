@@ -79,6 +79,26 @@ describe('member read boundary',()=>{
    ['mandate-created','/_node/mandates/'+fixtures['mandate-created'].id,'mandate',{household:fixtures['mandate-created'].household}],
   ] as const){const {state,read}=setup();state.owner=owner;state.session!.household=owner.household;state.body=fixtures[id];expect(validProjection(kind,state.body)).toBe(true);expect((await read(path)).status).toBe(200);}
  });
+ test('the mandate route reads the engine\'s own form, so a name no key has is not a mandate',async()=>{
+  // §13.2, question 55. A restated copy of the form accepted `key:` and 42
+  // `A`s and a `B`, which is not the encoding of any 32 bytes, so two such
+  // names could stand for one household and neither is a name any key has.
+  // A refutation pass on 2026-09-16 found the copy here and nothing catching it.
+  const id=fixtures['mandate-created'].id, owner={household:fixtures['mandate-created'].household};
+  // 42 `A`s and a `B`: `B` is not one of the sixteen characters a 32-byte
+  // digest can end in, so this decodes and does not encode back to itself.
+  const notAKey='key:'+'A'.repeat(42)+'B'+'.1';
+  for(const [path,expected] of [
+   ['/_node/mandates/'+id,200],
+   ['/_node/mandates/'+encodeURIComponent(id),200],
+   ['/_node/mandates/'+notAKey,404],
+   ['/_node/mandates/'+'key:'+'A'.repeat(42)+'.1',404],
+   ['/_node/mandates/'+id.replace('.1',''),404],
+  ] as const){
+   const {state,read}=setup();state.owner=owner;state.session!.household=owner.household;state.body=fixtures['mandate-created'];
+   expect((await read(path)).status).toBe(expected);
+  }
+ });
  test('malformed auth and upstream failures cannot be interpreted as an authorised read',async()=>{
   let calls=0;const gate=memberReadBoundary({environment:'fixture',origin:'https://unit.example',now:()=>1000,resolveSession:async()=>base,ownerOf:async()=>({household:base.household,presenter:offer.presenter}),next:async()=>{calls++;return new Response('<html>private</html>',{status:500});}});
   for(const auth of [undefined,'Bearer','Bearer a b','Basic fixture-token']){const r=await gate(new Request('https://unit.example'+offerPath,{headers:auth?{authorization:auth}:{}}));expect(r.status).toBe(401);}

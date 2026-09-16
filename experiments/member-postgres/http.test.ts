@@ -1,5 +1,5 @@
 import {beforeAll,afterAll,expect,test} from 'bun:test';
-import {randomUUID} from 'node:crypto';
+import {createPublicKey,randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -7,6 +7,8 @@ import {Database} from 'bun:sqlite';
 import {createPool,initialiseDeployment,postgresStore,type Identity} from './store.ts';
 import {migrateDatabase} from './migrate.ts';
 import {openPostgresMemberHTTP} from './http.ts';
+import {credentialSPKI} from '../member-login/credential-key.ts';
+import {isHouseholdName,nameOf} from '../../engine/src/common/names.ts';
 import {memberRuntime} from './runtime.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 import {seedUnified,loginResponse} from '../member-transactions/unified-fixture.ts';
@@ -16,6 +18,10 @@ const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explici
 const pool=createPool(url),ids:string[]=[];
 const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
 const now=()=>fixtureTime+1;
+const coseOf=(pair:{publicKey:{export:(o:any)=>any}})=>{const jwk=pair.publicKey.export({format:'jwk'});return Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);};
+// The invited member is a second household, so its identifier is a second key (§13.2, question 55).
+// The invited member has not registered a passkey, so it has no household yet
+// (§13.2, question 55): a household that is a key is adopted, not assigned.
 beforeAll(()=>migrateDatabase(url));afterAll(async()=>{for(const id of ids){await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await pool.end();});
 async function setup(overrides:Partial<MemberRuntimeConfig>={}){
  const identity:Identity={id:'http_'+randomUUID().replaceAll('-',''),environment:'test',origin:config.origin,epoch:1};ids.push(identity.id);await initialiseDeployment(pool,identity);
@@ -25,17 +31,33 @@ async function setup(overrides:Partial<MemberRuntimeConfig>={}){
  const rows=db.query('SELECT namespace,k,v FROM atomic_rows ORDER BY rowid').all() as {namespace:string;k:string;v:string}[];
  await unit.run(store=>{const maps=new Map<string,Map<string,unknown>>();for(const r of rows){let map=maps.get(r.namespace);if(!map){map=store.map(r.namespace);maps.set(r.namespace,map);}map.set(r.k,JSON.parse(r.v));}});
  }finally{db.close();}}finally{rmSync(dir,{recursive:true,force:true});}
- const jwk=seeded.pair.publicKey.export({format:'jwk'}),cose=Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);
- const grant=await unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionPrincipal('member','house',['merchant-1']);r.authority.registerCredential(seeded.input.credential,'member');r.login.provisionVerifiedPasskey(seeded.input.credential,cose,1,seeded.user);r.authority.bindResource({kind:'mandate',id:'mandate-1'},{household:'house'});r.authority.bindResource({kind:'offer',id:seeded.input.statement.offer},{household:'house',presenter:'merchant-1'});const grant=r.authority.createSessionAfterVerification(seeded.input.credential,now()+90000);r.bindings.bind(grant.token,'mandate-1');return grant;});
+ const cose=coseOf(seeded.pair);
  const request=(path:string,body?:unknown,token?:string)=>new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+ const grant=await unit.run(store=>{const r=memberRuntime(store,c,now);
+  r.authority.provisionUnclaimedPrincipal('member',['merchant-1']);
+  r.authority.registerCredential(seeded.input.credential,'member');
+  r.login.provisionVerifiedPasskey(seeded.input.credential,cose,1,seeded.user);
+  // `seedUnified` ran a real login ceremony with this exact pair in its own
+  // store, so the assertion this stands for was made. Nothing here invents a
+  // proof: the verification path is exercised over HTTP in the registration
+  // test below, and the refusal without one is asserted there too.
+  r.authority.markCredentialProven(seeded.input.credential);
+  r.authority.adoptHousehold('member',seeded.input.credential);
+  r.authority.bindResource({kind:'mandate',id:seeded.input.mandate},{household:seeded.input.house});
+  r.authority.bindResource({kind:'offer',id:seeded.input.statement.offer},{household:seeded.input.house,presenter:'merchant-1'});
+  const grant=r.authority.createSessionAfterVerification(seeded.input.credential,now()+90000);
+  r.bindings.bind(grant.token,seeded.input.mandate);return grant;});
  const send=(path:string,body?:unknown,token=grant.token)=>app.fetch(request(path,body,token),{peer:'fixture-peer'});
- const invite=()=>unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionPrincipal('new-member','house',['merchant-1']);return r.enrollment.issueInvitation('new-member');});
+ const invite=()=>unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionUnclaimedPrincipal('new-member',['merchant-1']);return r.enrollment.issueInvitation('new-member');});
  return {identity,c,unit,app,grant,request,send,invite,...seeded};
 }
 test('PostgreSQL HTTP signs in reads approves reconciles identical retries and logs out',async()=>{
  const s=await setup(),flow=await (await s.send('/auth/login/options',{})).json();const signed=loginResponse(s.pair,s.input.credential,s.user,flow.publicKey.challenge,2);
  const login=await s.send('/auth/login/verify',{id:flow.id,response:signed});expect(login.status).toBe(200);const grant=await login.json();
- for(const path of ['/auth/session','/offers?household=house&presenter=merchant-1','/offers/'+s.input.statement.offer,'/offers/'+s.input.statement.offer+'/statement'])expect((await s.send(path,undefined,grant.token)).status).toBe(200);
+ // The mandate route is in the list because a path filter of `[A-Za-z0-9_-]+`
+ // answered 404 for every identifier question 55 produces, so a household could
+ // not read its own mandate anywhere. Measured by a refutation pass 2026-09-16.
+ for(const path of ['/auth/session','/offers?household='+encodeURIComponent(s.input.house)+'&presenter=merchant-1','/offers/'+s.input.statement.offer,'/offers/'+s.input.statement.offer+'/statement','/_node/mandates/'+encodeURIComponent(s.input.mandate),'/_node/mandates/'+s.input.mandate])expect((await s.send(path,undefined,grant.token)).status).toBe(200);
  const reply=await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]},grant.token);expect(reply.status).toBe(200);const p=await reply.json();
  const assertion=loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3),path='/member/operations/'+p.operationID;
  const second=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
@@ -48,8 +70,36 @@ test('PostgreSQL registration persists login across independent composition and 
  const s=await setup(),key=syntheticAuthenticator(),invitation=await s.invite(),flow=await (await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();
  const response=key.register(flow.publicKey.challenge,config.origin,config.rpID);
  expect((await s.send('/auth/enrollment/verify',{id:flow.id,response})).status).toBe(201);expect((await s.send('/auth/enrollment/verify',{id:flow.id,response})).status).toBe(401);
+ // §10.5 and question 55. Enrolment runs with `attestationType: 'none'`, so a
+ // registered public key is a value the client sent and nothing signed. A
+ // refutation pass on 2026-09-16 enrolled another household's key, adopted that
+ // household and read its offers, statement and mandate. Both halves are here:
+ // a key that has signed nothing cannot name a household, and a key that is
+ // somebody else's is exactly such a key.
+ await expect(s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);})).rejects.toThrow('Credential has proven no key');
+ const borrowed=randomUUID().replaceAll('-','');
+ await expect(s.unit.run(store=>{const r=memberRuntime(store,s.c,now);
+  r.authority.registerCredential(borrowed,'new-member');
+  r.login.provisionVerifiedPasskey(borrowed,coseOf(s.pair),0,randomUUID().replaceAll('-',''));
+  return r.authority.adoptHousehold('new-member',borrowed);})).rejects.toThrow('Credential has proven no key');
+ expect(await s.unit.run(store=>store.map<{household:string|null}>('member_principals').get('new-member')?.household)).toBeNull();
  const login=await (await s.send('/auth/login/options',{})).json();const reply=await s.send('/auth/login/verify',{id:login.id,response:key.authenticate(login.publicKey.challenge,config.origin,config.rpID,flow.publicKey.user.id)});expect(reply.status).toBe(200);
- const fresh=await openPostgresMemberHTTP(pool,s.identity,s.c,now);expect((await fresh.fetch(s.request('/auth/session',undefined,(await reply.json()).token),{peer:'fresh'})).status).toBe(200);
+ const token=(await reply.json()).token as string;
+ // §13.2, question 55. A device that has enrolled holds a session and no
+ // household until it adopts one from its own key, so there is nothing yet to
+ // read with. The adoption derives the name from the registered credential.
+ const fresh=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ expect((await fresh.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'})).status).toBe(401);
+ const adopted=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);});
+ expect(isHouseholdName(adopted)).toBe(true);
+ // The authority's own return, not the engine's later refusal: for four commits
+ // the name came from the caller, and `name_is_not_the_key` in `registerIdentity`
+ // was what stood behind it. Nothing in that path runs here.
+ expect(await s.unit.run(store=>{const row=store.map<{public_key:number[]}>('member_passkeys').get(key.id)!;
+  return nameOf(createPublicKey({key:credentialSPKI(new Uint8Array(row.public_key)),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());})).toBe(adopted);
+ const after=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ const session=await after.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'});
+ expect(session.status).toBe(200);expect((await session.json()).household).toBe(adopted);
 });
 test('failed activation consumes ceremony but rolls back the inserted passkey',async()=>{
  const s=await setup(),key=syntheticAuthenticator(),invitation=await s.invite();await s.unit.run(store=>memberRuntime(store,s.c,now).authority.registerCredential(key.id,'new-member'));

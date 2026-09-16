@@ -18,6 +18,7 @@ The **Valence Protocol**: a specification for offering goods to a person and rec
 | `~/Documents/GitHub/hacci/Projects/Atarasy/` | the private English strategy documents. `03_Spec_Valence_Engine.md` is the working copy of this specification |
 | `~/Documents/GitHub/meter` | the ledger this specification's §6.4 maps onto. `reserveCredits` → work → `commitReservedUsage` / `releaseCreditReservation` |
 | `engine/` | the reference implementation, in this repository since 2026-09-08. Read `engine/CLAUDE.md` before changing it |
+| `experiments/` | four packages that compose the engine into a member-facing service. `member-postgres` is **deployed**, at `https://api-dev.vox.delivery` (Vercel `voxtech/atarasy-api-dev`, Neon `young-pond-73223516`); the others are the pieces it is built from |
 
 Change flows one way: **decide in the vault → specify here → implement.** A design decision made only in this repository will be lost.
 
@@ -58,6 +59,19 @@ This specification is where several constitutional clauses become structural. We
 An earlier version of this file said the requirement mirrors Meter, "where an estimate below the actual is rejected at commit and the hold released". That is wrong and was corrected on 2026-09-08 after reading the code. Meter's `commitReservedUsage` charges the difference as a `usage_hold_adjustment` and succeeds; it fails only when the balance cannot cover that difference, which makes a funded account the case that slips through. It is funded accounts and no others: the commit path compares the raw balance and never calls `authorizeSpend`, so a post-paid account carrying a negative balance is refused. Meter's own architecture note describes the underfunded path and reads as though it were the rule. **A funded household is exactly the case where the authorisation is exceeded quietly.** The ceiling is the implementation's obligation and no ledger underneath supplies it.
 
 **Adding a sponsored-placement field to the feed.** §8 has no room for one, deliberately (clause 14).
+
+**Believing `experiments/` will follow a change to `engine/src`.** They import it by relative path, so they compile against whatever is there, and **a change to the engine can break the deployed development API while its Vercel bundle goes on building**. Measured on 2026-09-16, when question 55 merged: the bundle built and **12 of `member-postgres`'s 20 tests failed**, because its fixtures named a household `house` and its acceptance flow registered a device's passkey under a mandate's own name. **A build is not evidence there.** Run the experiments after any change to `engine/src`:
+
+```bash
+cd experiments/member-login   && bun test      # 24
+cd experiments/member-read    && bun test      # 36
+cd experiments/member-transactions && bun test # 114
+# member-postgres needs a real database and reads no other variable:
+export ATARASY_TEST_POSTGRES_URL="postgres://user@host:port/an_isolated_database"
+cd experiments/member-postgres && bun test --timeout 60000   # 20
+```
+
+A throwaway instance is enough (`initdb` into a temporary directory, `pg_ctl start -o "-p <port>"`, `createdb`); the tests apply their own migrations and remove their own rows. **Nothing in the corpus covers this package**: it has no mutation script and no conformance probe, so its rules are proven in its own tests or nowhere, which is how seven refutation rounds each found a defect under the previous round's fix.
 
 ## Style
 
