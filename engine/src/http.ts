@@ -1369,6 +1369,14 @@ async function route(
         if (householdOfMandate(m.id) !== moving) {
           throw unprocessable("name_is_not_the_key", `mandate ${m.id} is not this household's`);
         }
+        // §16.1. A co-signer's name is a key, here as where one is recorded: a
+        // loosening of an arriving mandate is checked against whatever key is
+        // registered under the name it carries.
+        for (const k of m.co_signers) {
+          if (!isHouseholdName(k as string)) {
+            throw unprocessable("name_is_not_the_key", `co-signer ${k} is not a key`);
+          }
+        }
         if (seenMandates.has(m.id)) throw badRequest("malformed", `mandates names ${m.id} twice`);
         seenMandates.add(m.id);
         const held = engine.mandates.get(m.id);

@@ -393,11 +393,9 @@ console.log(
 // signature. The household's own key doubles as the mandate key, which is
 // what the engine already resolves for a signed decided set (§10.5).
 const coSigner = pairFor("co-signer");
-await post("/_identities", {
-  key: "key-cosigner-conformance",
-  public_key: coSigner.publicKey.export({ type: "spki", format: "pem" }).toString(),
-  attested: true,
-});
+// §16.1, question 55. A co-signer is named by the key it signs with.
+const CO_SIGNER = nameOf(pemOf(coSigner));
+await post("/_identities", { key: CO_SIGNER, public_key: pemOf(coSigner), attested: true });
 // The household's own key, under its own name: §16 has a mandate signed by
 // the household, and §10.5 has a decided set signed by the key registered
 // for the offer's mandate reference. The same key answers to both names here.
@@ -411,7 +409,7 @@ const baseMandate = {
   // 2026-09-12, when the per-purchase second signature was removed.
   ceiling_daily: null as number | null,
   cooling_seconds: null as number | null,
-  co_signers: ["key-cosigner-conformance"],
+  co_signers: [CO_SIGNER],
   lapses_at: Date.now() + 365 * 86_400_000,
   version: 1,
 };

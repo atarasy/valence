@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { HOUSEHOLD, MANDATE, makeEngine } from "./helpers.js";
+import { HOUSEHOLD, MANDATE, houseFor, makeEngine } from "./helpers.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
 import { createApp } from "../src/http.js";
 import { ApprovalDesk } from "../src/hub/approval.js";
@@ -88,6 +88,48 @@ describe("§13.2, question 55: a name is its key", () => {
     // then refused for the signature it does not carry, which is §16.1's.
     expect(() => record(MANDATE, HOUSEHOLD))
       .toThrow(expect.objectContaining({ code: "unsigned" }));
+  });
+
+  test("a co-signer is named by the key it signs with", () => {
+    // NOTE (mutation check, 2026-09-16): cosigner_name_unchecked. A stranger
+    // registers `mum`; the household records its first version naming `mum`,
+    // which needs nobody else's signature; and every loosening after that is
+    // the stranger's to sign. Clause 47 rests on who the named people are.
+    // Found by a refutation pass over the question 55 work.
+    const { engine } = makeEngine();
+    const family = houseFor("mum").household;
+    const version = (co: string[]) => ({
+      id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1, co_signers: co,
+      ceiling_daily: null, cooling_seconds: null, lapses_at: Date.now() + 3_600_000, version: 1,
+    });
+    const record = (co: string[]) => engine.mandates.record({
+      mandate: version(co) as never, signatures: {}, assertions: {},
+      keyOf: () => undefined, relyingPartyId: "unit.example",
+    });
+    expect(() => record(["mum"])).toThrow(expect.objectContaining({ code: "name_is_not_the_key" }));
+    // A key-shaped co-signer gets past the shape and is then refused for the
+    // signature it does not carry.
+    expect(() => record([family])).toThrow(expect.objectContaining({ code: "unsigned" }));
+  });
+
+  test("a mandate still does not change hands, on a row that predates the shape", () => {
+    // NOTE (mutation check, 2026-09-16): record_mandate_changes_hands.
+    // §16.1's `wrong_household` is unreachable through the shape above, since
+    // an identifier that begins with this household cannot be held for
+    // another. It stays as the guard it was and is reached here the way a host
+    // running the older rule would hold one, because an unreachable guard is
+    // one nothing proves.
+    const { engine } = makeEngine();
+    const elsewhere = houseFor("somebody-else").household;
+    engine.mandates.importMandate({
+      id: MANDATE, household: elsewhere, ceiling_out_of_network: 1, co_signers: [],
+      ceiling_daily: null, cooling_seconds: null, lapses_at: Date.now() + 3_600_000, version: 1,
+    } as never);
+    expect(() => engine.mandates.record({
+      mandate: { id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null,
+        cooling_seconds: null, lapses_at: Date.now() + 3_600_000, version: 2 } as never,
+      signatures: {}, assertions: {}, keyOf: () => undefined, relyingPartyId: "unit.example",
+    })).toThrow(expect.objectContaining({ code: "wrong_household" }));
   });
 });
 

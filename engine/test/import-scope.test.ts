@@ -16,6 +16,8 @@ const HOME = houseFor("h");
 const VICTIM = houseFor("victim");
 const ATTACKER = houseFor("attacker");
 const X = houseFor("x");
+// §16.1. A co-signer is named by the key it signs with.
+const CO = houseFor("cs").household;
 // A giver is a household too: an edge arrives on the giver's own path when it moves.
 const G = houseFor("g");
 const M_VICTIM = `${VICTIM.household}.m`;
@@ -45,7 +47,7 @@ function host() {
 }
 
 const mandate = (household: string, over: Record<string, unknown> = {}) => ({
-  id: `${household}.m`, household, ceiling_out_of_network: 1000, co_signers: ["cs"], ceiling_daily: null,
+  id: `${household}.m`, household, ceiling_out_of_network: 1000, co_signers: [CO], ceiling_daily: null,
   cooling_seconds: 3600, lapses_at: 9e15, version: 3, ...over,
 });
 // §13.2, question 55. An export always carries a mandate, and its identifier is the household's.
@@ -60,7 +62,7 @@ describe("§14.2: an import writes only its own household's rows", () => {
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household)] })).status).toBe(201);
     const r = await h.post(ATTACKER.household, { mandates: [mandate(VICTIM.household, { ceiling_out_of_network: 1e12, co_signers: [], cooling_seconds: null, version: 1 })] });
     expect(r.status).toBe(422);
-    expect(h.engine.mandates.get(M_VICTIM)).toMatchObject({ ceiling_out_of_network: 1000, co_signers: ["cs"], cooling_seconds: 3600, version: 3 });
+    expect(h.engine.mandates.get(M_VICTIM)).toMatchObject({ ceiling_out_of_network: 1000, co_signers: [CO], cooling_seconds: 3600, version: 3 });
   });
 
   test("a mandate this host already holds is not replaced, even by its own household", async () => {
@@ -75,10 +77,10 @@ describe("§14.2: an import writes only its own household's rows", () => {
     // arrived first block the household's move.
     const h = host();
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household)] })).status).toBe(201);
-    for (const over of [{ co_signers: [] }, { co_signers: ["cs", "cs2"], ceiling_out_of_network: 0, lapses_at: 1, version: 9 }]) {
+    for (const over of [{ co_signers: [] }, { co_signers: [CO, houseFor("cs2").household], ceiling_out_of_network: 0, lapses_at: 1, version: 9 }]) {
       const again = await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household, over)] });
       expect(again.status).toBe(201);
-      expect(h.engine.mandates.get(M_VICTIM)).toMatchObject({ co_signers: ["cs"], ceiling_out_of_network: 1000, version: 3 });
+      expect(h.engine.mandates.get(M_VICTIM)).toMatchObject({ co_signers: [CO], ceiling_out_of_network: 1000, version: 3 });
     }
   });
 
@@ -192,7 +194,7 @@ describe("§14.2: a mandate that arrives again", () => {
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household)] })).status).toBe(201);
     const reordered = Object.fromEntries(Object.entries(mandate(VICTIM.household)).reverse());
     expect((await h.post(VICTIM.household, { mandates: [reordered] })).status).toBe(201);
-    expect(h.engine.mandates.get(M_VICTIM)?.co_signers).toEqual(["cs"]);
+    expect(h.engine.mandates.get(M_VICTIM)?.co_signers).toEqual([CO]);
   });
 });
 
@@ -311,7 +313,7 @@ describe("§16.1: a mandate does not change hands", () => {
     const h = host();
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household)] })).status).toBe(201);
     const taken = await h.post(ATTACKER.household, {
-      mandates: [{ ...mandate(VICTIM.household, { ceiling_out_of_network: 1, co_signers: ["cs", "x"], cooling_seconds: 99999, lapses_at: 1, version: 9 }), household: ATTACKER.household }],
+      mandates: [{ ...mandate(VICTIM.household, { ceiling_out_of_network: 1, co_signers: [CO, X.household], cooling_seconds: 99999, lapses_at: 1, version: 9 }), household: ATTACKER.household }],
     });
     expect(taken.status).toBe(422);
     expect(await taken.json()).toMatchObject({ error: "name_is_not_the_key" });

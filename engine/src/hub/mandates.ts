@@ -167,6 +167,18 @@ export class MandateRegister {
     if (householdOfMandate(mandate.id) !== mandate.household) {
       throw unprocessable("name_is_not_the_key", `mandate ${mandate.id} is not this household's`);
     }
+    // **A co-signer's name is a name a signature is checked against**, so it is
+    // a key too. Found by a refutation pass on 2026-09-16 and measured: a
+    // stranger registered `mum`, a household recorded its first version naming
+    // `mum` as a co-signer, which needs nobody else's signature, and every
+    // loosening after that was the stranger's to sign and not the real
+    // co-signer's. Clause 47 rests on who the named people are, so the defect
+    // question 55 closed for a household reached through this one name.
+    for (const k of mandate.co_signers) {
+      if (!isHouseholdName(k)) {
+        throw unprocessable("name_is_not_the_key", `co-signer ${k} is not a key`);
+      }
+    }
     const before = this.rows.get(mandate.id);
     if (before && mandate.version !== before.version + 1) {
       throw conflict(
