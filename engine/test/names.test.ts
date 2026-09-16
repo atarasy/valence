@@ -39,6 +39,21 @@ describe("§13.2, question 55: a name is its key", () => {
     }
   });
 
+  test("a name that is not the encoding of 32 bytes is not a household", () => {
+    // NOTE (mutation check, 2026-09-16): household_name_not_canonical. §13.2.
+    // The last character carries four bits of digest and two that must be
+    // zero, so a name that decodes and does not encode back to itself is one
+    // no key has and two of them could stand for one household.
+    const canonical = "key:" + "A".repeat(43);
+    expect(isHouseholdName(canonical)).toBe(true);
+    expect(Buffer.from(canonical.slice(4), "base64url").toString("base64url")).toBe(canonical.slice(4));
+    for (const tail of ["B", "C", "F", "R", "x", "9"]) {
+      const name = "key:" + "A".repeat(42) + tail;
+      expect([tail, isHouseholdName(name)]).toEqual([tail, false]);
+      expect([tail, householdOfMandate(`${name}.1`)]).toEqual([tail, undefined]);
+    }
+  });
+
   test("a mandate names its household and nothing else", () => {
     expect(householdOfMandate(MANDATE)).toBe(HOUSEHOLD);
     expect(householdOfMandate(HOUSEHOLD)).toBeUndefined();

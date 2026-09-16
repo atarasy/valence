@@ -28,9 +28,17 @@ import { createHash, createPublicKey } from "node:crypto";
  */
 const PREFIX = "key:";
 
-/** The base64url SHA-256 of a 32-byte digest is 43 characters. */
-const HOUSEHOLD = /^key:[A-Za-z0-9_-]{43}$/;
-const MANDATE = /^(key:[A-Za-z0-9_-]{43})\.[A-Za-z0-9_-]{1,64}$/;
+/**
+ * The base64url of a 32-byte digest is 43 characters, and its last character
+ * carries four bits of digest and two that must be zero, so it is one of
+ * sixteen. Without the last clause a name that is not the encoding of any
+ * 32 bytes passes: `key:` and 42 `A`s and a `B` decodes and does not encode
+ * back to itself, so two such names could stand for one household and neither
+ * is a name any key has. Named by a refutation pass on 2026-09-16.
+ */
+const TAIL = "[AEIMQUYcgkosw048]";
+const HOUSEHOLD = new RegExp(`^key:[A-Za-z0-9_-]{42}${TAIL}$`);
+const MANDATE = new RegExp(`^(key:[A-Za-z0-9_-]{42}${TAIL})\\.[A-Za-z0-9_-]{1,64}$`);
 
 /** The identifier a public key has. The DER is re-exported, so the PEM's own whitespace does not reach the name. */
 export function nameOf(publicKeyPem: string): string {
