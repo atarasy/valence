@@ -8,6 +8,7 @@ import { openVerifiedLogin } from '../member-login/login.ts';
 import { credentialSPKI } from '../member-login/credential-key.ts';
 import { openMandateBindings } from './mandate-binding.ts';
 import { makeEngine } from '../../engine/test/helpers.ts';
+import { nameOf } from '../../engine/src/common/names.ts';
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const f of cleanups.splice(0).reverse()) f(); });
 const digest = (input: string | Buffer) => createHash('sha256').update(input).digest();
@@ -22,70 +23,83 @@ async function setup(mismatch = false) {
   const authority = openMemberAuthority(join(dir, 'authority.sqlite'), { environment: 'test', audience: origin, maxSessionLifetimeMs: 5000, now: () => clock.at }); cleanups.push(() => authority.close());
   const login = openVerifiedLogin(join(dir, 'login.sqlite'), authority, { environment: 'test', origin, rpID: 'unit.example', challengeLifetimeMs: 1000, sessionLifetimeMs: 4000, now: () => clock.at }); cleanups.push(() => login.close());
   const credential = randomBytes(32).toString('base64url'), user = randomBytes(32).toString('base64url'), keys = key();
-  authority.provisionPrincipal('member', 'house', ['merchant-1']); authority.registerCredential(credential, 'member');
+  // §13.2, question 55. The household is the name of the key this member logs
+  // in with, and its mandate hangs from that identifier; the key is registered
+  // under the household, because a mandate has none of its own.
+  // A mismatch is now a household whose key is not the one this member logs in
+  // with: §13.2 makes the household the name of a key, so an engine holding a
+  // different key under the same household is no longer a state that exists.
+  const householdKey = mismatch ? key() : keys;
+  const HOUSE = nameOf(householdKey.pem), TX_MANDATE = `${HOUSE}.tx`;
+  authority.provisionPrincipal('member', HOUSE, ['merchant-1']); authority.registerCredential(credential, 'member');
   login.provisionVerifiedPasskey(credential, keys.cose, 0, user);
-  authority.bindResource({ kind: 'mandate', id: 'tx-mandate' }, { household: 'house' });
-  const { engine } = makeEngine(); engine.registerIdentity('tx-mandate', mismatch ? key().pem : keys.pem);
+  authority.bindResource({ kind: 'mandate', id: TX_MANDATE }, { household: HOUSE });
+  const { engine } = makeEngine(); engine.registerIdentity(HOUSE, householdKey.pem);
   const flow = login.begin(), client = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: flow.publicKey.challenge, origin }));
   const auth = Buffer.concat([digest('unit.example'), Buffer.from([5, 0, 0, 0, 1])]);
   const signature = sign('sha256', Buffer.concat([auth, digest(client)]), keys.pair.privateKey);
   const session = await login.finish(flow.id, { id: credential, rawId: credential, type: 'public-key', clientExtensionResults: {}, response: { clientDataJSON: client.toString('base64url'), authenticatorData: auth.toString('base64url'), signature: signature.toString('base64url'), userHandle: user } });
   const path = join(dir, 'binding.sqlite');
   const connect = () => { const b = openMandateBindings(path, authority, login, engine); cleanups.push(() => b.close()); return b; };
-  return { dir, path, clock, authority, login, engine, credential, keys, user, session, connect, bridge: connect() };
+  return { dir, path, clock, authority, login, engine, credential, keys, user, session, connect, bridge: connect(), HOUSE, TX_MANDATE };
 }
 test('actual verified login key binds existing engine identity and survives close/reopen', async () => {
-  const s = await setup(), before = s.engine.publicKeyFor('tx-mandate');
-  const record = s.bridge.bind(s.session.token, 'tx-mandate');
-  expect(record.binding).toMatchObject({ principal: 'member', household: 'house', credential: s.credential, mandate: 'tx-mandate' });
+  const s = await setup(), before = s.engine.publicKeyFor(s.TX_MANDATE);
+  const record = s.bridge.bind(s.session.token, s.TX_MANDATE);
+  expect(record.binding).toMatchObject({ principal: 'member', household: s.HOUSE, credential: s.credential, mandate: s.TX_MANDATE });
   expect(record.binding.fingerprint).toBe(createHash('sha256').update(s.keys.pair.publicKey.export({ format: 'der', type: 'spki' })).digest('hex'));
   s.bridge.close(); const reopened = s.connect();
-  expect(reopened.resolve(s.session.token, 'tx-mandate')).toEqual(record);
-  expect(reopened.bind(s.session.token, 'tx-mandate')).toEqual(record);
-  expect(s.engine.publicKeyFor('tx-mandate')).toBe(before);
+  expect(reopened.resolve(s.session.token, s.TX_MANDATE)).toEqual(record);
+  expect(reopened.bind(s.session.token, s.TX_MANDATE)).toEqual(record);
+  expect(s.engine.publicKeyFor(s.TX_MANDATE)).toBe(before);
   for (const name of readdirSync(s.dir)) expect(readFileSync(join(s.dir, name)).includes(Buffer.from(s.session.token))).toBe(false);
 });
 test('different engine key cannot bind even with valid login and owned mandate', async () => {
   const s = await setup(true);
-  expect(() => s.bridge.bind(s.session.token, 'tx-mandate')).toThrow('Mandate key mismatch');
-  expect(() => s.bridge.resolve(s.session.token, 'tx-mandate')).toThrow();
+  expect(() => s.bridge.bind(s.session.token, s.TX_MANDATE)).toThrow('Mandate key mismatch');
+  expect(() => s.bridge.resolve(s.session.token, s.TX_MANDATE)).toThrow();
 });
 test('foreign and absent mandate claims cannot register or overwrite an engine identity', async () => {
   const s = await setup(); s.authority.bindResource({ kind: 'mandate', id: 'foreign' }, { household: 'other-house' }); s.engine.registerIdentity('foreign', s.keys.pem);
   expect(() => s.bridge.bind(s.session.token, 'foreign')).toThrow();
-  s.authority.bindResource({ kind: 'mandate', id: 'unregistered' }, { household: 'house' });
-  expect(() => s.bridge.bind(s.session.token, 'unregistered')).toThrow(); expect(s.engine.publicKeyFor('unregistered')).toBeUndefined();
-  expect(() => s.bridge.bind('amr1_' + 'A'.repeat(43), 'tx-mandate')).toThrow();
+  // §13.2, question 55. A mandate has no identity of its own, so "absent" is
+  // now a household the engine holds no key for rather than an unregistered
+  // mandate name. The binding refuses it either way.
+  s.authority.bindResource({ kind: 'mandate', id: `${s.HOUSE}.second` }, { household: s.HOUSE });
+  const empty = openMandateBindings(join(s.dir, 'empty.sqlite'), s.authority, s.login, { config: s.engine.config, publicKeyFor: () => undefined });
+  cleanups.push(() => empty.close());
+  expect(() => empty.bind(s.session.token, `${s.HOUSE}.second`)).toThrow('Mandate binding unavailable');
+  expect(() => s.bridge.bind('amr1_' + 'A'.repeat(43), s.TX_MANDATE)).toThrow();
 });
 test('same-household second credential cannot overwrite immutable binding across connections', async () => {
-  const s = await setup(); const first = s.bridge.bind(s.session.token, 'tx-mandate'), peer = s.connect();
-  expect(peer.bind(s.session.token, 'tx-mandate')).toEqual(first);
+  const s = await setup(); const first = s.bridge.bind(s.session.token, s.TX_MANDATE), peer = s.connect();
+  expect(peer.bind(s.session.token, s.TX_MANDATE)).toEqual(first);
   const credential = randomBytes(32).toString('base64url');
   s.authority.registerCredential(credential, 'member'); s.login.provisionVerifiedPasskey(credential, s.keys.cose, 0, s.user);
   // Trusted setup of a second session, distinct from the real verified first ceremony.
   const second = s.authority.createSessionAfterVerification(credential, 4000);
-  expect(() => peer.bind(second.token, 'tx-mandate')).toThrow('Immutable mandate binding');
-  expect(() => peer.resolve(second.token, 'tx-mandate')).toThrow();
-  expect(s.bridge.resolve(s.session.token, 'tx-mandate')).toEqual(first);
+  expect(() => peer.bind(second.token, s.TX_MANDATE)).toThrow('Immutable mandate binding');
+  expect(() => peer.resolve(second.token, s.TX_MANDATE)).toThrow();
+  expect(s.bridge.resolve(s.session.token, s.TX_MANDATE)).toEqual(first);
 });
 test('session credential principal ownership and grant revocations block later resolution', async () => {
   for (const change of ['session', 'credential', 'principal', 'ownership', 'grants', 'expiry']) {
-    const s = await setup(); s.bridge.bind(s.session.token, 'tx-mandate');
+    const s = await setup(); s.bridge.bind(s.session.token, s.TX_MANDATE);
     if (change === 'session') s.authority.revokeSession(s.session.id);
     if (change === 'credential') s.authority.revokeCredential(s.credential);
     if (change === 'principal') s.authority.disablePrincipal('member');
-    if (change === 'ownership') s.authority.invalidateResource({ kind: 'mandate', id: 'tx-mandate' });
+    if (change === 'ownership') s.authority.invalidateResource({ kind: 'mandate', id: s.TX_MANDATE });
     if (change === 'grants') s.authority.setPresenterGrants('member', []);
     if (change === 'expiry') s.clock.at = 5000;
-    expect(() => s.bridge.resolve(s.session.token, 'tx-mandate')).toThrow();
-    expect(() => s.bridge.bind(s.session.token, 'tx-mandate')).toThrow();
+    expect(() => s.bridge.resolve(s.session.token, s.TX_MANDATE)).toThrow();
+    expect(() => s.bridge.bind(s.session.token, s.TX_MANDATE)).toThrow();
   }
 });
 test('public key and authority snapshots are detached and inactive keys unavailable', async () => {
   const s = await setup(), bytes = s.login.verifiedPublicKey(s.credential)!; bytes.fill(0);
   expect(Buffer.from(s.login.verifiedPublicKey(s.credential)!)).toEqual(s.keys.cose);
-  const context = s.authority.transactionContext(s.session.token, 'tx-mandate')!; context.presenters.push('foreign');
-  expect(s.authority.transactionContext(s.session.token, 'tx-mandate')!.presenters).toEqual(['merchant-1']);
+  const context = s.authority.transactionContext(s.session.token, s.TX_MANDATE)!; context.presenters.push('foreign');
+  expect(s.authority.transactionContext(s.session.token, s.TX_MANDATE)!.presenters).toEqual(['merchant-1']);
   const id = randomBytes(32).toString('base64url');
   expect(() => s.login.enrolVerifiedPasskey('missing', id, s.keys.cose, 0, s.user)).toThrow();
   expect(s.login.verifiedPublicKey(id)).toBeUndefined();
@@ -98,10 +112,10 @@ test('unsupported COSE algorithm coordinates extra fields and trailing bytes are
   for (const bad of [alg, curve, point, Buffer.concat([Buffer.from([0xa6]), cose.subarray(1), Buffer.from([0, 1])]), Buffer.concat([cose, Buffer.from([0])]), cose.subarray(0, 20), Buffer.from([0xa0])]) expect(() => credentialSPKI(bad)).toThrow();
 });
 test('RP mismatch and later engine-key mismatch cannot resolve a stored binding', async () => {
-  const s = await setup(); s.bridge.bind(s.session.token, 'tx-mandate');
+  const s = await setup(); s.bridge.bind(s.session.token, s.TX_MANDATE);
   expect(() => openMandateBindings(s.path, s.authority, s.login, { config: { ...s.engine.config, relyingPartyId: 'other.example' }, publicKeyFor: id => s.engine.publicKeyFor(id) })).toThrow('Binding scope mismatch');
   const changed = openMandateBindings(s.path, s.authority, s.login, { config: s.engine.config, publicKeyFor: () => key().pem }); cleanups.push(() => changed.close());
-  expect(() => changed.resolve(s.session.token, 'tx-mandate')).toThrow('Mandate key mismatch');
+  expect(() => changed.resolve(s.session.token, s.TX_MANDATE)).toThrow('Mandate key mismatch');
 });
 
 test('stored environment scope cannot be reopened under a different configured environment', async () => {
@@ -109,9 +123,9 @@ test('stored environment scope cannot be reopened under a different configured e
   const authority = { ...s.authority, scope: { ...s.authority.scope, environment: 'other' } };
   const login = { ...s.login, scope: { ...s.login.scope, environment: 'other' } };
   expect(() => openMandateBindings(s.path, authority, login, s.engine)).toThrow('Binding scope mismatch');
-  s.bridge.bind(s.session.token, 'tx-mandate');
+  s.bridge.bind(s.session.token, s.TX_MANDATE);
   const config = { ...s.engine.config };
   const mutableView = openMandateBindings(s.path, s.authority, s.login, { config, publicKeyFor: id => s.engine.publicKeyFor(id) }); cleanups.push(() => mutableView.close());
   config.relyingPartyId = 'changed.example';
-  expect(() => mutableView.resolve(s.session.token, 'tx-mandate')).toThrow('Binding scope mismatch');
+  expect(() => mutableView.resolve(s.session.token, s.TX_MANDATE)).toThrow('Binding scope mismatch');
 });

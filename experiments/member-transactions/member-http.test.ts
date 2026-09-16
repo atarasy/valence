@@ -17,7 +17,7 @@ test('authenticated member prepare submit and signature-free outcome preserve ex
  const submitted=await s.app.fetch(s.req(route+'/submit',{assertion:proof}));expect(submitted.status).toBe(200);const result=await submitted.json();
  const outcome=await s.app.fetch(s.req(route+'/outcome'));expect(outcome.status).toBe(200);expect(outcome.headers.get('cache-control')).toBe('no-store');expect(await outcome.json()).toEqual(result);
  expect(await (await s.app.fetch(s.req(route+'/submit',{assertion:proof}))).json()).toEqual(result);
- expect(await s.unit.run((store,db)=>unifiedRuntime(store,db).engine.householdLedger.forHousehold('house'))).toHaveLength(1);
+ expect(await s.unit.run((store,db)=>unifiedRuntime(store,db).engine.householdLedger.forHousehold(s.input.house))).toHaveLength(1);
 });
 test('missing foreign and revoked sessions cannot read or submit member operations',async()=>{
  const s=await setup(),p=await s.prepare(),route='/member/operations/'+p.operationID;
@@ -31,7 +31,7 @@ test('missing foreign and revoked sessions cannot read or submit member operatio
  expect((await s.app.fetch(s.req(route+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,2)}))).status).toBe(404);
 });
 test('reference administrative routes and runtime injection fields never reach member operations',async()=>{
- const s=await setup();for(const route of ['/households/house/import','/identities','/offers','/member/statements/prepare?household=foreign'])expect((await s.app.fetch(s.req(route,{}))).status).toBe(route.includes('?')?400:404);
+ const s=await setup();for(const route of [`/households/${encodeURIComponent(s.input.house)}/import`,'/identities','/offers','/member/statements/prepare?household=foreign'])expect((await s.app.fetch(s.req(route,{}))).status).toBe(route.includes('?')?400:404);
  expect((await s.app.fetch(s.req('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[],household:'foreign'}))).status).toBe(404);
  expect((await s.app.fetch(new Request(config.origin+'/member/statements/prepare',{method:'POST',headers:{authorization:'Bearer '+s.input.token,origin:'https://foreign.example','content-type':'application/json'},body:'{}'}))).status).toBe(400);
 });

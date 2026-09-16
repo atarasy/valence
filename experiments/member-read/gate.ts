@@ -18,6 +18,12 @@ type Route = { kind: 'list'; household: string; presenter: string } | { kind: 'r
 const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
 const fail = (status: number, code: string) => new Response(JSON.stringify({ error: code, message: status === 401 ? 'Session unavailable.' : 'Resource unavailable.' }), { status, headers });
 const pathID = /^[A-Za-z0-9_-]+$/;
+// §13.2, question 55. A mandate's identifier is its household's, a full stop
+// and a label, so it carries a colon that a path may percent-encode.
+const mandateID = /^key:[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{1,64}$/;
+const decoded = (segment: string): string | undefined => {
+  try { return decodeURIComponent(segment); } catch { return undefined; }
+};
 function route(request: Request, origin: string): Route | undefined {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== origin || url.username || url.password || url.hash) return;
@@ -29,7 +35,11 @@ function route(request: Request, origin: string): Route | undefined {
     return { kind: 'list', household, presenter };
   }
   if ([...url.searchParams].length) return;
-  if (parts.length === 4 && parts[1] === '_node' && parts[2] === 'mandates' && pathID.test(parts[3]!)) return { kind: 'resource', resource: { kind: 'mandate', id: parts[3]! } };
+  if (parts.length === 4 && parts[1] === '_node' && parts[2] === 'mandates') {
+    const id = decoded(parts[3]!);
+    if (id !== undefined && mandateID.test(id)) return { kind: 'resource', resource: { kind: 'mandate', id } };
+    return;
+  }
   if (parts[1] !== 'offers' || !pathID.test(parts[2] ?? '')) return;
   if (parts.length === 3) return { kind: 'resource', resource: { kind: 'offer', id: parts[2]! } };
   if (parts.length === 4 && ['approval', 'statement', 'settlement'].includes(parts[3]!)) return { kind: 'resource', resource: { kind: 'offer', id: parts[2]! }, action: parts[3] };

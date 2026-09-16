@@ -1,3 +1,4 @@
+import { FIXTURE_MANDATE } from '../member-transactions/atomic-fixture.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -6,7 +7,7 @@ import { join } from 'node:path';
 import { openMemberAuthority } from './authority.ts';
 import { memberReadBoundary } from './gate.ts';
 import fixtures from './reference-fixtures.json';
-import { makeEngine, CONFIG_VERSION } from '../../engine/test/helpers.ts';
+import { CONFIG_VERSION, houseFor, makeEngine } from '../../engine/test/helpers.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { RecoveryRegister } from '../../engine/src/hub/node.ts';
@@ -177,8 +178,8 @@ test('detached records cannot mutate authority and closed dependency fails neutr
 test('reopened authority gates actual engine own, foreign and list reads', async () => {
   const { store, connect } = setup();
   const { engine, deliveries } = makeEngine();
-  const make = (household: string) => engine.createOffer({ binding: 'digital', household, purpose: 'replenish', config_version: CONFIG_VERSION, expires_at: Date.now() + 3600000, mandate: 'mandate-1', price_band: null, giver: null, candidates: [{ product: 'tea-a', quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }] });
-  const own = make('actual-own'), foreign = make('actual-foreign');
+  const make = (household: string) => engine.createOffer({ binding: 'digital', household, purpose: 'replenish', config_version: CONFIG_VERSION, expires_at: Date.now() + 3600000, mandate: `${household}.1`, price_band: null, giver: null, candidates: [{ product: 'tea-a', quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }] });
+  const own = make(houseFor('actual-own').household), foreign = make(houseFor('actual-foreign').household);
   await engine.present(own.id); await engine.present(foreign.id);
   store.provisionPrincipal('actual-member', own.household, [own.presenter]);
   store.registerCredential('actual-credential', 'actual-member');

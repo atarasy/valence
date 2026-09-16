@@ -1,3 +1,4 @@
+import { HOUSE } from './atomic-fixture.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -25,10 +26,10 @@ function signedEdge(store: Store) {
 }
 test('fresh unified runtime resolves stored candidates for notes and preserves duplicate-author refusal', async () => {
   const s = await fixture();
-  const note = await s.unit.run(store => localRuntime(store).engine.addNote({ candidate: s.candidate, author: 'house', text: 'Useful', shared_with: ['merchant'], now: fixtureTime }));
+  const note = await s.unit.run(store => localRuntime(store).engine.addNote({ candidate: s.candidate, author: HOUSE, text: 'Useful', shared_with: ['merchant'], now: fixtureTime }));
   expect(await s.unit.run(store => localRuntime(store).engine.notesSharedWith(s.candidate, 'merchant'))).toEqual([note]);
-  await expect(s.unit.run(store => localRuntime(store).engine.addNote({ candidate: s.candidate, author: 'house', text: 'Again', shared_with: [] }))).rejects.toThrow('one line');
-  await expect(s.unit.run(store => localRuntime(store).engine.addNote({ candidate: 'missing', author: 'house', text: 'No', shared_with: [] }))).rejects.toThrow('no candidate');
+  await expect(s.unit.run(store => localRuntime(store).engine.addNote({ candidate: s.candidate, author: HOUSE, text: 'Again', shared_with: [] }))).rejects.toThrow('one line');
+  await expect(s.unit.run(store => localRuntime(store).engine.addNote({ candidate: 'missing', author: HOUSE, text: 'No', shared_with: [] }))).rejects.toThrow('no candidate');
 });
 test('signed lineage retains exact opaque receipts and gift recognition across fresh runtimes', async () => {
   const s = await fixture(), accepted = await s.unit.run(store => signedEdge(store));
@@ -43,11 +44,11 @@ test('imported offers notes edges and explicit receipt references survive recons
   const target = openAtomicStore(path(), atomicScope); cleanup.push(() => target.close());
   await target.run(store => {
     const e = localRuntime(store).engine;
-    e.importOffer(s.offer, 'house'); e.importNote({ candidate: s.candidate, author: 'previous-author', text: 'Moved note', shared_with: [], created_at: fixtureTime }); e.registerIdentity('giver', accepted.key, true); e.importEdge(accepted.edge, 'recipient');
+    e.importOffer(s.offer, HOUSE); e.importNote({ candidate: s.candidate, author: 'previous-author', text: 'Moved note', shared_with: [], created_at: fixtureTime }); e.registerIdentity('giver', accepted.key, true); e.importEdge(accepted.edge, 'recipient');
     expect(e.receiptsFor('recipient')).toEqual([]);
     const rows = structuredClone(accepted.receipts); e.importReceipts('recipient', rows); rows[0]!.ref = 'caller-mutated';
   });
-  const result = await target.run(store => { const e = localRuntime(store).engine; const note = e.addNote({ candidate: s.candidate, author: 'house', text: 'After move', shared_with: [], now: fixtureTime }); return { note, receipts: e.receiptsFor('recipient'), edges: e.edgesTouching('recipient') }; });
+  const result = await target.run(store => { const e = localRuntime(store).engine; const note = e.addNote({ candidate: s.candidate, author: HOUSE, text: 'After move', shared_with: [], now: fixtureTime }); return { note, receipts: e.receiptsFor('recipient'), edges: e.edgesTouching('recipient') }; });
   expect(result.receipts).toEqual(accepted.receipts); expect(result.edges).toEqual([accepted.edge]); expect(result.note.candidate).toBe(s.candidate);
   expect(await target.run(store => localRuntime(store).engine.notesFor(s.candidate))).toHaveLength(2);
 });
@@ -58,7 +59,7 @@ test('ambiguous candidate imports fail before adding an offer or changing existi
     if (within) { other.candidates[0]!.id = 'new-candidate'; other.candidates.push(structuredClone(other.candidates[0]!)); }
     await s.unit.run(store => {
       const e = localRuntime(store).engine;
-      expect(() => e.importOffer(other, 'house')).toThrow('unambiguous');
+      expect(() => e.importOffer(other, HOUSE)).toThrow('unambiguous');
       expect(() => e.mustGet(other.id, fixtureTime)).toThrow();
     });
   }
@@ -77,11 +78,11 @@ test('receipt write failure rolls back signed lineage and its identity registrat
 });
 test('ordinary store reopen preserves exact receipts and imported candidate lookup', async () => {
   const s = await fixture(), file = path(), first = openStore(file);
-  const e = localRuntime(first).engine; e.importOffer(s.offer, 'house'); e.importReceipts('house', [{ ref: 'exported-opaque-reference', at: fixtureTime }]); first.close();
+  const e = localRuntime(first).engine; e.importOffer(s.offer, HOUSE); e.importReceipts(HOUSE, [{ ref: 'exported-opaque-reference', at: fixtureTime }]); first.close();
   const second = openStore(file); try {
     const reopened = localRuntime(second).engine;
-    expect(reopened.receiptsFor('house')).toEqual([{ ref: 'exported-opaque-reference', at: fixtureTime }]);
-    expect(reopened.addNote({ candidate: s.candidate, author: 'house', text: 'After reopen', shared_with: [] }).candidate).toBe(s.candidate);
+    expect(reopened.receiptsFor(HOUSE)).toEqual([{ ref: 'exported-opaque-reference', at: fixtureTime }]);
+    expect(reopened.addNote({ candidate: s.candidate, author: HOUSE, text: 'After reopen', shared_with: [] }).candidate).toBe(s.candidate);
   } finally { second.close(); }
 });
 test('legacy missing receipt history stays unavailable rather than being recreated from an edge', async () => {

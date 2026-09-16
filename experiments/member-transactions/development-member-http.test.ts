@@ -21,7 +21,7 @@ async function setup(overrides:Partial<MemberRuntimeConfig>={}) {
  const req=(route:string,body?:unknown,token?:string)=>new Request(config.origin+route,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const send=(route:string,body?:unknown,token?:string)=>app.fetch(req(route,body,token),{peer:'fixture-peer'});
  const invite=()=>unit.run((_store,db)=>{
-  const authority=openMemberAuthority(db,{...atomicScope,maxSessionLifetimeMs:100000});authority.provisionPrincipal('new-member','house',['merchant-1']);
+  const authority=openMemberAuthority(db,{...atomicScope,maxSessionLifetimeMs:100000});authority.provisionPrincipal('new-member',seeded.input.house,['merchant-1']);
   const p={environment:'test',origin:config.origin,rpID:config.rpID,challengeLifetimeMs:60000,sessionLifetimeMs:100000};const login=openVerifiedLogin(db,authority,p);
   return openEnrollment(db,authority,login,{...p,rpName:'Atarasy',invitationLifetimeMs:60000}).issueInvitation('new-member');
  });
@@ -31,7 +31,7 @@ test('one composition signs in reads prepares submits reconciles and revokes',as
  const s=await setup(),flow=await (await s.send('/auth/login/options',{})).json();
  const logged=await s.send('/auth/login/verify',{id:flow.id,response:loginResponse(s.pair,s.input.credential,s.user,flow.publicKey.challenge,2)});expect(logged.status).toBe(200);const grant=await logged.json();
  expect((await s.send('/auth/session',undefined,grant.token)).status).toBe(200);
- for(const route of ['/offers?household=house&presenter=merchant-1','/offers/'+s.input.statement.offer,'/offers/'+s.input.statement.offer+'/statement'])expect((await s.send(route,undefined,grant.token)).status).toBe(200);
+ for(const route of [`/offers?household=${encodeURIComponent(s.input.house)}&presenter=merchant-1`,'/offers/'+s.input.statement.offer,'/offers/'+s.input.statement.offer+'/statement'])expect((await s.send(route,undefined,grant.token)).status).toBe(200);
  const prepared=await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]},grant.token);expect(prepared.status).toBe(200);const p=await prepared.json();
  const committed=await s.send('/member/operations/'+p.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)},grant.token);expect(committed.status).toBe(200);
  expect(await (await s.send('/member/operations/'+p.operationID+'/outcome',undefined,grant.token)).json()).toEqual(await committed.json());
@@ -65,7 +65,7 @@ test('cutover preserves live enrolment and fences every auth read and write on s
  expect((await s.send('/auth/login/options',{})).status).toBe(503);
 });
 test('unknown routes cookies forged peers and foreign household reads cannot bypass the boundary',async()=>{
- const s=await setup();for(const path of ['/identities','/households/house/import','/auth/admin'])expect((await s.send(path,{})).status).toBe(404);
+ const s=await setup();for(const path of ['/identities',`/households/${encodeURIComponent(s.input.house)}/import`,'/auth/admin'])expect((await s.send(path,{})).status).toBe(404);
  expect((await s.send('/offers?household=foreign&presenter=merchant-1',undefined,s.input.token)).status).toBe(404);
  const req=s.req('/auth/login/options',{});req.headers.set('x-forwarded-for','allowed-peer');expect((await s.app.fetch(req,{peer:''})).status).toBe(503);
  const cookie=s.req('/member/statements/prepare',{},s.input.token);cookie.headers.set('cookie','session=x');expect((await s.app.fetch(cookie,{peer:'fixture-peer'})).status).toBe(403);

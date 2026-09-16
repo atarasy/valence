@@ -33,7 +33,7 @@ test('complete candidate preserves BLOB keys sessions and prepared approval then
 test('committed contextual outcome retains exact replay identity and does not charge again after migration',async()=>{
  const s=await setup(), receipt=await s.api.settle(s.input.token,s.prepared.operationID,s.proof), result=createOperationalSnapshot(s.path,join(s.dir,'committed'),scope);
  expect(await target(result.destination).settle(s.input.token,s.prepared.operationID,s.proof)).toEqual(receipt);
- const unit=openAtomicStore(result.destination,atomicScope);try{expect(await unit.run((store,db)=>unifiedRuntime(store,db).engine.householdLedger.forHousehold('house'))).toHaveLength(1);}finally{unit.close();}
+ const unit=openAtomicStore(result.destination,atomicScope);try{expect(await unit.run((store,db)=>unifiedRuntime(store,db).engine.householdLedger.forHousehold(s.input.house))).toHaveLength(1);}finally{unit.close();}
 });
 test('verified proof and pending login challenge share the preserved counter after migration',async()=>{
  const s=await setup();await s.api.verify(s.input.token,s.prepared.operationID,s.proof);

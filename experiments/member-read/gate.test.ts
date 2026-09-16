@@ -1,8 +1,9 @@
+import { FIXTURE_MANDATE } from '../member-transactions/atomic-fixture.ts';
 import { describe, expect, test } from 'bun:test';
 import { memberReadBoundary, type Session, type Ownership } from './gate.ts';
 import { validProjection } from './projection.ts';
 import fixtures from './reference-fixtures.json';
-import { makeEngine, CONFIG_VERSION } from '../../engine/test/helpers.ts';
+import { CONFIG_VERSION, houseFor, makeEngine } from '../../engine/test/helpers.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { RecoveryRegister } from '../../engine/src/hub/node.ts';
@@ -102,17 +103,17 @@ describe('member read boundary',()=>{
  });
  test('real pinned reference handler is reachable only for permitted resources',async()=>{
   const {engine,deliveries}=makeEngine();
-  const make=(household:string)=>engine.createOffer({binding:'digital',household,purpose:'replenish',config_version:CONFIG_VERSION,expires_at:Date.now()+3600000,mandate:'mandate-1',price_band:null,giver:null,candidates:[{product:'tea-a',quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
-  const own=make('fixture-own'),other=make('fixture-other');await engine.present(own.id);await engine.present(other.id);
+  const make=(household:string)=>engine.createOffer({binding:'digital',household,purpose:'replenish',config_version:CONFIG_VERSION,expires_at:Date.now()+3600000,mandate:`${household}.1`,price_band:null,giver:null,candidates:[{product:'tea-a',quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
+  const own=make(houseFor('fixture-own').household),other=make(houseFor('fixture-other').household);await engine.present(own.id);await engine.present(other.id);
   const index=new Map([own,other].map(o=>[o.id,{household:o.household,presenter:o.presenter}]));
   const expiry=Date.now()+60000;
   const handler=createApp(engine,{deliveries,approvals:new ApprovalDesk(),recovery:new RecoveryRegister(),permissions:new PermissionLedger(),registry:new Registry()});let calls=0;
-  const gate=memberReadBoundary({environment:'fixture',origin:'https://unit.example',resolveSession:async t=>t==='fixture-token'?{...base,household:'fixture-own',expiresAt:expiry}:undefined,ownerOf:async r=>index.get(r.id),next:async r=>{calls++;return handler(r);}});
+  const gate=memberReadBoundary({environment:'fixture',origin:'https://unit.example',resolveSession:async t=>t==='fixture-token'?{...base,household:own.household,expiresAt:expiry}:undefined,ownerOf:async r=>index.get(r.id),next:async r=>{calls++;return handler(r);}});
   const get=(path:string)=>gate(new Request('https://unit.example'+path,{headers:{authorization:'Bearer fixture-token'}}));
   // Keep the session expiry stable across revalidation.
-  const first=await get('/offers/'+own.id);expect(first.status).toBe(200);expect((await first.json()).household).toBe('fixture-own');
+  const first=await get('/offers/'+own.id);expect(first.status).toBe(200);expect((await first.json()).household).toBe(own.household);
   expect((await get('/offers/'+other.id)).status).toBe(404);expect(calls).toBe(1);
-  const list=await get('/offers?household=fixture-own&presenter=merchant-1');expect(list.status).toBe(200);expect((await list.json()).offers.map((o:any)=>o.id)).toEqual([own.id]);
+  const list=await get('/offers?household='+encodeURIComponent(own.household)+'&presenter=merchant-1');expect(list.status).toBe(200);expect((await list.json()).offers.map((o:any)=>o.id)).toEqual([own.id]);
  });
 });
 
