@@ -1,5 +1,5 @@
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHash, createPublicKey } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
@@ -352,6 +352,15 @@ export class ValenceEngine {
     return structuredClone(frozen);
   }
 
+  /** Whether two PEMs carry the same key, whatever their line breaks. */
+  private static sameKeyDer(pem: string): string | undefined {
+    try {
+      return createPublicKey(pem).export({ type: "spki", format: "der" }).toString("base64");
+    } catch {
+      return undefined;
+    }
+  }
+
   registerIdentity(key: string, publicKeyPem: string, attested = false): void {
     // A key, once attested, is not replaced by a later caller: whoever could
     // overwrite it could sign as the person (clauses 22, 35).
@@ -367,7 +376,13 @@ export class ValenceEngine {
       }
     }
     const existing = this.identities.get(key);
-    if (existing !== undefined && existing !== publicKeyPem) {
+    // **The same key in a different wrapping is the same key.** A PEM folds at
+    // 64 characters by convention and not by rule, so comparing the text made
+    // a second registration of the identical key a `409`: a party that knew a
+    // household's public key could file it re-wrapped and the household's own
+    // enrolment then failed, taking nothing but stopping the member. Found by
+    // a review pass on 2026-09-16.
+    if (existing !== undefined && ValenceEngine.sameKeyDer(existing) !== ValenceEngine.sameKeyDer(publicKeyPem)) {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
     }
     this.identities.set(key, publicKeyPem);

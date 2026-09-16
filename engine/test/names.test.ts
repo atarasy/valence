@@ -61,6 +61,14 @@ describe("§13.2, question 55: a name is its key", () => {
     // A name that claims nothing is still the registry's to hand out: a
     // presenter's and a giver's stay first-come under §5.2's limit.
     expect(() => engine.registerIdentity("merchant-2", pemOf(publicKey))).not.toThrow();
+    // NOTE (mutation check, 2026-09-16): identity_pem_text_compared. The same
+    // key folded differently answered `409 identity_exists`, so a party that
+    // knew a household's public key could file it re-wrapped and the
+    // household's own enrolment then failed. Found by a review pass.
+    const folded = pemOf(publicKey).replace(/\n/g, "\r\n");
+    expect(() => engine.registerIdentity("merchant-2", folded)).not.toThrow();
+    expect(() => engine.registerIdentity("merchant-2", pemOf(generateKeyPairSync("ed25519").publicKey)))
+      .toThrow(expect.objectContaining({ code: "identity_exists" }));
   });
 
   test("a mandate is not recorded under an identifier that is not its household's", () => {
