@@ -488,6 +488,7 @@ POST   /_identities                 a public key: a presenter's, a household's o
 POST   /households/{id}/offers      the person's copy of a decided offer, sent by the engine (§13.2)
 POST   /households/{id}/settled     the person's copy of what settled, an amount and a date (§13.2, §16.3)
 GET    /households/{id}/settled?since=  what has settled for this household since a moment, as a total
+GET    /_node/mandates?household=  which mandates this household has here (§16.2, question 56)
 ```
 
 The same operations SHOULD be exposed as MCP tools, so that a merchant's agent and a household's agent call the same surface.
@@ -715,8 +716,9 @@ An implementation is Valence-conformant when it:
 17. refuses a ceremonial offer in the physical binding (§12), renders on both the approval and the statement the carriage the hub holds, asking the hub for it where it does not hold the register itself (§13.1, §7.5b), and refuses a delivery update that changes a recorded carriage
 
 18. refuses a key registered under a `key:` name the key does not hash to, refuses a mandate or an offer whose household or mandate identifier is not of the shape §13.2 gives it, and verifies a decided set, a settlement statement and a mandate version against the household's key rather than against one registered for a mandate (§13.2, §10.5, §16.1)
+19. refuses an offer naming a mandate it does not hold for a household it holds one for, and names that refusal `mandate_unknown` (§16.2, §16.6)
 
-**Condition 18 was added on 2026-09-16** with question 55, when a name a signature is checked against stopped being a name and became the key. Conditions 16 and 17 were added on 2026-09-12: 16 with §6.5, the evening the reference was found to charge consumed lines on the collection's record alone, and 17 with the two defects two independent passes found beside it the same night. Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent. **Condition 15 was added on 2026-09-12**, when three questions about where this system stands between a household and a merchant resolved into one answer: the seller composes what the seller must say, and the person's agent renders it.
+**Conditions 18 and 19 were added on 2026-09-16**, 18 with question 55, when a name a signature is checked against stopped being a name and became the key, and 19 with question 56's first half, when a presenter naming a label the household never recorded was measured getting an offer with no ceiling and no cooling window. Conditions 16 and 17 were added on 2026-09-12: 16 with §6.5, the evening the reference was found to charge consumed lines on the collection's record alone, and 17 with the two defects two independent passes found beside it the same night. Conditions 9 to 11 were added on 2026-09-09, after an adversarial pass measured each of them open in the reference engine. Condition 12 was added on 2026-09-10 with §16, and 13 and 14 on 2026-09-11 with the thresholds and the roles. **Every condition on this list is one a suite asks about**, which is what keeps it from becoming a description of intent. **Condition 15 was added on 2026-09-12**, when three questions about where this system stands between a household and a merchant resolved into one answer: the seller composes what the seller must say, and the person's agent renders it.
 
 ### 13.1 Two roles, and what each is judged on
 
@@ -882,7 +884,7 @@ mandate
 them, and absent is not zero: no daily ceiling and no cooling, against a
 `ceiling_daily` of 0 that would refuse everything.
 
-**The mandate an offer reads is the offer's household's.** Question 54, decided 2026-09-16. An offer names a mandate id, and nothing bound the two: an offer read another household's ceilings, cooling window and co-signers through the id alone. An implementation MUST read a mandate for an offer only when the mandate's `household` is the offer's, and a mandate of another household is unknown to that offer, which §16.2 already leaves alone. **What this does not settle** was that a mandate id and a key name were each one name across the whole host and belonged to whoever registered them first, so one household could take a name another household meant to use. That is question 55, decided 2026-09-16: a household's identifier is its key's fingerprint and a mandate's is that identifier with a label, so the **household half** of the binding above is now a property of the identifier and this section's check is the second of two (§13.2). **The other half is not bound at all**: an offer may name any label after its household's prefix, and a label the household never recorded is an unknown mandate, which the next section leaves alone, so naming one removes the ceilings and the cooling window together. Measured 2026-09-16 by a second refutation pass. That is question 56, and it is the worse half of it.
+**The mandate an offer reads is the offer's household's.** Question 54, decided 2026-09-16. An offer names a mandate id, and nothing bound the two: an offer read another household's ceilings, cooling window and co-signers through the id alone. An implementation MUST read a mandate for an offer only when the mandate's `household` is the offer's, and a mandate of another household is unknown to that offer, which §16.2 already leaves alone. **What this does not settle** was that a mandate id and a key name were each one name across the whole host and belonged to whoever registered them first, so one household could take a name another household meant to use. That is question 55, decided 2026-09-16: a household's identifier is its key's fingerprint and a mandate's is that identifier with a label, so the **household half** of the binding above is now a property of the identifier and this section's check is the second of two (§13.2). **The other half was not bound at all until the same day**: an offer could name any label after its household's prefix, and a label the household never recorded is an unknown mandate, which the next section left alone, so naming one removed the ceilings and the cooling window together. Measured by a second refutation pass and closed in §16.2: an implementation that holds any mandate for that household refuses an offer naming one it does not hold.
 
 **Three fields were added on 2026-09-10 and one of them left on 2026-09-12.**
 `co_sign_categories` named the feed categories whose candidates needed a
@@ -919,7 +921,7 @@ This is what clause 47 means by "nothing else changes it": not the person alone,
 
 At presentation, an implementation that holds a mandate for the offer MUST refuse with `422` when what the offer could cost at merchants the registry does not list exceeds `ceiling_out_of_network`, and MUST refuse when the mandate has lapsed. The registry is what "in the network" means (§17); a person's limit on the rest is applied inside their own mandate, which is clause 46's ceiling under clause 47's structure. **This line cited clause 55 until 2026-09-11**, and clause 55's exclusion is of a fork of the hub's software, not of a merchant the registry does not list.
 
-An offer whose mandate this implementation does not hold is left alone. A deployment may carry mandates elsewhere, and refusing every offer whose mandate is unknown would be a gate rather than a protection. **What that costs is question 56**: a presenter that names a label this household never recorded gets an offer with no ceiling and no cooling window, having recorded nothing and forged nothing, and the household cannot see it because the decided set's signed bytes name the offer and its candidates and not the mandate (§10.5). Measured 2026-09-16.
+**An implementation that holds any mandate for the offer's household MUST refuse with `422 mandate_unknown` an offer naming one it does not hold.** Question 56's first half, decided 2026-09-16. An offer whose mandate this implementation does not hold is otherwise left alone: a deployment may carry mandates elsewhere, and refusing every offer whose mandate is unknown would be a gate rather than a protection, and a household that has set no protection here is every household before its first mandate. **What the unqualified rule cost was measured the day it was qualified**: a presenter naming any label after the household's own prefix got an offer with no out-of-network ceiling, no daily ceiling and no cooling window, having recorded nothing, imported nothing and forged nothing, and the household could not see it, because the decided set's signed bytes name the offer and its candidates and not the mandate (§10.5). An implementation that does not hold the household's mandates itself asks the hub which it has, over `GET /_node/mandates?household={id}`, and a hub it could not reach is not a hub that says there are none, for §13.2's reason.
 
 ### 16.3 The daily ceiling
 
@@ -983,11 +985,13 @@ Refusals in this section share a status code, and a person MUST be able to tell 
 
 ```
 mandate_ceiling_out_of_network | mandate_ceiling_daily |
-mandate_cooling | mandate_lapsed
+mandate_cooling | mandate_lapsed | mandate_unknown
 ```
 
 There were five until 2026-09-12, when §16.4 was withdrawn and
-`mandate_co_sign_required` went with it.
+`mandate_co_sign_required` went with it. `mandate_unknown` joined on 2026-09-16 with
+question 56's first half, and it is the one that says a protection was not
+read rather than which threshold refused.
 
 **This is the lesson of `novelty_from_this_catalogue`**, a mutation that survived every probe because two different refusals shared a status code and nothing else. A `422` with no name is a refusal no probe can tell from another `422`, and clause 36 requires that the reason an order was not executed be shown to the person.
 

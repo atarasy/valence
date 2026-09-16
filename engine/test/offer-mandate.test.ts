@@ -17,11 +17,18 @@ import type { Offer } from "../src/common/types.js";
 describe("§16, question 54: the mandate an offer reads is its own household's", () => {
   const ELSEWHERE = houseFor("somebody-else");
   const lapsed = {
-    async get() {
+    async get(_id?: string) {
       return {
         id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 0,
         ceiling_daily: null, cooling_seconds: null, co_signers: [], lapses_at: 1, version: 1,
       } as never;
+    },
+    async forHousehold(h: string) {
+      // §16.2, question 56. A stub that answers with a mandate must also say
+      // whose it is, or an offer of that household naming another label is
+      // refused before the stub is read.
+      const m = (await this.get("")) as { household?: string } | undefined;
+      return m && m.household === h ? [m as never] : [];
     },
   };
   const offerFor = (household: string, mandate: string) => ({

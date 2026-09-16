@@ -16,9 +16,15 @@ const mandate: Mandate = {
 describe("§13.1: where the engine reads a protection from", () => {
   test("the local source is the register in this process", async () => {
     const rows = new Map([["m-1", mandate]]);
-    const source = new LocalMandates({ get: (id) => rows.get(id) });
+    const source = new LocalMandates({
+      get: (id) => rows.get(id),
+      forHousehold: (h) => [...rows.values()].filter((m) => m.household === h),
+    });
     expect(await source.get("m-1")).toEqual(mandate);
     expect(await source.get("m-2")).toBeUndefined();
+    // §16.2, question 56. Which mandates a household has here.
+    expect(await source.forHousehold(mandate.household)).toEqual([mandate]);
+    expect(await source.forHousehold("somebody-else")).toEqual([]);
   });
 
   test("the remote source asks the hub over the endpoint the specification defines", async () => {

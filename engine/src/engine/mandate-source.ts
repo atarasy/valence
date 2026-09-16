@@ -18,13 +18,29 @@ import type { Mandate } from "../hub/mandates.js";
  */
 export type MandateSource = {
   get(id: string): Promise<Mandate | undefined>;
+  /**
+   * §16.2, question 56. Which mandates this household has here, so that an
+   * offer naming one it does not have can be refused. `get` alone cannot say:
+   * an unknown mandate is left alone, and a presenter that named a label the
+   * household never recorded got an offer with no ceiling and no cooling
+   * window, having recorded nothing and forged nothing. Measured 2026-09-16.
+   */
+  forHousehold(household: string): Promise<Mandate[]>;
 };
 
 /** The register in this process. What the reference runs when it presents both roles. */
 export class LocalMandates implements MandateSource {
-  constructor(private readonly rows: { get(id: string): Mandate | undefined }) {}
+  constructor(
+    private readonly rows: {
+      get(id: string): Mandate | undefined;
+      forHousehold(household: string): Mandate[];
+    }
+  ) {}
   async get(id: string): Promise<Mandate | undefined> {
     return this.rows.get(id);
+  }
+  async forHousehold(household: string): Promise<Mandate[]> {
+    return this.rows.forHousehold(household);
   }
 }
 
@@ -69,5 +85,32 @@ export class RemoteMandates implements MandateSource {
       );
     }
     return (await response.json()) as Mandate;
+  }
+
+  /**
+   * §16.2, question 56. The hub answers which mandates a household has, over
+   * `GET /_node/mandates?household={id}`. A hub that cannot be reached is not
+   * a hub that says there are none, for the reason `get` gives.
+   */
+  async forHousehold(household: string): Promise<Mandate[]> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.base.replace(/\/+$/, "")}/_node/mandates?household=${encodeURIComponent(household)}`,
+        { headers: { accept: "application/json" } }
+      );
+    } catch (err) {
+      throw unprocessable(
+        "hub_unreachable",
+        `the hub holding the mandates of ${household} could not be reached: ${(err as Error).message}`
+      );
+    }
+    if (!response.ok) {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${response.status} for the mandates of ${household}`
+      );
+    }
+    return ((await response.json()) as { mandates?: Mandate[] }).mandates ?? [];
   }
 }

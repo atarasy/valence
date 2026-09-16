@@ -247,6 +247,13 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
           version: 1,
         } as never;
       },
+      async forHousehold(h: string) {
+        // §16.2, question 56. A stub that answers with a mandate must also say
+        // whose it is, or an offer of that household naming another label is
+        // refused before the stub is read.
+        const m = (await this.get("")) as { household?: string } | undefined;
+        return m && m.household === h ? [m as never] : [];
+      },
     });
     const offer = await box(made, HOUSEHOLD);
     const [gone, back, kept] = offer.candidates;
@@ -285,6 +292,13 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
             lapses_at: Date.now() + 90 * DAY,
             version: 1,
           } as never;
+        },
+        async forHousehold(h: string) {
+          // §16.2, question 56. A stub that answers with a mandate must also say
+          // whose it is, or an offer of that household naming another label is
+          // refused before the stub is read.
+          const m = (await this.get("")) as { household?: string } | undefined;
+          return m && m.household === h ? [m as never] : [];
         },
       });
       const offer = await box(made, household);

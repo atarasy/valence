@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { HOUSEHOLD, MANDATE, houseFor, makeEngine } from "./helpers.js";
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine } from "./helpers.js";
+import { canonicalMandate } from "../src/hub/mandates.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
 import { createApp } from "../src/http.js";
 import { ApprovalDesk } from "../src/hub/approval.js";
@@ -153,6 +154,48 @@ describe("§13.2, question 55: a name is its key", () => {
         cooling_seconds: null, lapses_at: Date.now() + 3_600_000, version: 2 } as never,
       signatures: {}, assertions: {}, keyOf: () => undefined, relyingPartyId: "unit.example",
     })).toThrow(expect.objectContaining({ code: "wrong_household" }));
+  });
+});
+
+describe("§16.2, question 56: an offer names a mandate this household has", () => {
+  test("a label the household never recorded is refused, and one it has is not", async () => {
+    // NOTE (mutation check, 2026-09-16): offer_names_any_label. The phantom
+    // offer settled at once, with the household's daily ceiling of 0 and its
+    // cooling window of a day both unapplied.
+    //
+    // Measured before the rule: a presenter naming any label after the
+    // household's own prefix got an offer with no out-of-network ceiling, no
+    // daily ceiling and no cooling window, having recorded nothing, imported
+    // nothing and forged nothing. It is invisible to the member, because the
+    // decided set's signed bytes name the offer and its candidates and not
+    // the mandate.
+    const { engine } = makeEngine();
+    const m = {
+      id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000,
+      ceiling_daily: 0, cooling_seconds: 86_400, co_signers: [],
+      lapses_at: Date.now() + 10 * HOUR, version: 1,
+    };
+    engine.mandates.record({
+      mandate: m as never,
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+      assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
+    });
+    const offerFor = (mandate: string, product: string) => ({
+      binding: "digital" as const, household: HOUSEHOLD, purpose: "replenish" as const,
+      config_version: CONFIG_VERSION, expires_at: Date.now() + HOUR, mandate, price_band: null, giver: null,
+      candidates: [{ product, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    });
+    const phantom = engine.createOffer(offerFor(`${HOUSEHOLD}.presenter-chose-this`, "tea-b") as never);
+    await expect(engine.present(phantom.id)).rejects.toMatchObject({ code: "mandate_unknown" });
+    // The household's own mandate still presents, so the refusal above is not
+    // a rule that refuses everything.
+    const real = engine.createOffer(offerFor(MANDATE, "tea-a") as never);
+    expect((await engine.present(real.id)).state).toBe("presented");
+    // And a household that has set no protection here is left alone, which is
+    // every household before its first mandate.
+    const stranger = houseFor("no-mandate-yet");
+    const theirs = engine.createOffer({ ...offerFor(`${stranger.household}.1`, "coffee-a"), household: stranger.household } as never);
+    expect((await engine.present(theirs.id)).state).toBe("presented");
   });
 });
 

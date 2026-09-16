@@ -188,6 +188,30 @@ export class ValenceEngine {
     return mandate;
   }
 
+  /**
+   * §16.2, question 56, decided 2026-09-16. **An offer names a mandate this
+   * household has, where it has any.**
+   *
+   * An unknown mandate is left alone, because a deployment may carry mandates
+   * elsewhere. What that cost was measured on 2026-09-16: a presenter naming
+   * any label after the household's own prefix got an offer with no ceiling
+   * and no cooling window, having recorded nothing, imported nothing and
+   * forged nothing, and the household could not see it because the decided
+   * set's signed bytes name the offer and its candidates and not the mandate.
+   * A household that has set no protection here is still left alone, which is
+   * every household before its first mandate.
+   */
+  private async knownMandateOrNone(offer: Offer): Promise<void> {
+    if (await this.mandateFor(offer)) return;
+    const held = await this.mandateSource.forHousehold(offer.household);
+    if (held.length > 0) {
+      throw unprocessable(
+        "mandate_unknown",
+        `this household has ${held.length === 1 ? "a mandate" : "mandates"} here and this offer names ${offer.mandate}, which is not one of them`
+      );
+    }
+  }
+
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
     this.mandateSource = source;
@@ -701,6 +725,8 @@ export class ValenceEngine {
     // record is left alone, because a deployment may carry mandates outside
     // this engine, and refusing every offer would be a gate rather than a
     // protection.
+    // §16.2, question 56. And it is one this household has, where it has any.
+    await this.knownMandateOrNone(offer);
     const mandate = await this.mandateFor(offer);
     if (mandate) {
       if (mandate.lapses_at <= now) {
