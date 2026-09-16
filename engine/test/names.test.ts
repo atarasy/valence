@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { HOUSEHOLD, MANDATE, makeEngine } from "./helpers.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
+import { createApp } from "../src/http.js";
+import { ApprovalDesk } from "../src/hub/approval.js";
+import { DeliveryRegister } from "../src/hub/delivery.js";
+import { RecoveryRegister } from "../src/hub/node.js";
+import { PermissionLedger } from "../src/hub/permissions.js";
+import { Registry } from "../src/shared/registry.js";
 
 /**
  * §13.2, question 55, decided 2026-09-16. A name a signature is checked
@@ -10,18 +16,19 @@ import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names
  * the key its mandates and its decided sets were checked against.
  */
 describe("§13.2, question 55: a name is its key", () => {
-  const pemOf = (k: { export: (o: unknown) => unknown }) =>
-    (k.export as (o: unknown) => Buffer | string)({ type: "spki", format: "pem" }).toString();
+  const pemOf = (k: KeyObject) => k.export({ type: "spki", format: "pem" }).toString();
 
   test("a name is the same for every kind of key the verifier reaches, and does not read the PEM's whitespace", () => {
     // §10.5 verifies ed25519, ECDSA and RSA, which is why the name commits to
     // the key by hash rather than carrying it: a `did:key` with an RSA key
     // inside is about 380 characters in every path and every export.
-    for (const opts of [
-      ["ed25519"], ["ec", { namedCurve: "prime256v1" }],
-      ["ec", { namedCurve: "secp384r1" }], ["rsa", { modulusLength: 2048 }],
-    ] as const) {
-      const { publicKey } = generateKeyPairSync(...(opts as never));
+    const pairs = [
+      generateKeyPairSync("ed25519"),
+      generateKeyPairSync("ec", { namedCurve: "prime256v1" }),
+      generateKeyPairSync("ec", { namedCurve: "secp384r1" }),
+      generateKeyPairSync("rsa", { modulusLength: 2048 }),
+    ];
+    for (const { publicKey } of pairs) {
       const pem = pemOf(publicKey);
       const name = nameOf(pem);
       expect(name.length).toBe(47);
@@ -73,5 +80,27 @@ describe("§13.2, question 55: a name is its key", () => {
     // then refused for the signature it does not carry, which is §16.1's.
     expect(() => record(MANDATE, HOUSEHOLD))
       .toThrow(expect.objectContaining({ code: "unsigned" }));
+  });
+});
+
+describe("§13.2: a path segment a caller wrote", () => {
+  test("a malformed percent sequence is refused by name, not by a 500", async () => {
+    // NOTE (mutation check, 2026-09-16): path_segment_unnamed_failure. The
+    // answer was `500 internal`, which tells a caller nothing and tells a
+    // probe less. Six routes gained a decoded segment with question 55 and two
+    // had one already.
+    const { engine } = makeEngine();
+    const handle = createApp(engine, {
+      deliveries: new DeliveryRegister(),
+      approvals: new ApprovalDesk(),
+      recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(),
+      registry: new Registry(),
+    });
+    for (const path of ["/households/%zz/export", "/households/%zz/import", "/_node/mandates/%zz"]) {
+      const r = await handle(new Request(`https://unit.example${path}`, { method: path.endsWith("import") ? "POST" : "GET", body: path.endsWith("import") ? "{}" : undefined }));
+      expect([path, r.status]).toEqual([path, 400]);
+      expect([path, ((await r.json()) as { error: string }).error]).toEqual([path, "malformed"]);
+    }
   });
 });

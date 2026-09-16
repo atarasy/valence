@@ -190,6 +190,21 @@ export function createApp(
   };
 }
 
+/**
+ * A path segment as the caller wrote it. **A malformed percent sequence is a
+ * `400 malformed` and not a 500**, which it was until 2026-09-16: two routes
+ * decoded a segment and threw an unnamed error out of the router, and question
+ * 55 added six more, because a household identifier carries a colon and a
+ * caller may encode it. §13.2's discipline is that a refusal names itself.
+ */
+function segment(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw badRequest("malformed", "this path is not valid percent-encoding");
+  }
+}
+
 async function body(request: Request): Promise<unknown> {
   const text = await request.text();
   if (text.trim() === "") return {};
@@ -910,7 +925,7 @@ async function route(
       const raw = strict(await body(request), ["describes", "expires_at"], "action");
       return json(
         permissions.openAction({
-          household: decodeURIComponent(parts[1]),
+          household: segment(parts[1]),
           describes: requireString(raw, "describes", "action"),
           expiresAt: requireInteger(raw, "expires_at", "action", 0),
         }),
@@ -982,7 +997,7 @@ async function route(
   }
 
   if (parts[0] === "households" && parts[2] === "offers" && method === "POST") {
-    const household = decodeURIComponent(parts[1]!);
+    const household = segment(parts[1]!);
     const raw = strict(
       await body(request),
       ["id", "household", "presenter", "recorded_at", "offer"],
@@ -1004,7 +1019,7 @@ async function route(
   }
 
   if (parts[0] === "households" && parts[2] === "settled") {
-    const household = decodeURIComponent(parts[1]!);
+    const household = segment(parts[1]!);
     if (method === "GET") {
       const since = Number(url.searchParams.get("since") ?? "0");
       if (!Number.isFinite(since)) {
@@ -1108,17 +1123,17 @@ async function route(
   }
 
   if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {
-    const m = engine.mandates.get(decodeURIComponent(parts[2]));
+    const m = engine.mandates.get(segment(parts[2]));
     if (!m) throw notFound(`no mandate ${parts[2]}`);
     return json(m);
   }
 
   if (parts[0] === "presenters" && parts[1] && parts[2] === "export" && method === "GET") {
-    return json(exportMerchant(engine, decodeURIComponent(parts[1])));
+    return json(exportMerchant(engine, segment(parts[1])));
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "duplicate-check" && method === "POST") {
-    const household = decodeURIComponent(parts[1]);
+    const household = segment(parts[1]);
     const raw = strict(await body(request), ["product", "asked_by", "asked_from"], "duplicate check");
     const asked_by = requireString(raw, "asked_by", "duplicate check");
     const product = requireString(raw, "product", "duplicate check");
@@ -1138,11 +1153,11 @@ async function route(
 
   // §4.2. Who asked what, in the recipient's own record.
   if (parts[0] === "households" && parts[1] && parts[2] === "queries" && method === "GET") {
-    return json({ queries: permissions.queriesFor(decodeURIComponent(parts[1])) });
+    return json({ queries: permissions.queriesFor(segment(parts[1])) });
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "permissions") {
-    const household = decodeURIComponent(parts[1]);
+    const household = segment(parts[1]);
     if (method === "GET" && parts.length === 3) {
       // Clause 40. Always visible, revoked rows included.
       return json({ permissions: permissions.forHousehold(household) });
@@ -1183,7 +1198,7 @@ async function route(
       // §13.2, question 55. The segment is decoded, as it is on the import
       // beside it: a household identifier carries a colon, so a route that read
       // the raw segment answered for a household nobody has.
-      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, decodeURIComponent(parts[1])));
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, segment(parts[1])));
     }
   }
 
@@ -1198,7 +1213,7 @@ async function route(
       if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
-      const moving = decodeURIComponent(parts[1]);
+      const moving = segment(parts[1]);
       // §13.2, question 55. The identifier on the path is a household's key,
       // and every offer and mandate this body carries names a mandate of that
       // household's. An import does not pass through `createOffer`, so without
@@ -1424,14 +1439,14 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "recoveries") {
     // Clause 53. The log a person reads after being locked out.
     if (method === "GET") {
-      return json({ recoveries: recovery.logFor(decodeURIComponent(parts[1])) });
+      return json({ recoveries: recovery.logFor(segment(parts[1])) });
     }
     if (method === "POST") {
       const raw = strict(await body(request), ["by"], "recovery");
       try {
         return json(
           recovery.recover({
-            household: decodeURIComponent(parts[1]),
+            household: segment(parts[1]),
             by: requireString(raw, "by", "recovery"),
           }),
           201
@@ -1449,7 +1464,7 @@ async function route(
     parts[1]
   ) {
     // §7.6. The fact of receipt, and nothing else.
-    return json({ receipts: engine.receiptsFor(decodeURIComponent(parts[1])) });
+    return json({ receipts: engine.receiptsFor(segment(parts[1])) });
   }
 
   // §9.1. /segments, /broadcast, /discounts, /ratings, /events/track are not
