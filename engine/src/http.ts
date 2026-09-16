@@ -1127,9 +1127,11 @@ async function route(
   if (parts[0] === "_node" && parts[1] === "mandates" && parts.length === 2 && method === "GET") {
     const household = url.searchParams.get("household");
     if (!household) throw badRequest("malformed", "household query parameter required");
-    // One bit and not the rows: this route is reachable by whoever holds a
-    // household identifier, which every merchant does, and a mandate's
-    // contents were behind its own unguessable label until now.
+    // One bit and not the rows, because a route should carry what its caller
+    // needs and no more. **It defends nothing**: `GET /households/{id}/export`
+    // already hands every mandate a household has to whoever asks, and a
+    // presenter can read this bit by presenting under a label of its own and
+    // reading the answer. What closes that read is question 41.
     return json({ has: engine.mandates.forHousehold(household).length > 0 });
   }
 

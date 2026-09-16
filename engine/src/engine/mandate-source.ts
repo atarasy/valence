@@ -19,14 +19,18 @@ import type { Mandate } from "../hub/mandates.js";
 export type MandateSource = {
   get(id: string): Promise<Mandate | undefined>;
   /**
-   * §16.2, question 56. **Whether this household has any mandate here**, and
-   * nothing more than whether: the route that carries this between two parties
-   * is reachable by whoever holds a household identifier, which every merchant
-   * does, and a mandate's contents were behind its own unguessable label.
-   * An offer naming a mandate the household does not have is refused. `get` alone cannot say:
-   * an unknown mandate is left alone, and a presenter that named a label the
-   * household never recorded got an offer with no ceiling and no cooling
-   * window, having recorded nothing and forged nothing. Measured 2026-09-16.
+   * §16.2, question 56. **Whether this household has any mandate here**, so
+   * that an offer naming one it does not have can be refused. `get` alone
+   * cannot say: an unknown mandate is left alone, and a presenter that named a
+   * label the household never recorded got an offer with no ceiling and no
+   * cooling window, having recorded nothing and forged nothing. Measured
+   * 2026-09-16.
+   *
+   * It answers one bit rather than the rows, because a route should carry what
+   * its caller needs and no more. **It defends nothing**: the household's own
+   * export already hands every mandate to whoever asks, and a presenter can
+   * read this bit by presenting under a label of its own and reading the
+   * answer. What closes that read is question 41's authenticated one.
    */
   holdsAny(household: string): Promise<boolean>;
 };
