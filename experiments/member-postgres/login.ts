@@ -1,7 +1,8 @@
 import { records, type Records } from './records.ts';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createPublicKey, randomBytes, randomUUID } from 'node:crypto';
 import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { openMemberAuthority } from './authority.ts';
+import { credentialSPKI } from '../member-login/credential-key.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
 type Policy = { environment: string; origin: string; rpID: string; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
@@ -20,6 +21,15 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
   const now = () => { const at = clock(); integer(at); return at; };
   const db=path,shared=true,passkeys=records<any>(path,'member_passkeys'),challenges=records<any>(path,'member_challenges');
   path.assert(authority);
+  // The authority names a household after a credential's key, and this module is
+  // what holds that key, so it hands over the reader once at construction rather
+  // than letting a caller pass one per adoption.
+  authority.useCredentialKeys((id: string) => {
+    if (!b64(id)) return undefined;
+    const row = passkeys.get(id);
+    if (!row || row.active !== 1) return undefined;
+    return createPublicKey({ key: credentialSPKI(new Uint8Array(row.public_key)), format: 'der', type: 'spki' }).export({ type: 'spki', format: 'pem' }).toString();
+  });
   function activeKey(id:string){const v=passkeys.get(id);return v?.active===1?v:null;}
   return path.register({
     scope: Object.freeze({ environment, origin, rpID }),

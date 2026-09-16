@@ -84,19 +84,22 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  if(statementEntry(entries))throw new Error('Statement acceptance already prepared; inspect status');
  const at=now(),r=memberRuntime(store,c,()=>at);
  if(!r.authority.matchesActivePrincipalScope(value.principal,value.household,[]))throw new Error('Acceptance principal changed or unavailable');
- // One passkey only, so the mandate key cannot silently pick among devices.
- const credentials=r.authority.activeCredentialIDs(value.principal);if(credentials.length!==1)throw new Error('Exactly one active acceptance credential required');
+ // One passkey only, so the mandate key cannot silently pick among devices,
+ // and it must have signed once: a registration proves no key (§10.5). A step
+ // that counted active credentials instead refused for ever as soon as one
+ // device registered and did not sign in, with no command that cleared it.
+ const {proven,unproven}=r.authority.credentialProof(value.principal);
+ if(proven.length!==1)throw new Error(`Exactly one signed-in acceptance credential required; ${proven.length} have signed in and ${unproven.length} have not. Sign in on the device, or run \`retire\` to revoke the ones that have not.`);
+ const credentials=proven;
  const credential=credentials[0]!,cose=r.login.verifiedPublicKey(credential);if(!cose)throw new Error('Acceptance credential unavailable');
  // The key is registered under the household's own name, not the mandate's:
  // a mandate has no key, and its identifier is the household's with a label.
- const keyOf=(id:string)=>{const k=r.login.verifiedPublicKey(id);return k===undefined?undefined:createPublicKey({key:credentialSPKI(k),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();};
- const pem=keyOf(credential)!;
- // The authority derives the name from the key rather than taking it here.
- const household=value.household===null?r.authority.adoptHousehold(value.principal,credential,keyOf):value.household;
+ // The authority reads the credential's key itself; nothing is named here.
+ const household=value.household===null?r.authority.adoptHousehold(value.principal,credential):value.household;
  if(value.household===null)entries.set('current',{...value,household});
- else if(household!==nameOf(pem))throw new Error('Acceptance household is not this credential');
+ else if(household!==nameOf(createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString()))throw new Error('Acceptance household is not this credential');
  const mandate=household+'.1';
- r.engine.registerIdentity(household,pem);
+ r.engine.registerIdentity(household,createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
  // **Nobody signed this mandate.** §16.1's signed route is `record`; this is
  // `importMandate`, which checks no signature, name or version, and the
  // household is now the real name of a real key, so what it writes is a
@@ -157,6 +160,22 @@ export async function prepareStatementBox(store:Store,c:MemberRuntimeConfig,now=
  * waiting under a presenter the household can no longer read, and it revokes
  * the device's session like any grant change.
  */
+/**
+ * Trusted operator capability for the case a registration leaves a credential
+ * that has never signed anything: a device that enrolled and did not sign in,
+ * or an invitation used by the wrong party. It revokes those and only those,
+ * so the operator can issue another invitation. It never touches a credential
+ * that has proven a key, and it refuses once a statement exists, because after
+ * that the household is adopted and revoking is not what is wanted.
+ */
+export function retireUnprovenCredentials(store:Store,c:MemberRuntimeConfig){
+ const entries=checked(store,c),value=entries.get('current');if(!value)throw new Error('Acceptance not prepared');
+ if(statementEntry(entries))throw new Error('Statement acceptance already prepared; inspect status');
+ const r=memberRuntime(store,c);
+ const {proven,unproven}=r.authority.credentialProof(value.principal);
+ for(const id of unproven)r.authority.revokeCredential(id);
+ return {retired:unproven.length,remaining:proven.length};
+}
 export function grantVoxPresenter(store:Store,c:MemberRuntimeConfig,presenter:string,now=Date.now){
  const entries=checked(store,c),value=entries.get('current'),statement=statementEntry(entries);
  if(!value||!statement)throw new Error('Statement acceptance not prepared');

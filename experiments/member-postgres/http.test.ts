@@ -33,7 +33,6 @@ async function setup(overrides:Partial<MemberRuntimeConfig>={}){
  }finally{db.close();}}finally{rmSync(dir,{recursive:true,force:true});}
  const cose=coseOf(seeded.pair);
  const request=(path:string,body?:unknown,token?:string)=>new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
- const keyOf=(r:ReturnType<typeof memberRuntime>)=>(id:string)=>{const k=r.login.verifiedPublicKey(id);return k===undefined?undefined:createPublicKey({key:credentialSPKI(k),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();};
  const grant=await unit.run(store=>{const r=memberRuntime(store,c,now);
   r.authority.provisionUnclaimedPrincipal('member',['merchant-1']);
   r.authority.registerCredential(seeded.input.credential,'member');
@@ -43,14 +42,14 @@ async function setup(overrides:Partial<MemberRuntimeConfig>={}){
   // proof: the verification path is exercised over HTTP in the registration
   // test below, and the refusal without one is asserted there too.
   r.authority.markCredentialProven(seeded.input.credential);
-  r.authority.adoptHousehold('member',seeded.input.credential,keyOf(r));
+  r.authority.adoptHousehold('member',seeded.input.credential);
   r.authority.bindResource({kind:'mandate',id:seeded.input.mandate},{household:seeded.input.house});
   r.authority.bindResource({kind:'offer',id:seeded.input.statement.offer},{household:seeded.input.house,presenter:'merchant-1'});
   const grant=r.authority.createSessionAfterVerification(seeded.input.credential,now()+90000);
   r.bindings.bind(grant.token,seeded.input.mandate);return grant;});
  const send=(path:string,body?:unknown,token=grant.token)=>app.fetch(request(path,body,token),{peer:'fixture-peer'});
  const invite=()=>unit.run(store=>{const r=memberRuntime(store,c,now);r.authority.provisionUnclaimedPrincipal('new-member',['merchant-1']);return r.enrollment.issueInvitation('new-member');});
- return {identity,c,unit,app,grant,request,send,invite,keyOf,...seeded};
+ return {identity,c,unit,app,grant,request,send,invite,...seeded};
 }
 test('PostgreSQL HTTP signs in reads approves reconciles identical retries and logs out',async()=>{
  const s=await setup(),flow=await (await s.send('/auth/login/options',{})).json();const signed=loginResponse(s.pair,s.input.credential,s.user,flow.publicKey.challenge,2);
@@ -77,12 +76,12 @@ test('PostgreSQL registration persists login across independent composition and 
  // household and read its offers, statement and mandate. Both halves are here:
  // a key that has signed nothing cannot name a household, and a key that is
  // somebody else's is exactly such a key.
- await expect(s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id,s.keyOf(r));})).rejects.toThrow('Credential has proven no key');
+ await expect(s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);})).rejects.toThrow('Credential has proven no key');
  const borrowed=randomUUID().replaceAll('-','');
  await expect(s.unit.run(store=>{const r=memberRuntime(store,s.c,now);
   r.authority.registerCredential(borrowed,'new-member');
   r.login.provisionVerifiedPasskey(borrowed,coseOf(s.pair),0,randomUUID().replaceAll('-',''));
-  return r.authority.adoptHousehold('new-member',borrowed,s.keyOf(r));})).rejects.toThrow('Credential has proven no key');
+  return r.authority.adoptHousehold('new-member',borrowed);})).rejects.toThrow('Credential has proven no key');
  expect(await s.unit.run(store=>store.map<{household:string|null}>('member_principals').get('new-member')?.household)).toBeNull();
  const login=await (await s.send('/auth/login/options',{})).json();const reply=await s.send('/auth/login/verify',{id:login.id,response:key.authenticate(login.publicKey.challenge,config.origin,config.rpID,flow.publicKey.user.id)});expect(reply.status).toBe(200);
  const token=(await reply.json()).token as string;
@@ -91,7 +90,7 @@ test('PostgreSQL registration persists login across independent composition and 
  // read with. The adoption derives the name from the registered credential.
  const fresh=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
  expect((await fresh.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'})).status).toBe(401);
- const adopted=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id,s.keyOf(r));});
+ const adopted=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);});
  expect(isHouseholdName(adopted)).toBe(true);
  const after=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
  const session=await after.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'});

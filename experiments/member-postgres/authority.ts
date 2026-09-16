@@ -24,6 +24,14 @@ export function openMemberAuthority(path: Records, options: Options) {
   if (!maxSessionLifetimeMs) throw new Error('Positive session lifetime required');
   const clock = options.now ?? Date.now;
   const now = () => { const value = clock(); timestamp(value); return value; };
+  // §13.2, question 55. The household is the name of the credential's key, so
+  // the authority reads that key through the login that holds it rather than
+  // taking it from whoever calls the adoption. A fourth refutation pass on
+  // 2026-09-16 measured why: with the key supplied per call, a credential that
+  // had genuinely proven possession adopted a household computed from somebody
+  // else's key, because the proof and the name were two facts about two
+  // objects. The slot is set once, by `openVerifiedLogin`, and never by a route.
+  let credentialKeys: ((credential: string) => string | undefined) | undefined;
   const db=path, principals=records<any>(path,'member_principals'), credentials=records<any>(path,'member_credentials'), sessions=records<any>(path,'member_sessions'), ownership=records<any>(path,'member_ownership');
   if(path.scope.environment!==environment||path.scope.audience!==audience)throw new Error('Authority scope mismatch');
   const digest = (token: string) => createHash('sha256').update(JSON.stringify(['atarasy.member-session.1', environment, audience, token])).digest('hex');
@@ -85,8 +93,15 @@ export function openMemberAuthority(path: Records, options: Options) {
      * removed. Two principals can reach one household only by proving one key,
      * and two holders of one key are that key.
      */
-    adoptHousehold(id: string, credentialID: string, keyOf: (credential: string) => string | undefined) {
+    /** Set once by the login that holds the passkeys. Not a route. */
+    useCredentialKeys(reader: (credential: string) => string | undefined) {
+      if (credentialKeys) throw new Error('Credential keys already bound');
+      credentialKeys = reader;
+    },
+    adoptHousehold(id: string, credentialID: string) {
       name(id); name(credentialID);
+      const keyOf = credentialKeys;
+      if (!keyOf) throw new Error('Credential keys unavailable');
       return db.transaction(() => {
         const c = credentials.get(credentialID) as { principal: string; revoked: number; proven?: number } | null;
         const p = principal(id);
@@ -114,6 +129,18 @@ export function openMemberAuthority(path: Records, options: Options) {
       name(principalID); const ids: string[] = [];
       credentials.each(c => { if (c.principal === principalID && c.revoked === 0) ids.push(c.id); });
       return ids.sort();
+    },
+    /**
+     * The active credentials that have proven a key, and the unproven ones
+     * beside them. A registration that never signs in leaves a credential that
+     * can do nothing, and a step that counted active credentials alone then
+     * refused for ever with no route back. Measured by a fourth refutation pass
+     * on 2026-09-16.
+     */
+    credentialProof(principalID: string): { proven: string[]; unproven: string[] } {
+      name(principalID); const proven: string[] = [], unproven: string[] = [];
+      credentials.each(c => { if (c.principal === principalID && c.revoked === 0) (c.proven === 1 ? proven : unproven).push(c.id); });
+      return { proven: proven.sort(), unproven: unproven.sort() };
     },
     setPresenterGrants(id: string, presenters: readonly string[]) {
       name(id); const encoded = grants(presenters);

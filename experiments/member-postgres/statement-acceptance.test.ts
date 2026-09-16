@@ -2,7 +2,7 @@ import {test,expect} from 'bun:test';
 import {createPublicKey,randomUUID} from 'node:crypto';
 import {createPool,initialiseDeployment,postgresStore} from './store.ts';
 import {openPostgresMemberHTTP} from './http.ts';
-import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox} from './device-acceptance.ts';
+import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox,retireUnprovenCredentials} from './device-acceptance.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 import {memberRuntime} from './runtime.ts';
 import config from './deployment/config.json';
@@ -19,7 +19,16 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // §13.2, question 55. Preparation cannot name the household: its identifier is
   // the name of the passkey the device has not registered yet.
   expect(prepared.household).toBeNull();
-  await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('Exactly one active acceptance credential');
+  await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('0 have signed in and 0 have not');
+  // A registration that never signs in leaves a credential that can do nothing.
+  // Counting active credentials made `statement` refuse for ever as soon as one
+  // existed, with no command that cleared it, so it counts signed-in ones and
+  // `retire` revokes the rest. Measured by a fourth refutation pass 2026-09-16.
+  const spent=syntheticAuthenticator(),wrong=await unit.run(s=>inviteDeviceAcceptance(s,c));
+  const spentFlow=await (await send('/auth/enrollment/options',{invitation:wrong.token})).json();
+  expect((await send('/auth/enrollment/verify',{id:spentFlow.id,response:spent.register(spentFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
+  await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('0 have signed in and 1 have not');
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:1,remaining:0});
   const invitation=await unit.run(s=>inviteDeviceAcceptance(s,c)),key=syntheticAuthenticator();
   const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
   expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
@@ -51,9 +60,8 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // principal holds rather than taken from the caller. There is no uniqueness
   // check on purpose: one measured earlier let a planted row claim a key's
   // name permanently, which is the registry question 55 abolished.
-  const pemOf=(r:ReturnType<typeof memberRuntime>)=>(id:string)=>{const k=r.login.verifiedPublicKey(id);return k===undefined?undefined:createPublicKey({key:credentialSPKI(k),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();};
-  await expect(unit.run(s=>{const r=memberRuntime(s,c);return r.authority.adoptHousehold(prepared.principal,r.authority.activeCredentialIDs(prepared.principal)[0]!,pemOf(r));})).rejects.toThrow('Principal has a household');
-  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);return r.authority.adoptHousehold('dev_member_second',r.authority.activeCredentialIDs(prepared.principal)[0]!,pemOf(r));})).rejects.toThrow("Credential is not this principal's");
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);return r.authority.adoptHousehold(prepared.principal,r.authority.activeCredentialIDs(prepared.principal)[0]!);})).rejects.toThrow('Principal has a household');
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);return r.authority.adoptHousehold('dev_member_second',r.authority.activeCredentialIDs(prepared.principal)[0]!);})).rejects.toThrow("Credential is not this principal's");
   // And a household that is a key's name can never be assigned, only adopted.
   await expect(unit.run(s=>memberRuntime(s,c).authority.provisionPrincipal('dev_member_assigned',statement.household,[]))).rejects.toThrow('adopted, not assigned');
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('already prepared');
