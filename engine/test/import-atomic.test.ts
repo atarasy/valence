@@ -8,6 +8,10 @@ import { DeliveryRegister } from "../src/hub/delivery.js";
 import { RecoveryRegister } from "../src/hub/node.js";
 import { PermissionLedger } from "../src/hub/permissions.js";
 import { Registry } from "../src/shared/registry.js";
+import { houseFor } from "./helpers.js";
+
+// §13.2, question 55. The household is the name of its key.
+const H = houseFor("h").household;
 
 /**
  * §14.2, question 51, decided 2026-09-15. A refused import writes nothing.
@@ -29,7 +33,7 @@ function host(store: Store) {
     handle(new Request(`https://unit.example/households/${household}/import`, { method: "POST", body: JSON.stringify(body) }));
   const holds = () => ({
     offer: (engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1"),
-    mandate: engine.mandates.forHousehold("h").length > 0,
+    mandate: engine.mandates.forHousehold(H).length > 0,
     collection: engine.recoveries.for("o-1") !== undefined,
     delivery: deliveries.forHousehold(["o-1"]).length > 0,
   });
@@ -38,12 +42,12 @@ function host(store: Store) {
   return { post, holds, receipts };
 }
 
-const offer = { id: "o-1", household: "h", candidates: [{ id: "c-1" }] };
+const offer = { id: "o-1", household: H, mandate: `${H}.1`, candidates: [{ id: "c-1" }] };
 const node = (extra: Record<string, unknown>) => ({
   format: "valence-node/6",
   offers: [offer],
   collections: [{ offer: "o-1", due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} }],
-  mandates: [{ id: "m-1", household: "h", ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }],
+  mandates: [{ id: `${H}.1`, household: H, ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }],
   deliveries: [{ offer: "o-1", carriage: 500, code: "dc-1", status: "placed", updated_at: 1 }],
   ...extra,
 });
@@ -60,7 +64,7 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
         { offers: [{ ...offer, id: { a: 1 } }] },
         { settlements: [{ offer: { a: 1 } }] },
         { notes: [{ candidate: 5, author: "a", text: "t", shared_with: [], created_at: 1 }] },
-        { lineage: [{ id: null, from: "h", to: "g" }] },
+        { lineage: [{ id: null, from: H, to: "g" }] },
         { collections: [{ offer: [], due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [] }] },
         { mandates: [{ id: ["m"], co_signers: [] }] },
         { deliveries: [{ offer: true, carriage: 1, code: "c", status: "placed", updated_at: 1 }] },
@@ -71,7 +75,7 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       ];
       for (const extra of bad) {
         const { post, holds } = host(open());
-        const r = await post("h", node(extra));
+        const r = await post(H, node(extra));
         expect([Object.keys(extra)[0], r.status]).toEqual([Object.keys(extra)[0], 400]);
         expect(holds()).toEqual(nothing);
       }
@@ -82,9 +86,9 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       // files them under the encoded segment. This assertion failed, reading
       // none: a household id that needs encoding lost its receipts on arrival.
       const { post, receipts } = host(open());
-      const r = await post(encodeURIComponent("h h"), { ...node({}), offers: [], collections: [], deliveries: [], mandates: [], receipts: [{ ref: "r-1", at: 1 }] });
+      const r = await post(encodeURIComponent(H), { ...node({}), offers: [], collections: [], deliveries: [], mandates: [], receipts: [{ ref: "r-1", at: 1 }] });
       expect(r.status).toBe(201);
-      expect(receipts("h h")).toEqual([{ ref: "r-1", at: 1 }]);
+      expect(receipts(H)).toEqual([{ ref: "r-1", at: 1 }]);
     });
 
     test("an offer named twice in one body", async () => {
@@ -93,7 +97,7 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       const { post, holds } = host(open());
       // The second copy carries a candidate of its own, or the shared candidate
       // identifier refuses it first and the offer check is never reached.
-      const r = await post("h", node({ offers: [offer, { ...offer, candidates: [{ id: "c-2" }] }] }));
+      const r = await post(H, node({ offers: [offer, { ...offer, candidates: [{ id: "c-2" }] }] }));
       expect(r.status).toBe(409);
       expect(holds()).toEqual(nothing);
     });
@@ -105,10 +109,10 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       const { post, holds } = host(open());
       const twice = node({});
       (twice.deliveries as unknown[]).push({ offer: "o-1", carriage: 800, code: "dc-1", status: "placed", updated_at: 2 });
-      const r = await post("h", twice);
+      const r = await post(H, twice);
       expect(r.status).toBe(422);
       expect(holds()).toEqual(nothing);
-      const retried = await post("h", node({}));
+      const retried = await post(H, node({}));
       expect(retried.status).toBe(201);
       expect(holds()).toEqual(everything);
     });

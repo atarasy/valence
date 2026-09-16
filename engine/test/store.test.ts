@@ -1,4 +1,4 @@
-import { MERCHANT_PAIR, disclosureFor } from "./helpers.js";
+import { HOUSEHOLD, MANDATE, MERCHANT_PAIR, disclosureFor } from "./helpers.js";
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -87,11 +87,11 @@ describe("a store is a map that writes through", () => {
     first.putDisclosure(disclosureFor("maker-a"));
     const offer = first.createOffer({
       binding: "digital",
-      household: "house-restart",
+      household: HOUSEHOLD,
       purpose: "replenish",
       config_version: "cfg-restart",
       expires_at: Date.now() + 3600_000,
-      mandate: "mandate-restart",
+      mandate: MANDATE,
       price_band: null,
       giver: null,
       candidates: [

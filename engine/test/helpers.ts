@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { ValenceEngine, canonicalConfig } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
@@ -7,9 +7,48 @@ import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { DeliveryRegister } from "../src/hub/delivery.js";
 import { LocalDeliveries } from "../src/engine/delivery-source.js";
+import { nameOf } from "../src/common/names.js";
 
-/** Clause 35. The key the unit tests confirm with, registered for "mandate-1". */
+/** Clause 35. The key the unit tests confirm with, and the household it names (§13.2). */
 export const MANDATE_PAIR = generateKeyPairSync("ed25519");
+
+/**
+ * §13.2, question 55. A household's identifier is the name of its key and a
+ * mandate's is that identifier with a label, so the fixture derives both
+ * rather than choosing them. A test that wants a household it cannot sign for
+ * takes one from `otherHousehold`.
+ */
+export const HOUSEHOLD = nameOf(MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
+export const MANDATE = `${HOUSEHOLD}.1`;
+
+/**
+ * A household named after a key derived from a label, so a fixture that used
+ * to choose a readable name keeps one thing that reads and gains an identifier
+ * of the shape §13.2 requires. Deterministic, so a diff of these files is
+ * about what changed rather than about which keys were generated.
+ */
+const ED25519_PKCS8 = Buffer.from("302e020100300506032b657004220420", "hex");
+export function houseFor(label: string) {
+  const seed = createHash("sha256").update(`valence-fixture/${label}`).digest();
+  const privateKey = createPrivateKey({ key: Buffer.concat([ED25519_PKCS8, seed]), format: "der", type: "pkcs8" });
+  const pem = createPublicKey(privateKey).export({ type: "spki", format: "pem" }).toString();
+  const household = nameOf(pem);
+  return {
+    household,
+    mandate: `${household}.1`,
+    pem,
+    privateKey,
+    sign: (bytes: Buffer) => sign(null, bytes, privateKey).toString("base64"),
+    signEdge: (edge: EdgeInput) => sign(null, canonical(edge), privateKey).toString("base64"),
+  };
+}
+
+/** A household this fixture holds no private key for. */
+export function otherHousehold(label = "1"): { household: string; mandate: string } {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const household = nameOf(publicKey.export({ type: "spki", format: "pem" }).toString());
+  return { household, mandate: `${household}.${label}` };
+}
 
 export async function decideSigned(engine: ValenceEngine, offerId: string, decisions: DecisionInput[]) {
   const signature = sign(null, canonicalDecisions(offerId, decisions), MANDATE_PAIR.privateKey).toString("base64");
@@ -110,7 +149,7 @@ export function makeEngine(overrides: Partial<{
     },
   };
   engine.registerConfig(config, signConfig(config));
-  engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
+  engine.registerIdentity(HOUSEHOLD, MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
   // §10a. Every merchant named on a candidate needs one, or a decision naming
   // it is refused. The fixture's merchant is `maker-a`, which is not the
   // presenter: the block belongs to the party that sells, not to the party

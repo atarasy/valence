@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { CONFIG_VERSION, HOUR, makeEngine, decideSigned } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine } from "./helpers.js";
 
 // §10a.3, §14.2: an import can arrive already presented, so the receiving
 // engine must check disclosure completeness when the household decides.
@@ -8,9 +8,9 @@ import { CONFIG_VERSION, HOUR, makeEngine, decideSigned } from "./helpers.js";
 test("an imported presented offer needs its merchant disclosure before a decision", async () => {
   const { engine: sender } = makeEngine();
   const offer = sender.createOffer({
-    binding: "digital", household: "house-import-disclosure", purpose: "replenish",
+    binding: "digital", household: HOUSEHOLD, purpose: "replenish",
     config_version: CONFIG_VERSION, expires_at: Date.now() + HOUR,
-    mandate: "mandate-1", price_band: null, giver: null,
+    mandate: MANDATE, price_band: null, giver: null,
     candidates: [{ product: "coffee-a", quantity: 1, predicted_conversion: 0.5,
       is_exploration: true, given_by: null }],
   });

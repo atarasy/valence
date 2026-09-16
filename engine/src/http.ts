@@ -1,4 +1,5 @@
 import { type Mandate } from "./hub/mandates.js";
+import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
@@ -909,7 +910,7 @@ async function route(
       const raw = strict(await body(request), ["describes", "expires_at"], "action");
       return json(
         permissions.openAction({
-          household: parts[1],
+          household: decodeURIComponent(parts[1]),
           describes: requireString(raw, "describes", "action"),
           expiresAt: requireInteger(raw, "expires_at", "action", 0),
         }),
@@ -1141,7 +1142,7 @@ async function route(
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "permissions") {
-    const household = parts[1];
+    const household = decodeURIComponent(parts[1]);
     if (method === "GET" && parts.length === 3) {
       // Clause 40. Always visible, revoked rows included.
       return json({ permissions: permissions.forHousehold(household) });
@@ -1179,7 +1180,10 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "export") {
     // Clause 43. Everything the household holds, whatever a surface shows.
     if (method === "GET") {
-      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, parts[1]));
+      // §13.2, question 55. The segment is decoded, as it is on the import
+      // beside it: a household identifier carries a colon, so a route that read
+      // the raw segment answered for a household nobody has.
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, decodeURIComponent(parts[1])));
     }
   }
 
@@ -1195,6 +1199,15 @@ async function route(
         throw badRequest("malformed", "unknown export format");
       }
       const moving = decodeURIComponent(parts[1]);
+      // §13.2, question 55. The identifier on the path is a household's key,
+      // and every offer and mandate this body carries names a mandate of that
+      // household's. An import does not pass through `createOffer`, so without
+      // this the shape holds for an offer made here and not for one that
+      // arrived, and a decided set that arrived would go on being verified
+      // against whatever key its mandate's name resolved to.
+      if (!isHouseholdName(moving)) {
+        throw unprocessable("name_is_not_the_key", `${moving} is not a household identifier`);
+      }
       // §14.2, question 50. A confirmation names an offer this import carries.
       // Unscoped, a body carrying only `confirmations` put a token on an offer
       // the host already held, which unlocked the withdrawal §16.5 refuses and
@@ -1222,6 +1235,10 @@ async function route(
       for (const o of body_.offers ?? []) {
         if (!Array.isArray(o.candidates) || o.candidates.some((c) => !c || typeof c !== "object")) {
           throw badRequest("malformed", "an offer's candidates must be a list of rows");
+        }
+        // §13.2, question 55.
+        if (typeof o.mandate !== "string" || householdOfMandate(o.mandate) !== moving) {
+          throw unprocessable("name_is_not_the_key", `offer ${o.id} names a mandate that is not this household's`);
         }
       }
       for (const [field, key] of MERGED_KEYS) {
@@ -1331,6 +1348,12 @@ async function route(
         ) {
           throw badRequest("malformed", "a mandate's ceilings, window, lapse and version are whole numbers");
         }
+        // §13.2, question 55. A mandate's identifier is its household's with a
+        // label, so a row that does not begin with the path's household is not
+        // this household's mandate whatever its `household` field says.
+        if (householdOfMandate(m.id) !== moving) {
+          throw unprocessable("name_is_not_the_key", `mandate ${m.id} is not this household's`);
+        }
         if (seenMandates.has(m.id)) throw badRequest("malformed", `mandates names ${m.id} twice`);
         seenMandates.add(m.id);
         const held = engine.mandates.get(m.id);
@@ -1401,14 +1424,14 @@ async function route(
   if (parts[0] === "households" && parts[1] && parts[2] === "recoveries") {
     // Clause 53. The log a person reads after being locked out.
     if (method === "GET") {
-      return json({ recoveries: recovery.logFor(parts[1]) });
+      return json({ recoveries: recovery.logFor(decodeURIComponent(parts[1])) });
     }
     if (method === "POST") {
       const raw = strict(await body(request), ["by"], "recovery");
       try {
         return json(
           recovery.recover({
-            household: parts[1],
+            household: decodeURIComponent(parts[1]),
             by: requireString(raw, "by", "recovery"),
           }),
           201
@@ -1426,7 +1449,7 @@ async function route(
     parts[1]
   ) {
     // §7.6. The fact of receipt, and nothing else.
-    return json({ receipts: engine.receiptsFor(parts[1]) });
+    return json({ receipts: engine.receiptsFor(decodeURIComponent(parts[1])) });
   }
 
   // §9.1. /segments, /broadcast, /discounts, /ratings, /events/track are not

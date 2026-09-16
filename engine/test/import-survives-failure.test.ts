@@ -11,6 +11,10 @@ import { DeliveryRegister } from "../src/hub/delivery.js";
 import { RecoveryRegister } from "../src/hub/node.js";
 import { PermissionLedger } from "../src/hub/permissions.js";
 import { Registry } from "../src/shared/registry.js";
+import { houseFor } from "./helpers.js";
+
+// §13.2, question 55. The household is the name of its key.
+const H = houseFor("h").household;
 
 /**
  * §14.2, question 53, decided 2026-09-16. An accepted import stands whole or
@@ -30,16 +34,16 @@ function host(store: Store) {
     permissions: new PermissionLedger(store), registry: new Registry(store),
   });
   const post = (body: unknown) =>
-    handle(new Request("https://unit.example/households/h/import", { method: "POST", body: JSON.stringify(body) }));
+    handle(new Request(`https://unit.example/households/${H}/import`, { method: "POST", body: JSON.stringify(body) }));
   return { engine, deliveries, post };
 }
 
 const node = {
   format: "valence-node/6",
-  offers: [{ id: "o-1", household: "h", candidates: [{ id: "c-1" }] }],
+  offers: [{ id: "o-1", household: H, mandate: `${H}.1`, candidates: [{ id: "c-1" }] }],
   notes: [{ candidate: "c-1", author: "a", text: "t", shared_with: [], created_at: 1 }],
   collections: [{ offer: "o-1", due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} }],
-  mandates: [{ id: "m-1", household: "h", ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }],
+  mandates: [{ id: `${H}.1`, household: H, ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }],
   deliveries: [{ offer: "o-1", carriage: 500, code: "dc-1", status: "placed", updated_at: 1 }],
 };
 
@@ -59,7 +63,7 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
       offer: (h.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1"),
       note: h.engine.notesFor("c-1").length,
       collection: h.engine.recoveries.for("o-1") !== undefined,
-      mandate: h.engine.mandates.get("m-1") !== undefined,
+      mandate: h.engine.mandates.get(`${H}.1`) !== undefined,
     };
     expect(inMemory).toEqual({ offer: false, note: 0, collection: false, mandate: false });
 
@@ -73,7 +77,7 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
     const again = host(reopened);
     expect((again.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1")).toBe(true);
     expect(again.engine.notesFor("c-1").length).toBe(1);
-    expect(again.engine.mandates.get("m-1")).toBeDefined();
+    expect(again.engine.mandates.get(`${H}.1`)).toBeDefined();
     expect(again.deliveries.forHousehold(["o-1"]).length).toBe(1);
     reopened.close();
   });
@@ -91,7 +95,7 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
     const reopened = openStore(path);
     const after = host(reopened);
     expect((after.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1")).toBe(false);
-    expect(after.engine.mandates.get("m-1")).toBeUndefined();
+    expect(after.engine.mandates.get(`${H}.1`)).toBeUndefined();
     reopened.close();
   });
 });

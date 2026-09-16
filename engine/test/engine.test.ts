@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ValenceEngine, explorationFloor } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { ValenceError } from "../src/common/errors.js";
-import { CONFIG_VERSION, HOUR, makeEngine, signer, decideSigned, settleSigned, signConfig } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, settleSigned, signConfig, signer } from "./helpers.js";
 
 const baseOffer = (candidates: {
   product: string;
@@ -12,11 +12,11 @@ const baseOffer = (candidates: {
   given_by?: string | null;
 }[], overrides: Record<string, unknown> = {}) => ({
   binding: "digital" as const,
-  household: "house-1",
+  household: HOUSEHOLD,
   purpose: "replenish" as const,
   config_version: CONFIG_VERSION,
   expires_at: Date.now() + HOUR,
-  mandate: "mandate-1",
+  mandate: MANDATE,
   price_band: null,
   giver: null,
   candidates: candidates.map((c) => ({

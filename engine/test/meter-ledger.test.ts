@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { MeterLedger } from "../src/engine/meter-ledger.js";
 import { ValenceEngine } from "../src/engine/offers.js";
-import { CONFIG_VERSION, HOUR, decideSigned, MANDATE_PAIR, signConfig, PRESENTER_PAIR, MERCHANT_PAIR, disclosureFor } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PRESENTER_PAIR, decideSigned, disclosureFor, signConfig } from "./helpers.js";
 
 /**
  * The adapter is tested against a stand-in that reproduces the behaviour
@@ -82,7 +82,7 @@ const makeEngine = (ledger: MeterLedger) => {
     recoveryGraceDays: 3,
     relyingPartyId: "unit.example",
   });
-  engine.registerIdentity("mandate-1", MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
+  engine.registerIdentity(HOUSEHOLD, MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
   // §5.4. A catalogue is signed by the presenter it names.
   engine.registerIdentity(
     "merchant-1",
@@ -108,11 +108,11 @@ const makeEngine = (ledger: MeterLedger) => {
 const offerFor = (engine: ValenceEngine) =>
   engine.createOffer({
     binding: "digital",
-    household: "house-meter",
+    household: HOUSEHOLD,
     purpose: "replenish",
     config_version: CONFIG_VERSION,
     expires_at: Date.now() + HOUR,
-    mandate: "mandate-1",
+    mandate: MANDATE,
     price_band: null,
     giver: null,
     candidates: [
@@ -189,11 +189,11 @@ describe("MeterLedger", () => {
     const now = Date.now();
     const offer = engine.createOffer({
       binding: "digital",
-      household: "house-meter",
+      household: HOUSEHOLD,
       purpose: "replenish",
       config_version: CONFIG_VERSION,
       expires_at: now + 1000,
-      mandate: "mandate-1",
+      mandate: MANDATE,
       price_band: null,
       giver: null,
       candidates: [
@@ -218,7 +218,7 @@ describe("MeterLedger", () => {
     const before = ledgerCalls.filter((c) => c.path.endsWith("/authorize")).length;
     await ledger.reserve({
       requestId: offer.id,
-      household: "house-meter",
+      household: HOUSEHOLD,
       amount: 2100,
       expiresAt: Date.now() + HOUR,
     });
@@ -231,7 +231,7 @@ describe("MeterLedger", () => {
     rows.set("poor", { requestId: "poor", credits: 10, status: "held" });
     (ledger as unknown as { held: Map<string, unknown> }).held.set("poor", {
       requestId: "poor",
-      household: "house-meter",
+      household: HOUSEHOLD,
       reserved: 10_000,
       expiresAt: Date.now() + HOUR,
       status: "held",
