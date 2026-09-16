@@ -186,7 +186,10 @@ export function retireUnprovenCredentials(store:Store,c:MemberRuntimeConfig){
  if(statementEntry(entries))throw new AcceptanceError('Statement acceptance already prepared; inspect status');
  const r=memberRuntime(store,c);
  const {proven,unproven}=r.authority.credentialProof(value.principal);
- for(const id of [...proven,...unproven])r.authority.revokeCredential(id);
+ // Removed, not revoked: a revoked row keeps its id and its user handle, so the
+ // same device could never enrol again, and the message this step prints tells
+ // the operator to do exactly that.
+ for(const id of [...proven,...unproven]){r.authority.removeCredential(id);r.login.removeEnrolledPasskey(id);}
  // What is in flight counts too: an invitation not yet spent, and a ceremony
  // opened and not finished, both become credentials after this returns.
  const cancelled=r.enrollment.cancelEnrolment(value.principal);

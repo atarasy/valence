@@ -44,8 +44,24 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // An invitation outstanding when the enrolment is undone becomes a credential
   // afterwards unless it is dropped with the rest.
   const stranded=await unit.run(s=>inviteDeviceAcceptance(s,c));
-  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:2,signedIn:1,unproven:1,cancelled:1});
+  // And a ceremony opened and not finished: finishing it after the enrolment is
+  // undone would produce a credential, so it is dropped with the rest.
+  const openCeremony=syntheticAuthenticator(),opening=await unit.run(s=>inviteDeviceAcceptance(s,c));
+  const openFlow=await (await send('/auth/enrollment/options',{invitation:opening.token})).json();
+  expect(await unit.run(s=>s.map('member_flows').size)).toBe(1);
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:2,signedIn:1,unproven:1,cancelled:2});
+  expect((await send('/auth/enrollment/verify',{id:openFlow.id,response:openCeremony.register(openFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
   expect((await send('/auth/enrollment/options',{invitation:stranded.token})).status).toBe(401);
+  // A half-finished ceremony is dropped too, not only the invitation that
+  // opened it: finishing it afterwards would produce a credential.
+  expect(await unit.run(s=>s.map('member_flows').size)).toBe(0);
+  // And the device can enrol again, which is what the message tells the
+  // operator to do. Revoking the rows instead of removing them made the same
+  // credential id and user handle unusable for the life of the deployment.
+  const reInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
+  const reFlow=await (await send('/auth/enrollment/options',{invitation:reInvite.token})).json();
+  expect((await send('/auth/enrollment/verify',{id:reFlow.id,response:spent.register(reFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toMatchObject({retired:1,signedIn:0,unproven:1});
   // The counts are computed before anything is revoked, so the rows are read
   // back: an earlier version returned the same object and revoked less.
   expect(await unit.run(s=>{const rows=s.map<{revoked:number}>('member_credentials');return [...rows.values()].every(v=>v.revoked===1);})).toBe(true);

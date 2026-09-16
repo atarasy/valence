@@ -181,6 +181,21 @@ export function openMemberAuthority(path: Records, options: Options) {
       name(id);
       credentials.updateWhere(id, c => c.revoked === 0, { proven: 1 });
     },
+    /**
+     * Trusted administration only, and only where nothing has been adopted from
+     * it. Removing the row rather than revoking it is what lets the same device
+     * enrol again, which `revokeCredential` alone does not: `insert` refuses a
+     * duplicate id for the life of the deployment.
+     */
+    removeCredential(id: string) {
+      name(id);
+      db.transaction(() => {
+        const c = credentials.get(id) as { principal: string } | null;
+        if (c && principal(c.principal)?.household !== null) throw new Error('This credential names a household');
+        credentials.delete(id);
+        sessions.each(s => { if (s.credential === id) sessions.delete(s.id); });
+      }).immediate();
+    },
     revokeCredential(id: string) {
       name(id);
       db.transaction(() => {

@@ -43,10 +43,26 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
     enrolVerifiedPasskey(principal: string, id: string, publicKey: Uint8Array, counter: number, userHandle: string) {
       if (!b64(id) || !b64(userHandle) || !(publicKey instanceof Uint8Array) || !publicKey.length || publicKey.length > 4096) throw new Error('Invalid enrolled credential');
       integer(counter); if (counter > 0xffffffff) throw new Error('Invalid authenticator counter');
-      passkeys.insert(id,{id,public_key:Array.from(publicKey),counter,user_handle:userHandle,revision:0,active:0});
+      // The authority's refusals run before anything is written. The order was
+      // the other way and the caller's savepoint was what kept a refused
+      // enrolment from leaving a passkey row; a seventh refutation pass on
+      // 2026-09-16 named the dependence even though it measured it clean.
       authority.registerCredential(id, principal);
+      passkeys.insert(id,{id,public_key:Array.from(publicKey),counter,user_handle:userHandle,revision:0,active:0});
       const changed = passkeys.updateWhere(id,v=>v.active===0,{active:1});
       if (changed.changes !== 1) throw new Error('Enrollment activation failed');
+    },
+    /**
+     * Trusted administration only. Removes an enrolled passkey outright rather
+     * than marking it inactive, because a row left behind makes the same device
+     * unable to enrol again: `insert` refuses a duplicate id and the user handle
+     * persists. Measured by a seventh refutation pass on 2026-09-16, which found
+     * the tool telling the operator to enrol again after an operation that made
+     * enrolling again impossible.
+     */
+    removeEnrolledPasskey(id: string) {
+      if (!b64(id)) throw new Error('Invalid enrolled credential');
+      passkeys.delete(id);
     },
     /** Detached active public-key data for trusted internal mandate binding only. */
     verifiedPublicKey(id: string): Uint8Array | undefined {
