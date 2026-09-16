@@ -1,7 +1,7 @@
 import { records, type Records } from './records.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Ownership, Resource, Session } from '../member-read/gate.ts';
-import { isHouseholdName } from '../../engine/src/common/names.ts';
+import { isHouseholdName, nameOf } from '../../engine/src/common/names.ts';
 
 type Options = { environment: string; audience: string; maxSessionLifetimeMs: number; now?: () => number };
 function name(value: unknown): asserts value is string {
@@ -46,6 +46,11 @@ export function openMemberAuthority(path: Records, options: Options) {
     },
     provisionPrincipal(id: string, household: string, presenters: readonly string[]) {
       name(id); name(household); const encoded = grants(presenters);
+      // §13.2, question 55. A household that is the name of a key is adopted by
+      // proving that key, never assigned. Without this the column is a free,
+      // global, permanent claim on a key's name that proves nothing about the
+      // key, which is the registry question 55 was decided to abolish.
+      if (isHouseholdName(household)) throw new Error('A household that is a key is adopted, not assigned');
       // INSERT only: no rebind, revive or silent overwrite of an existing principal.
       principals.insert(id,{id,household,presenters:encoded,disabled:0});
     },
@@ -62,23 +67,33 @@ export function openMemberAuthority(path: Records, options: Options) {
       principals.insert(id,{id,household:null,presenters:encoded,disabled:0});
     },
     /**
-     * **This checks the shape of the name and that nobody else holds it. It does
-     * not check that the key is this principal's**, which the caller does by
-     * deriving the name from that principal's own credential. A refutation pass
-     * on 2026-09-16 adopted a freshly generated key's name onto a principal with
-     * no credential at all, so the sentence is here rather than left implied.
+     * §13.2, question 55. The household is **derived from the key the principal
+     * holds**, never taken from the caller: `keyOf` reads the public half of
+     * that principal's own active credential, exactly as `Mandates.record`
+     * takes a `keyOf` rather than a name. A first version took the name as an
+     * argument and checked only its shape, and a refutation pass adopted a
+     * freshly generated key's name onto a principal with no credential at all.
      *
-     * The uniqueness check is the half that belongs here: `permitted()` keys a
-     * read on the session's household alone, so two principals holding one
-     * household is one read scope, and the same pass measured it.
+     * There is deliberately **no uniqueness check**. A second version refused a
+     * household any principal held, and a second pass measured what that
+     * bought: a row planted by `provisionPrincipal`, which proves nothing about
+     * any key, claimed a key's name permanently and locked its real holder out,
+     * with no route back. That is the same `409 identity_exists` question 55
+     * removed. Two principals can reach one household only by proving one key,
+     * and two holders of one key are that key.
      */
-    adoptHousehold(id: string, household: string) {
-      name(id); name(household);
-      if (!isHouseholdName(household)) throw new Error('A household identifier is the name of its key');
-      db.transaction(() => {
-        if (principals.find(p => p.household === household)) throw new Error('Household already held');
-        const changed = principals.updateWhere(id, p => p.household === null && p.disabled === 0, { household });
+    adoptHousehold(id: string, credentialID: string, keyOf: (credential: string) => string | undefined) {
+      name(id); name(credentialID);
+      return db.transaction(() => {
+        const c = credentials.get(credentialID) as { principal: string; revoked: number } | null;
+        const p = principal(id);
+        if (!c || c.revoked !== 0 || c.principal !== id || !p || p.disabled !== 0) throw new Error('Credential is not this principal\'s');
+        const pem = keyOf(credentialID);
+        if (!pem) throw new Error('Credential key unavailable');
+        const household = nameOf(pem);
+        const changed = principals.updateWhere(id, v => v.household === null && v.disabled === 0, { household });
         if (!changed.changes) throw new Error('Principal has a household or is unavailable');
+        return household;
       }).immediate();
     },
     registerCredential(id: string, principalID: string) {

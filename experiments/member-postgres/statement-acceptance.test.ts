@@ -1,5 +1,5 @@
 import {test,expect} from 'bun:test';
-import {generateKeyPairSync,randomUUID} from 'node:crypto';
+import {createPublicKey,randomUUID} from 'node:crypto';
 import {createPool,initialiseDeployment,postgresStore} from './store.ts';
 import {openPostgresMemberHTTP} from './http.ts';
 import {prepareDeviceAcceptance,deviceAcceptanceStatus,inviteDeviceAcceptance,prepareStatementAcceptance,prepareStatementBox} from './device-acceptance.ts';
@@ -7,7 +7,8 @@ import type {MemberRuntimeConfig} from './config.ts';
 import {memberRuntime} from './runtime.ts';
 import config from './deployment/config.json';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
-import {isHouseholdName,householdOfMandate,nameOf} from '../../engine/src/common/names.ts';
+import {isHouseholdName,householdOfMandate} from '../../engine/src/common/names.ts';
+import {credentialSPKI} from '../member-login/credential-key.ts';
 test('trusted statement acceptance lets the registered passkey approve one physical statement through HTTP',async()=>{
  const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
  const pool=createPool(url),c=config as MemberRuntimeConfig,id={id:'statement_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1},unit=postgresStore(pool,id);
@@ -38,19 +39,23 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect(isHouseholdName(statement.household)).toBe(true);
   expect(householdOfMandate(statement.mandate)).toBe(statement.household);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({household:statement.household});
-  // Nobody signed this mandate, so its terms are the narrowest the acceptance
-  // box needs. If it is ever widened, it is widened under a real key's name.
+  // Nobody signed this mandate, and it is written under a real key's name. The
+  // ceiling is one box's price, which is what §16.2 bounds: carriage is not in
+  // it. It contains nothing on this service, because no registry is supplied
+  // and every merchant then reads as in network, so this assertion is about the
+  // number being right where it is read and not about anything it stops.
   expect(await unit.run(s=>s.map<{household:string;ceiling_out_of_network:number;ceiling_daily:number|null;co_signers:string[];version:number}>('mandates').get(statement.mandate)))
-   .toMatchObject({household:statement.household,ceiling_out_of_network:1750,co_signers:[],version:1});
+   .toMatchObject({household:statement.household,ceiling_out_of_network:1200,co_signers:[],version:1});
   await expect(unit.run(s=>s.map<{household:string}>('member_principals').get(prepared.principal)?.household)).resolves.toBe(statement.household);
-  // The transition runs once, only to a key, and only to a key nobody else
-  // holds. The last of the three was measured open by a refutation pass: two
-  // principals held one household and `permitted()` keys a read on the
-  // household alone, so that was one read scope.
-  const other=nameOf(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}).toString());
-  await expect(unit.run(s=>memberRuntime(s,c).authority.adoptHousehold(prepared.principal,other))).rejects.toThrow('Principal has a household');
-  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);r.authority.adoptHousehold('dev_member_second',statement.household);})).rejects.toThrow('Household already held');
-  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_unclaimed',[]);r.authority.adoptHousehold('dev_member_unclaimed','dev_house_plain');})).rejects.toThrow('the name of its key');
+  // The transition runs once, and the name is derived from the key the
+  // principal holds rather than taken from the caller. There is no uniqueness
+  // check on purpose: one measured earlier let a planted row claim a key's
+  // name permanently, which is the registry question 55 abolished.
+  const pemOf=(r:ReturnType<typeof memberRuntime>)=>(id:string)=>{const k=r.login.verifiedPublicKey(id);return k===undefined?undefined:createPublicKey({key:credentialSPKI(k),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();};
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);return r.authority.adoptHousehold(prepared.principal,r.authority.activeCredentialIDs(prepared.principal)[0]!,pemOf(r));})).rejects.toThrow('Principal has a household');
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);return r.authority.adoptHousehold('dev_member_second',r.authority.activeCredentialIDs(prepared.principal)[0]!,pemOf(r));})).rejects.toThrow("Credential is not this principal's");
+  // And a household that is a key's name can never be assigned, only adopted.
+  await expect(unit.run(s=>memberRuntime(s,c).authority.provisionPrincipal('dev_member_assigned',statement.household,[]))).rejects.toThrow('adopted, not assigned');
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('already prepared');
   // The grant change revokes the earlier session and the internal binding session leaves nothing live.
   expect((await send('/auth/session',undefined,before)).status).toBe(401);

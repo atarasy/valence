@@ -37,7 +37,7 @@ export async function openDevelopmentMemberHTTP(path:string,input:MemberRuntimeC
    const url=new URL(request.url);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    const member=url.pathname.startsWith('/member/');
-   const known=member||authPaths.includes(url.pathname)||url.pathname==='/offers'||/^\/offers\/[A-Za-z0-9_-]+(?:\/(approval|statement|settlement))?$/.test(url.pathname)||/^\/_node\/mandates\/[A-Za-z0-9_-]+$/.test(url.pathname);
+   const known=member||authPaths.includes(url.pathname)||url.pathname==='/offers'||/^\/offers\/[A-Za-z0-9_-]+(?:\/(approval|statement|settlement))?$/.test(url.pathname)||/^\/_node\/mandates\/[A-Za-z0-9_.:%-]+$/.test(url.pathname);
    if(!known)return json(404,'request_unavailable');
    if(closed||pending>=c.maximumPending||typeof context?.peer!=='string'||!context.peer||context.peer.length>256)return json(503,'unavailable');
    const at=Date.now(),key=createHash('sha256').update(context.peer).digest('hex');

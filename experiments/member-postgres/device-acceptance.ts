@@ -9,8 +9,10 @@ import {memberRuntime} from './runtime.ts';
 type Acceptance={principal:string;household:string|null;createdAt:number};
 type StatementAcceptance={presenter:string;merchant:string;mandate:string;offer:string;credential:string;createdAt:number};
 const DAY_MS=86_400_000;
-// One acceptance box: the catalogue price below plus the carriage recorded with it.
-const ACCEPTANCE_PRICE=1200,ACCEPTANCE_CARRIAGE=550,ACCEPTANCE_BOX_TOTAL=ACCEPTANCE_PRICE+ACCEPTANCE_CARRIAGE;
+// One acceptance box: the catalogue price below and the carriage recorded with
+// it. §16.2's ceiling bounds the sum of unit price times quantity, and carriage
+// is not in it, so the ceiling below is the price alone.
+const ACCEPTANCE_PRICE=1200,ACCEPTANCE_CARRIAGE=550;
 function checked(store:Store,c:MemberRuntimeConfig){
  const expected=memberRuntimeIdentity(c),bound=store.map<typeof expected>('member_config').get('current');
  if(c.environment!=='development'||!bound||bound.profile!==expected.profile||bound.fingerprint!==expected.fingerprint||memberRuntimeIdentity(bound.config).fingerprint!==expected.fingerprint)throw new Error('Acceptance configuration unavailable');
@@ -87,10 +89,12 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  const credential=credentials[0]!,cose=r.login.verifiedPublicKey(credential);if(!cose)throw new Error('Acceptance credential unavailable');
  // The key is registered under the household's own name, not the mandate's:
  // a mandate has no key, and its identifier is the household's with a label.
- const pem=createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();
- const household=nameOf(pem);
- if(value.household===null){r.authority.adoptHousehold(value.principal,household);entries.set('current',{...value,household});}
- else if(value.household!==household)throw new Error('Acceptance household is not this credential');
+ const keyOf=(id:string)=>{const k=r.login.verifiedPublicKey(id);return k===undefined?undefined:createPublicKey({key:credentialSPKI(k),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();};
+ const pem=keyOf(credential)!;
+ // The authority derives the name from the key rather than taking it here.
+ const household=value.household===null?r.authority.adoptHousehold(value.principal,credential,keyOf):value.household;
+ if(value.household===null)entries.set('current',{...value,household});
+ else if(household!==nameOf(pem))throw new Error('Acceptance household is not this credential');
  const mandate=household+'.1';
  r.engine.registerIdentity(household,pem);
  // **Nobody signed this mandate.** §16.1's signed route is `record`; this is
@@ -98,11 +102,20 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  // household is now the real name of a real key, so what it writes is a
  // version 1 the key's holder never agreed to and can only ever build a
  // version 2 on top of. Named by a refutation pass on 2026-09-16 and open as
- // the second half of question 56. Until the device records its own mandate
- // through an assertion, the terms here are the narrowest the acceptance box
- // needs rather than the widest the shape allows: one box's price and
- // carriage, and a week.
- r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:ACCEPTANCE_BOX_TOTAL,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
+ // the second half of question 56. The fix is for the device to record its own
+ // mandate with an assertion, which `record` already accepts and this service
+ // has no route for.
+ //
+ // The ceiling below is one box's price. **It bounds nothing on this service**,
+ // because `memberRuntime` supplies no registry and the engine then reads every
+ // merchant as in network, so the out-of-network total is always zero: a second
+ // pass set this field to 0 and the whole acceptance still ran. It is written
+ // narrow so that it is right wherever it is read, not because it contains
+ // anything here. The other three fields are the widest the shape allows and
+ // are not narrowed: a cooling window would stop the acceptance settling, a
+ // daily ceiling would stop the second box, and a co-signer is a key nobody
+ // holds. What contains this is that it is a development deployment.
+ r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:ACCEPTANCE_PRICE,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
  const box=await presentBox(r,household,mandate,at);
  // Changing grants revokes the device's current session; it signs in again afterwards.
  r.authority.setPresenterGrants(value.principal,[box.presenter]);
