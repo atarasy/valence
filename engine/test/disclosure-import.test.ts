@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeEngine, MANDATE_PAIR, disclosureFor, CONFIG_VERSION } from "./helpers.js";
+import { CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, disclosureFor, makeEngine } from "./helpers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import { sign } from "node:crypto";
 
@@ -18,11 +18,11 @@ describe("§10a.3: an imported block signed by a key this host lacks", () => {
     const { engine } = makeEngine();
     const offer = await engine.createOffer({
       binding: "digital",
-      household: "household-1",
+      household: HOUSEHOLD,
       purpose: "replenish",
       config_version: CONFIG_VERSION,
       expires_at: Date.now() + 3_600_000,
-      mandate: "mandate-1",
+      mandate: MANDATE,
       price_band: null,
       giver: null,
       candidates: [{ product: "tea-a", quantity: 1, is_exploration: true }],
@@ -53,11 +53,11 @@ describe("§10a.5: a product block with an invalid signature on an existing offe
     const { engine } = makeEngine();
     const offer = await engine.createOffer({
       binding: "digital",
-      household: "household-2",
+      household: HOUSEHOLD,
       purpose: "replenish",
       config_version: CONFIG_VERSION,
       expires_at: Date.now() + 3_600_000,
-      mandate: "mandate-1",
+      mandate: MANDATE,
       price_band: null,
       giver: null,
       candidates: [{ product: "tea-a", quantity: 1, is_exploration: true }],

@@ -30,7 +30,7 @@ test('committed revocations and resource invalidations refuse before claim and l
       if (kind === 'session') a.revokeSession(input.session);
       if (kind === 'principal') a.disablePrincipal('member');
       if (kind === 'grants') a.setPresenterGrants('member', []);
-      if (kind === 'offer' || kind === 'mandate') a.invalidateResource({ kind, id: kind === 'offer' ? input.statement.offer : 'mandate-1' });
+      if (kind === 'offer' || kind === 'mandate') a.invalidateResource({ kind, id: kind === 'offer' ? input.statement.offer : input.mandate });
     });
     await expect(unit.run((store, db) => commitUnified(store, db, input))).rejects.toThrow();
     expect(await observe(f.path, input)).toMatchObject({ operation: { state: 'prepared', assertionFingerprint: null }, receipt: null, reservation: { status: 'held' }, day: [] });
@@ -51,7 +51,7 @@ test('login counter session and challenge consumption roll back together before 
   expect(await unit.run((store, db) => unifiedRuntime(store, db).authority.resolveSession(uncommittedToken))).toBeUndefined();
   const session = await unit.run((store, db) => unifiedRuntime(store, db).login.finish(flow.id, response));
   expect((await observe(f.path, seeded.input)).counter).toBe(2);
-  expect(await unit.run((store, db) => unifiedRuntime(store, db).authority.resolveSession(session.token))).toMatchObject({ household: 'house' });
+  expect(await unit.run((store, db) => unifiedRuntime(store, db).authority.resolveSession(session.token))).toMatchObject({ household: seeded.input.house });
 });
 test('caught login verification failures commit the consumed challenge and issue no session', async () => {
   const f = fresh(), seeded = await seedUnified(f.path), unit = open(f.path);
@@ -72,7 +72,7 @@ test('two login flows with the same nonzero authenticator counter issue only one
 });
 test('shared capabilities reject expired use mixed participants and standalone reopening', async () => {
   const f = fresh(), { input } = await seedUnified(f.path), unit = open(f.path); let escaped: ReturnType<typeof unifiedRuntime> | undefined;
-  await unit.run((store, db) => { escaped = unifiedRuntime(store, db); escaped.authority.close(); expect(escaped.authority.transactionContext(input.token, 'mandate-1')).toBeDefined(); });
+  await unit.run((store, db) => { escaped = unifiedRuntime(store, db); escaped.authority.close(); expect(escaped.authority.transactionContext(input.token, input.mandate)).toBeDefined(); });
   expect(() => escaped!.authority.revokeCredential(input.credential)).toThrow('scope ended');
   await expect(escaped!.journal.read(input.token, input.operation.id)).rejects.toThrow('scope ended');
   await unit.run((_store, db) => {

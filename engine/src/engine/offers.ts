@@ -1,5 +1,5 @@
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID, createHash, createPublicKey } from "node:crypto";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
@@ -16,6 +16,7 @@ import {
   type PersonalSignature,
 } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
+import { claimsToBeAKey, householdOfMandate, isHouseholdName, nameOf } from "../common/names.js";
 import { LocalMandates, type MandateSource } from "./mandate-source.js";
 import type { Mandate } from "../hub/mandates.js";
 import { LocalDay, type DaySource } from "./day-source.js";
@@ -170,9 +171,39 @@ export class ValenceEngine {
    * through it, whoever they belonged to. A mandate of another household is no
    * mandate here, which §16.2 already says an unknown mandate is.
    */
+  /**
+   * §13.2, question 55. The key a decided set, a settlement statement and a
+   * physical confirmation are checked against is the household's, named by the
+   * mandate identifier up to its full stop. Nothing is registered under a
+   * mandate's own name, so nobody holds that key by taking the name first.
+   */
+  private householdKeyFor(offer: Offer): string | undefined {
+    const household = householdOfMandate(offer.mandate);
+    return household === undefined ? undefined : this.identities.get(household);
+  }
+
+  /**
+   * **This returns a mandate or nothing, and it also throws.** §16.2's
+   * `mandate_unknown` is refused here rather than at each caller, because the
+   * refusal belongs wherever the mandate is read; a caller added later
+   * inherits it from a name that does not say so.
+   */
   private async mandateFor(offer: Offer): Promise<Mandate | undefined> {
     const mandate = await this.mandateSource.get(offer.mandate);
     if (mandate && mandate.household !== offer.household) return undefined;
+    // §16.2, question 56. **The refusal is here and not at presentation
+    // alone.** It was at presentation for an hour, and an offer presented
+    // while the household had set no protection still settled without the one
+    // it set afterwards, which is the ordinary order for a new member: the
+    // presenter had only to present first. §16.5 already says a window is
+    // read when a set is taken back or settled and not when it was signed, so
+    // the mandate has to be the household's wherever it is read.
+    if (mandate === undefined && (await this.mandateSource.holdsAny(offer.household))) {
+      throw unprocessable(
+        "mandate_unknown",
+        `this household has a mandate here and this offer names ${offer.mandate}, which is not one of them`
+      );
+    }
     return mandate;
   }
 
@@ -340,11 +371,46 @@ export class ValenceEngine {
     return structuredClone(frozen);
   }
 
+  /**
+   * Whether two PEMs carry the same key, whatever their line breaks. A PEM
+   * that does not parse has no key, and two such are compared as the text
+   * they are: without that they were equal to each other, and the second
+   * overwrote the first under a free name.
+   */
+  private static sameKey(a: string, b: string): boolean {
+    const der = (pem: string) => {
+      try {
+        return createPublicKey(pem).export({ type: "spki", format: "der" }).toString("base64");
+      } catch {
+        return undefined;
+      }
+    };
+    const one = der(a), two = der(b);
+    return one === undefined || two === undefined ? a === b : one === two;
+  }
+
   registerIdentity(key: string, publicKeyPem: string, attested = false): void {
     // A key, once attested, is not replaced by a later caller: whoever could
     // overwrite it could sign as the person (clauses 22, 35).
+    // §13.2, question 55. A name that claims to be a key is checked against
+    // the key. Whoever registers first no longer decides who holds a name.
+    if (claimsToBeAKey(key)) {
+      let named: string | undefined;
+      // A key that does not parse has no name, which is the same refusal: the
+      // name claims to be this key's and it is not.
+      try { named = nameOf(publicKeyPem); } catch { named = undefined; }
+      if (named !== key) {
+        throw unprocessable("name_is_not_the_key", `${key} is not the name of this key`);
+      }
+    }
     const existing = this.identities.get(key);
-    if (existing !== undefined && existing !== publicKeyPem) {
+    // **The same key in a different wrapping is the same key.** A PEM folds at
+    // 64 characters by convention and not by rule, so comparing the text made
+    // a second registration of the identical key a `409`: a party that knew a
+    // household's public key could file it re-wrapped and the household's own
+    // enrolment then failed, taking nothing but stopping the member. Found by
+    // a review pass on 2026-09-16.
+    if (existing !== undefined && !ValenceEngine.sameKey(existing, publicKeyPem)) {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
     }
     this.identities.set(key, publicKeyPem);
@@ -375,6 +441,16 @@ export class ValenceEngine {
       given_by: string | null;
     }[];
   }): Offer {
+    // §13.2, question 55. The shape is refused here and not only where a
+    // mandate is recorded: a decided set is verified against whatever key the
+    // offer's mandate names, so an offer naming a mandate outside this shape
+    // is one a presenter can confirm on the household's behalf.
+    if (!isHouseholdName(input.household)) {
+      throw unprocessable("name_is_not_the_key", `${input.household} is not a household identifier`);
+    }
+    if (householdOfMandate(input.mandate) !== input.household) {
+      throw unprocessable("name_is_not_the_key", `mandate ${input.mandate} is not this household's`);
+    }
     const config = this.configs.get(input.config_version);
     if (!config) {
       throw notFound(`no presenter config ${input.config_version}`);
@@ -703,9 +779,9 @@ export class ValenceEngine {
     // set. The key is the one registered for the offer's mandate; a set with
     // no key, no signature, or a signature over some other set is refused
     // before anything is written.
-    const mandateKey = this.identities.get(offer.mandate);
+    const mandateKey = this.householdKeyFor(offer);
     if (!mandateKey) {
-      throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
+      throw unprocessable("unsigned", `no key is registered for the household of mandate ${offer.mandate}`);
     }
     // §10.5. Two shapes, and the canonical form is what is signed in both:
     // once directly, and once as the challenge inside an authenticator's own
@@ -1065,7 +1141,7 @@ export class ValenceEngine {
     const missing = this.recoveries.for(offer.id)?.missing ?? [];
     let memberIdentity: string | undefined;
     if (memberEnvelope) {
-      const delivery = await this.deliverySource.find(offer.id), key = this.identities.get(offer.mandate), sent = confirmation.signed;
+      const delivery = await this.deliverySource.find(offer.id), key = this.householdKeyFor(offer), sent = confirmation.signed;
       if (!needsStatement(offer, missing) || !delivery || !key || !sent || !("assertion" in sent) ||
           !verifyMemberStatement(memberEnvelope, sent.assertion, key, this.config.memberStatementScope, this.config.relyingPartyId,
             canonicalStatement(offer.id, delivery.carriage, statementLines(offer, confirmation.disputed ?? [], missing)).toString(), offer, now)) {
@@ -1150,9 +1226,9 @@ export class ValenceEngine {
           "a physical box with goods used settles on a statement, and the statement carries the carriage from the delivery record (§6.5, §7.5b)"
         );
       }
-      const householdKey = this.identities.get(offer.mandate);
+      const householdKey = this.householdKeyFor(offer);
       if (!householdKey) {
-        throw unprocessable("unsigned", `no key is registered for mandate ${offer.mandate}`);
+        throw unprocessable("unsigned", `no key is registered for the household of mandate ${offer.mandate}`);
       }
       const lines = statementLines(offer, disputed, missing);
       // §6.5, question 40. The carriage is inside what the household signed,

@@ -7,9 +7,9 @@ import { canonicalConfig, ValenceEngine } from '../src/engine/offers.js';
 import { InMemoryLedger } from '../src/engine/ledger.js';
 import { openStore } from '../src/common/store.js';
 import type { PresenterConfig } from '../src/common/types.js';
-import { PHYSICAL, makeEngine, signConfig, PRESENTER_PAIR } from './helpers.js';
+import { HOUSEHOLD, MANDATE, PHYSICAL, makeEngine, signConfig, PRESENTER_PAIR } from './helpers.js';
 const config=():PresenterConfig=>({version:'catalogue-v2-fixture',presenter:'merchant-1',products:{tea:{merchant:'maker-a',maker:'maker',ships:'carrier',price:1200,physical:{...PHYSICAL}}}});
-const create=(version:string)=>({binding:'physical' as const,household:'fixture-v2-house',purpose:'replenish' as const,config_version:version,expires_at:Date.now()+3600000,mandate:'mandate-1',price_band:null,giver:null,candidates:[{product:'tea',quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
+const create=(version:string)=>({binding:'physical' as const,household:HOUSEHOLD,purpose:'replenish' as const,config_version:version,expires_at:Date.now()+3600000,mandate:MANDATE,price_band:null,giver:null,candidates:[{product:'tea',quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
 const options={explorationRate:0.2,reminderLimit:1 as const,recoveryGraceDays:3,relyingPartyId:'unit.example'};
 const legacy=(c:PresenterConfig)=>Buffer.from([c.version,c.presenter,...Object.keys(c.products).sort().map(ref=>{const e=c.products[ref]!;return [ref,e.merchant,e.maker,e.ships,String(e.price),e.category??''].map(encodeURIComponent).join(':');})].join('\n'));
 describe('catalogue signature revision 2',()=>{

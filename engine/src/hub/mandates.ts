@@ -1,6 +1,7 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import { verifyPersonal, type Assertion } from "../shared/decisions.js";
 import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
+import { householdOfMandate, isHouseholdName } from "../common/names.js";
 
 /**
  * Clauses 46 and 47. A person's standing protections, in a record only that
@@ -157,6 +158,27 @@ export class MandateRegister {
   }): Mandate {
     const { mandate, signatures, assertions, keyOf, relyingPartyId } = input;
     const now = input.now ?? Date.now();
+    // §13.2, question 55. A household's identifier is its key and a mandate's
+    // is that identifier with a label, so the signature below is checked
+    // against a key nobody could have held by registering a name first.
+    if (!isHouseholdName(mandate.household)) {
+      throw unprocessable("name_is_not_the_key", `${mandate.household} is not a household identifier`);
+    }
+    if (householdOfMandate(mandate.id) !== mandate.household) {
+      throw unprocessable("name_is_not_the_key", `mandate ${mandate.id} is not this household's`);
+    }
+    // **A co-signer's name is a name a signature is checked against**, so it is
+    // a key too. Found by a refutation pass on 2026-09-16 and measured: a
+    // stranger registered `mum`, a household recorded its first version naming
+    // `mum` as a co-signer, which needs nobody else's signature, and every
+    // loosening after that was the stranger's to sign and not the real
+    // co-signer's. Clause 47 rests on who the named people are, so the defect
+    // question 55 closed for a household reached through this one name.
+    for (const k of mandate.co_signers) {
+      if (!isHouseholdName(k)) {
+        throw unprocessable("name_is_not_the_key", `co-signer ${k} is not a key`);
+      }
+    }
     const before = this.rows.get(mandate.id);
     if (before && mandate.version !== before.version + 1) {
       throw conflict(

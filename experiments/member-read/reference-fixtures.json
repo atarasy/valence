@@ -80,7 +80,7 @@
   "digital-offer": {
     "id": "9f3cc45d-6f19-4a9f-94aa-9270a6851bc6",
     "binding": "digital",
-    "household": "fixture-house-a",
+    "household": "key:XWR3GGba5jj_9b7X-RJndScsqylXJd3GthDDuF3CmZo",
     "presenter": "merchant-1",
     "presenter_attested": true,
     "purpose": "replenish",
@@ -91,7 +91,7 @@
     "expires_at": 1789261126909,
     "state": "presented",
     "exploration_floor_met": true,
-    "mandate": "mandate-1",
+    "mandate": "key:XWR3GGba5jj_9b7X-RJndScsqylXJd3GthDDuF3CmZo.1",
     "candidates": [
       {
         "id": "2e8c967c-a70c-4f8c-b67d-4d168970c997",
@@ -156,7 +156,7 @@
       {
         "id": "9f3cc45d-6f19-4a9f-94aa-9270a6851bc6",
         "binding": "digital",
-        "household": "fixture-house-a",
+        "household": "key:XWR3GGba5jj_9b7X-RJndScsqylXJd3GthDDuF3CmZo",
         "presenter": "merchant-1",
         "presenter_attested": true,
         "purpose": "replenish",
@@ -167,7 +167,7 @@
         "expires_at": 1789261126909,
         "state": "presented",
         "exploration_floor_met": true,
-        "mandate": "mandate-1",
+        "mandate": "key:XWR3GGba5jj_9b7X-RJndScsqylXJd3GthDDuF3CmZo.1",
         "candidates": [
           {
             "id": "2e8c967c-a70c-4f8c-b67d-4d168970c997",
@@ -231,7 +231,7 @@
   },
   "physical-statement": {
     "offer": "dc6c0582-d5bf-41c4-9c72-5ec94c8f8162",
-    "household": "fixture-house-physical",
+    "household": "key:6PAMy23Chlh2E4b2BmKOGbA2zhO6ce9w9STICmy3bR4",
     "expires_at": 1789261126914,
     "lines": [
       {
@@ -325,14 +325,14 @@
       }
     ],
     "confirmation": "lSf9CAGz06QKzaPFXw/7S9BvmmNffewxoZ7mxa/NYIk8c78IjK41Ho5UZUlTzgPuRxBx5kE2RHaf+zR7p6OTDQ==",
-    "payer": "fixture-house-physical",
+    "payer": "key:6PAMy23Chlh2E4b2BmKOGbA2zhO6ce9w9STICmy3bR4",
     "signed_by": "merchant-1",
     "signed_as": "agent",
     "receipt": "8dd054c219bc26d87b02e661dd63bcdffcca3fbbb7d9c6f4df9f1a1cdef3bbdf"
   },
   "mandate-created": {
-    "id": "fixture-protection",
-    "household": "fixture-mandate-house",
+    "id": "key:GapFPBkM27MpzcPFpc5WyN5gG_f6Ojm5VPmSOLEADjo.1",
+    "household": "key:GapFPBkM27MpzcPFpc5WyN5gG_f6Ojm5VPmSOLEADjo",
     "ceiling_out_of_network": 10000,
     "ceiling_daily": null,
     "cooling_seconds": null,

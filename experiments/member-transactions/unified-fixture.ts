@@ -8,7 +8,7 @@ import { openMandateBindings } from './mandate-binding.ts';
 import { openOperationJournal, type JournalOperation } from './operation-journal.ts';
 import { openAtomicStore } from './atomic-store.ts';
 import { databaseFor, type SharedDatabase } from './shared-database.ts';
-import { atomicScope, fixtureTime, localRuntime, seedAtomicFixture, type FixtureStatement } from './atomic-fixture.ts';
+import { atomicScope, fixtureTime, houseOf, localRuntime, mandateOf, seedAtomicFixture, type FixtureStatement } from './atomic-fixture.ts';
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export function unifiedRuntime(store: Store, database: SharedDatabase, at = fixtureTime + 1) {
   const runtime = localRuntime(store);
@@ -25,24 +25,27 @@ export function loginResponse(pair: ReturnType<typeof generateKeyPairSync>, cred
   const auth = Buffer.concat([digest('unit.example'), Buffer.from([5]), count]);
   return { id: credential, rawId: credential, type: 'public-key' as const, clientExtensionResults: {}, response: { clientDataJSON: client.toString('base64url'), authenticatorData: auth.toString('base64url'), signature: sign('sha256', Buffer.concat([auth, digest(client)]), pair.privateKey).toString('base64url'), userHandle: user } };
 }
-export type UnifiedInput = { token: string; credential: string; session: string; statement: FixtureStatement; operation: JournalOperation };
+export type UnifiedInput = { token: string; credential: string; session: string; statement: FixtureStatement; operation: JournalOperation; house: string; mandate: string };
 export async function seedUnified(path: string, loginCounter = 1) {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }), jwk = pair.publicKey.export({ format: 'jwk' });
+  // §13.2, question 55. This fixture signs with a P-256 pair of its own, so
+  // its household and its mandate are that pair's names and not the default's.
+  const HOUSE = houseOf(pair), FIXTURE_MANDATE = mandateOf(pair);
   const [statement] = await seedAtomicFixture(path, 1, null, pair), unit = openAtomicStore(path, atomicScope);
   const credential = randomBytes(32).toString('base64url'), user = randomBytes(32).toString('base64url');
   try {
     const input = await unit.run(async (store, database) => {
       const r = unifiedRuntime(store, database);
-      r.authority.provisionPrincipal('member', 'house', ['merchant-1']); r.authority.registerCredential(credential, 'member');
+      r.authority.provisionPrincipal('member', HOUSE, ['merchant-1']); r.authority.registerCredential(credential, 'member');
       const cose = Buffer.concat([Buffer.from('a5010203262001215820', 'hex'), Buffer.from(jwk.x!, 'base64url'), Buffer.from('225820', 'hex'), Buffer.from(jwk.y!, 'base64url')]);
       r.login.provisionVerifiedPasskey(credential, cose, 0, user);
-      r.authority.bindResource({ kind: 'mandate', id: 'mandate-1' }, { household: 'house' });
-      r.authority.bindResource({ kind: 'offer', id: statement!.offer }, { household: 'house', presenter: 'merchant-1' });
+      r.authority.bindResource({ kind: 'mandate', id: FIXTURE_MANDATE }, { household: HOUSE });
+      r.authority.bindResource({ kind: 'offer', id: statement!.offer }, { household: HOUSE, presenter: 'merchant-1' });
       const flow = r.login.begin(), session = await r.login.finish(flow.id, loginResponse(pair, credential, user, flow.publicKey.challenge, loginCounter));
-      r.bindings.bind(session.token, 'mandate-1');
+      r.bindings.bind(session.token, FIXTURE_MANDATE);
       const canonical = canonicalStatement(statement!.offer, 550, statementLines(r.engine.mustGet(statement!.offer), [])).toString();
-      const operation = await r.journal.prepare(session.token, { offer: statement!.offer, mandate: 'mandate-1', presenter: 'merchant-1', canonical, reviewedRevision: hash('fixture-reviewed-revision'), expiresAt: fixtureTime + 4000 });
-      return { token: session.token, session: session.id, credential, statement: statement!, operation };
+      const operation = await r.journal.prepare(session.token, { offer: statement!.offer, mandate: FIXTURE_MANDATE, presenter: 'merchant-1', canonical, reviewedRevision: hash('fixture-reviewed-revision'), expiresAt: fixtureTime + 4000 });
+      return { token: session.token, session: session.id, credential, statement: statement!, operation, house: HOUSE, mandate: FIXTURE_MANDATE };
     });
     return { input, pair, user };
   } finally { unit.close(); }
@@ -67,5 +70,5 @@ export async function commitUnified(store: Store, database: SharedDatabase, inpu
 export function inspectUnified(store: Store, database: SharedDatabase, input: UnifiedInput) {
   const r = unifiedRuntime(store, database), db = databaseFor(database, atomicScope).db;
   const operation = db.query('SELECT record FROM operations WHERE id=?').get(input.operation.id) as { record: string };
-  return { operation: JSON.parse(operation.record) as JournalOperation, receipt: r.engine.settlement(input.statement.offer) ?? null, reservation: r.ledger.get(input.statement.offer), state: r.engine.mustGet(input.statement.offer).state, day: r.engine.householdLedger.forHousehold('house'), counter: (db.query('SELECT counter FROM passkeys WHERE id=?').get(input.credential) as { counter: number }).counter };
+  return { operation: JSON.parse(operation.record) as JournalOperation, receipt: r.engine.settlement(input.statement.offer) ?? null, reservation: r.ledger.get(input.statement.offer), state: r.engine.mustGet(input.statement.offer).state, day: r.engine.householdLedger.forHousehold(r.engine.mustGet(input.statement.offer).household), counter: (db.query('SELECT counter FROM passkeys WHERE id=?').get(input.credential) as { counter: number }).counter };
 }

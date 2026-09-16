@@ -4,6 +4,7 @@ import type { openMemberAuthority } from '../member-read/authority.ts';
 import type { openVerifiedLogin } from '../member-login/login.ts';
 import type { ValenceEngine } from '../../engine/src/engine/offers.ts';
 import { credentialSPKI } from '../member-login/credential-key.ts';
+import { householdOfMandate } from '../../engine/src/common/names.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
 type Login = ReturnType<typeof openVerifiedLogin>;
@@ -34,7 +35,12 @@ export function openMandateBindings(path: DatabaseTarget, authority: Authority, 
     if (engine.config.relyingPartyId !== login.scope.rpID) throw new Error('Binding scope mismatch');
     const context = authority.transactionContext(token, mandate);
     if (!context) throw new Error('Mandate binding unavailable');
-    const credential = login.verifiedPublicKey(context.credential), registered = engine.publicKeyFor(mandate);
+    // §13.2, question 55. The key a mandate's operations are checked against is
+    // its household's, which the identifier names: nothing is registered under
+    // a mandate's own name.
+    const household = householdOfMandate(mandate);
+    const credential = login.verifiedPublicKey(context.credential);
+    const registered = household === undefined ? undefined : engine.publicKeyFor(household);
     if (!credential || !registered) throw new Error('Mandate binding unavailable');
     const loginKey = credentialSPKI(credential), engineKey = createPublicKey(registered).export({ type: 'spki', format: 'der' });
     if (!loginKey.equals(engineKey)) throw new Error('Mandate key mismatch');

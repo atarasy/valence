@@ -24,7 +24,22 @@ function pairFor(name: string): { publicKey: KeyObject; privateKey: KeyObject } 
   return { publicKey: createPublicKey(privateKey), privateKey };
 }
 
+// §13.2, question 55. A household's identifier is `key:` and the base64url
+// SHA-256 of its public key, and a mandate's is that identifier with a label,
+// so the seed derives both from the key it already holds rather than choosing
+// readable names a stranger could have registered first. The suite is told
+// them on the tenth and eleventh output lines.
+const pemOf = (pair: { publicKey: KeyObject }) =>
+  pair.publicKey.export({ type: "spki", format: "pem" }).toString();
+const mandatePair = pairFor("mandate");
+const HOUSEHOLD = nameOf(pemOf(mandatePair));
+const MANDATE = `${HOUSEHOLD}.1`;
+const otherPair = pairFor("household-other");
+const OTHER = nameOf(pemOf(otherPair));
+
 import { canonical } from "../src/shared/lineage.js";
+import { nameOf } from "../src/common/names.js";
+import { canonicalMandate } from "../src/hub/mandates.js";
 import { canonicalEntry } from "../src/shared/registry.js";
 import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { ownerOf } from "../src/common/roles.js";
@@ -198,11 +213,11 @@ await postConfig({
 });
 await post("/offers", {
   binding: "digital",
-  household: "household-other",
+  household: OTHER,
   purpose: "replenish",
   config_version: "cfg-other-merchant",
   expires_at: Date.now() + 3_600_000,
-  mandate: "mandate-conformance",
+  mandate: `${OTHER}.1`,
   price_band: null,
   giver: null,
   candidates: [
@@ -253,7 +268,10 @@ await postConfig({
 });
 
 const { publicKey, privateKey } = pairFor("giver");
-const giver = "key-giver-conformance";
+// §13.2, question 55. A giver that moves its own node is a household, and a
+// household's identifier is the name of its key. The exit suite exports and
+// imports under this name, so it has to be one.
+const giver = nameOf(publicKey.export({ type: "spki", format: "pem" }).toString());
 await post("/_identities", {
   key: giver,
   public_key: publicKey.export({ type: "spki", format: "pem" }).toString(),
@@ -357,12 +375,10 @@ for (const [merchant, mark] of [["b-merchant-marked", true], ["a-merchant-no-mar
 // Clause 35. The key that confirms offers under the conformance mandate. The
 // public half is registered here; the private half goes to the suite on the
 // second output line, base64 of the PEM, so the probes can sign decisions.
-const mandatePair = pairFor("mandate");
-await post("/_identities", {
-  key: "mandate-conformance",
-  public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
-  attested: true,
-});
+// §13.2, question 55. One registration: nothing is registered under a
+// mandate's name, because a mandate has no key of its own.
+await post("/_identities", { key: HOUSEHOLD, public_key: pemOf(mandatePair), attested: true });
+await post("/_identities", { key: OTHER, public_key: pemOf(otherPair), attested: true });
 
 console.log(
   JSON.stringify({
@@ -378,22 +394,15 @@ console.log(
 // signature. The household's own key doubles as the mandate key, which is
 // what the engine already resolves for a signed decided set (§10.5).
 const coSigner = pairFor("co-signer");
-await post("/_identities", {
-  key: "key-cosigner-conformance",
-  public_key: coSigner.publicKey.export({ type: "spki", format: "pem" }).toString(),
-  attested: true,
-});
+// §16.1, question 55. A co-signer is named by the key it signs with.
+const CO_SIGNER = nameOf(pemOf(coSigner));
+await post("/_identities", { key: CO_SIGNER, public_key: pemOf(coSigner), attested: true });
 // The household's own key, under its own name: §16 has a mandate signed by
 // the household, and §10.5 has a decided set signed by the key registered
 // for the offer's mandate reference. The same key answers to both names here.
-await post("/_identities", {
-  key: "household-conformance",
-  public_key: mandatePair.publicKey.export({ type: "spki", format: "pem" }).toString(),
-  attested: true,
-});
 const baseMandate = {
-  id: "mandate-conformance",
-  household: "household-conformance",
+  id: MANDATE,
+  household: HOUSEHOLD,
   ceiling_out_of_network: 100000,
   // §16. The fixture leaves the two protections of 2026-09-10 unset, so the
   // suites that do not care about them see the mandate they always saw. The
@@ -401,31 +410,21 @@ const baseMandate = {
   // 2026-09-12, when the per-purchase second signature was removed.
   ceiling_daily: null as number | null,
   cooling_seconds: null as number | null,
-  co_signers: ["key-cosigner-conformance"],
+  co_signers: [CO_SIGNER],
   lapses_at: Date.now() + 365 * 86_400_000,
   version: 1,
 };
-const canonicalMandate = (m: typeof baseMandate) =>
-  Buffer.from(
-    [
-      m.id,
-      m.household,
-      String(m.ceiling_out_of_network),
-      m.ceiling_daily === null ? "" : String(m.ceiling_daily),
-      m.cooling_seconds === null ? "" : String(m.cooling_seconds),
-      // Escaped exactly as `canonicalMandate` in the engine escapes it. The
-      // seed joined raw until 2026-09-12, which agreed only because no key
-      // here holds a character that changes under it.
-      [...m.co_signers].sort().map(encodeURIComponent).join(","),
-      String(m.lapses_at),
-      String(m.version),
-    ].join("\n"),
-    "utf8"
-  );
+// §16.1. The engine's own canonical form, imported rather than written again.
+// The seed kept a copy, "escaped exactly as the engine escapes it", and that
+// copy is what an engine mutation is measured against: when a co-signer became
+// a `key:` name on 2026-09-16 the copy and the engine disagreed under
+// `mandate_form_is_malleable`, the seed died, and a mutation that a probe
+// catches was reported as one that aborts. The seed is deployment plumbing and
+// the independent implementation of this form is the suite's.
 await post("/_node/mandates", {
   ...baseMandate,
   signatures: {
-    "household-conformance": sign(null, canonicalMandate(baseMandate), mandatePair.privateKey).toString("base64"),
+    [HOUSEHOLD]: sign(null, canonicalMandate(baseMandate), mandatePair.privateKey).toString("base64"),
   },
 });
 
@@ -433,7 +432,7 @@ console.log(Buffer.from(JSON.stringify(seedKeys), "utf8").toString("base64"));
 // §7.1. A well-formed edge from the unattested key, for the probes.
 const strangerEdge = {
   from: "key-stranger-conformance",
-  to: "household-conformance",
+  to: HOUSEHOLD,
   product: "nori-a",
   merchant: "maker-a",
   maker: "made-by-tea",
@@ -468,3 +467,7 @@ console.log("cfg-conformance-undisclosed");
 // §10a.5. The product block, ninth, for the probes that check it is carried
 // only where its product is.
 console.log(JSON.stringify(productDisclosure));
+// §13.2, question 55. The household and its mandate, tenth and eleventh, so
+// that the suite uses the names the keys have rather than names of its own.
+console.log(HOUSEHOLD);
+console.log(MANDATE);

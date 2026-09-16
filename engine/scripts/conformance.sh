@@ -116,6 +116,10 @@ DISCLOSURE_JSON="$(printf '%s\n' "$SEED_OUT" | sed -n 6p)"
 UNDISCLOSED_PRODUCT="$(printf '%s\n' "$SEED_OUT" | sed -n 7p)"
 UNDISCLOSED_CONFIG="$(printf '%s\n' "$SEED_OUT" | sed -n 8p)"
 DISCLOSURE_PRODUCT_JSON="$(printf '%s\n' "$SEED_OUT" | sed -n 9p)"
+# §13.2, question 55. The household and its mandate are the names the seed's
+# key has, so the suite is told them rather than carrying literals of its own.
+SEED_HOUSEHOLD="$(printf '%s\n' "$SEED_OUT" | sed -n 10p)"
+SEED_MANDATE="$(printf '%s\n' "$SEED_OUT" | sed -n 11p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
@@ -130,8 +134,8 @@ SEED_KEYS="$SEED_KEYS" BASE="$ENGINE_ONLY" HUB_BASE="$HUB_ONLY" bun scripts/seed
 cd "$TESTS"
 VALENCE_BASE_URL="$BASE" \
 VALENCE_CONFIG_VERSION="cfg-conformance" \
-VALENCE_HOUSEHOLD="household-conformance" \
-VALENCE_MANDATE="mandate-conformance" \
+VALENCE_HOUSEHOLD="$SEED_HOUSEHOLD" \
+VALENCE_MANDATE="$SEED_MANDATE" \
 VALENCE_MANDATE_KEY="$MANDATE_KEY" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \

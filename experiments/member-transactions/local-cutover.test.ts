@@ -1,3 +1,4 @@
+import { HOUSE } from './atomic-fixture.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,10 +24,10 @@ test('freeze blocks existing and reopened writers; activation enables only the e
 });
 test('freeze waits for admitted local work and includes its last committed write',async()=>{
  const s=await setup(),unit=openAtomicStore(s.path,atomicScope);cleanup.push(()=>unit.close());let release!:()=>void;const barrier=new Promise<void>(r=>{release=r;});
- const owner=unit.run(async store=>{const m=store.map('bare_receipts');m.set('house',[{ref:'last-write',at:fixtureTime}]);await barrier;});
+ const owner=unit.run(async store=>{const m=store.map('bare_receipts');m.set(HOUSE,[{ref:'last-write',at:fixtureTime}]);await barrier;});
  const freezing=prepareLocalCutover(s.path,join(s.dir,'target'),scope,runtime);await Bun.sleep(15);expect(metadata(s.path)).toBe(JSON.stringify(['atarasy.local-engine-unit.1',scope.environment,scope.origin]));release();await owner;const plan=await freezing;
  await expect(unit.run(()=>true)).rejects.toThrow('fenced');await activateLocalCutover(s.path,scope,plan.ticket,runtime);
- const target=openAtomicStore(plan.target,atomicScope);try{expect(await target.run(store=>store.map('bare_receipts').get('house'))).toEqual([{ref:'last-write',at:fixtureTime}]);}finally{target.close();}
+ const target=openAtomicStore(plan.target,atomicScope);try{expect(await target.run(store=>store.map('bare_receipts').get(HOUSE))).toEqual([{ref:'last-write',at:fixtureTime}]);}finally{target.close();}
 });
 test('wrong ticket runtime or changed candidate refuse activation while source stays stopped',async()=>{
  const s=await setup(),plan=await prepareLocalCutover(s.path,join(s.dir,'target'),scope,runtime);
