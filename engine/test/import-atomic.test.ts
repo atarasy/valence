@@ -91,6 +91,21 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       expect(receipts(H)).toEqual([{ ref: "r-1", at: 1 }]);
     });
 
+    test("the verification refuses an offer named twice, before any write can", () => {
+      // NOTE (mutation check, 2026-09-18): import_forgets_carried_offers. It
+      // survived the sweep of 2026-09-16 through the route, because the write
+      // pass's own `already here` check answers identically once the first
+      // copy is written and question 53 rolls it back. **The verification pass
+      // is what refuses before a row exists**, so it is called here directly:
+      // through the route the two are indistinguishable by outcome.
+      const engine = new ValenceEngine(new InMemoryLedger(), {
+        explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3, relyingPartyId: "unit.example",
+      }, open());
+      const twice = [offer, { ...offer, candidates: [{ id: "c-2" }] }] as unknown as Parameters<typeof engine.checkImport>[0];
+      expect(() => engine.checkImport(twice, H, [])).toThrow(/already here/);
+      expect(() => engine.checkImport([offer] as unknown as typeof twice, H, [])).not.toThrow();
+    });
+
     test("an offer named twice in one body", async () => {
       // NOTE (mutation check, 2026-09-15): import_forgets_carried_offers. The
       // first copy was written before the second was refused.
@@ -99,6 +114,52 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       // identifier refuses it first and the offer check is never reached.
       const r = await post(H, node({ offers: [offer, { ...offer, candidates: [{ id: "c-2" }] }] }));
       expect(r.status).toBe(409);
+      expect(holds()).toEqual(nothing);
+    });
+
+    test("a mandate whose identifier is this household's and whose household is not", async () => {
+      // NOTE (mutation check, 2026-09-18): import_mandate_any_household. It
+      // survived the sweep of 2026-09-16 because every body here carried a
+      // mandate whose two halves agreed, and question 55's identifier check
+      // refuses the disagreement only when the identifier is somebody else's.
+      // An identifier that carries a household proves whose the row claims to
+      // be and says nothing about the household written inside it.
+      const { post, holds } = host(open());
+      const r = await post(H, node({ mandates: [{ id: `${H}.1`, household: "key:" + "A".repeat(42) + "A", ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }] }));
+      expect(r.status).toBe(422);
+      expect(await r.json()).toMatchObject({ error: "wrong_household" });
+      expect(holds()).toEqual(nothing);
+    });
+
+    test("nothing is written before the whole body has been verified", async () => {
+      // NOTE (mutation check, 2026-09-18): import_writes_before_verifying and
+      // import_skips_delivery_check. Both survived the sweep of 2026-09-16,
+      // and neither is a missing probe: question 53 wrapped the import in a
+      // transaction, so a body refused after a write rolls back and answers
+      // exactly as one refused before the first write. **The rule that is left
+      // is the order**, and the order is only visible from inside the store.
+      const written: string[] = [];
+      const base = open();
+      const store = { ...base, map: <V,>(namespace: string) => {
+        const inner = base.map<V>(namespace);
+        return new Proxy(inner, { get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver);
+          if (property === "set" || property === "delete" || property === "clear") {
+            return (...args: unknown[]) => { written.push(namespace); return (value as (...a: unknown[]) => unknown).apply(target, args); };
+          }
+          return typeof value === "function" ? value.bind(target) : value;
+        } }) as Map<string, V>;
+      } } as Store;
+      const { post, holds } = host(store);
+      // Two carriages for one offer, which §7.5b refuses, and the deliveries
+      // are the last rows the body carries.
+      const r = await post(H, node({ deliveries: [
+        { offer: "o-1", carriage: 500, code: "dc-1", status: "placed", updated_at: 1 },
+        { offer: "o-1", carriage: 800, code: "dc-1", status: "placed", updated_at: 1 },
+      ] }));
+      expect(r.status).toBe(422);
+      expect(await r.json()).toMatchObject({ error: "carriage_fixed" });
+      expect(written).toEqual([]);
       expect(holds()).toEqual(nothing);
     });
 
