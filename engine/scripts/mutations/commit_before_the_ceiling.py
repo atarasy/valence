@@ -12,7 +12,7 @@ a = """    // Past every refusal, so what the ledger is told and what the settle
     // records are the same event.
     if (charged > 0) {
       await this.ledger.commit({ requestId: offer.id, amount: charged });
-    } else if (this.ledger.get(offer.id)) {
+    } else {
       await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
     }
 
@@ -23,7 +23,7 @@ b = "    const charged = kept + consumed;\n"
 assert b in s, "offers.ts charged anchor has drifted"
 s = s.replace(b, b + """    if (charged > 0) {
       await this.ledger.commit({ requestId: offer.id, amount: charged });
-    } else if (this.ledger.get(offer.id)) {
+    } else {
       await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
     }
 """, 1)
