@@ -1,6 +1,6 @@
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
-import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
+import { ValenceError, badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
@@ -934,7 +934,59 @@ export class ValenceEngine {
       });
     }
     this.confirmations.set(offerId, [...used, ...spent]);
-    return this.commit(offer);
+    this.commit(offer);
+    if (offer.state === "decided") await this.settleIfNothingOwed(offer, now);
+    return offer;
+  }
+
+  /**
+   * §6.4, question 62, decided 2026-09-19. **A set that owes nothing settles
+   * at nothing, at once, and releases its reserve.** Before this, a set the
+   * household decided with every line returned, or one that expired with
+   * nothing kept, held its reserve until the presenter settled it at 0, and
+   * nothing obliged the presenter to. §6.4's table already said expiry with
+   * nothing kept releases. Measured by the fifth refutation pass over
+   * question 57: such a set could not move, because its reserve was here, so
+   * the household's record of what it refused did not reach the host it moved
+   * to, and a presenter that wanted that record gone had only to leave the
+   * zero-settle unmade.
+   *
+   * **Where it happens**: at the decision itself, and at the household's
+   * export for everything else, which is a set whose cooling window has
+   * closed since, an offer that expired, and a box a collection resolved with
+   * nothing used. A set inside a cooling window can be taken back and decided
+   * again, so it waits. Nothing here settles on a timer, so a reserve on an
+   * expired offer is still held until the presenter settles or the household
+   * exports; §6.4's release at expiry is met at the first of those. A refusal
+   * of any kind leaves the set as it was, because this is the engine tidying
+   * up and not a party asking.
+   */
+  private async settleIfNothingOwed(offer: Offer, now: number): Promise<boolean> {
+    if (offer.state !== "decided" && offer.state !== "expired") return false;
+    if (owesSettlement(offer) || this.settlements.has(offer.id)) return false;
+    if (this.ledger.get(offer.id)?.status !== "held") return false;
+    try {
+      await this.settleInternal(offer.id, now);
+      return true;
+    } catch (err) {
+      if (err instanceof ValenceError) return false;
+      throw err;
+    }
+  }
+
+  /**
+   * Question 62. Settle at nothing every set of this household's, or one it
+   * pays for as a giver, that owes nothing and still holds a reserve here.
+   * The export asks first, so that what a move carries is what has finished.
+   */
+  async settleWhatOwesNothing(household: string, now = Date.now()): Promise<number> {
+    this.sweep(now);
+    let settled = 0;
+    for (const offer of [...this.offers.values()]) {
+      if (offer.household !== household && offer.giver !== household) continue;
+      if (await this.settleIfNothingOwed(offer, now)) settled++;
+    }
+    return settled;
   }
 
   /**

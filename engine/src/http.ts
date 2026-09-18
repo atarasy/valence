@@ -1231,7 +1231,13 @@ async function route(
       // §13.2, question 55. The segment is decoded, as it is on the import
       // beside it: a household identifier carries a colon, so a route that read
       // the raw segment answered for a household nobody has.
-      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, segment(parts[1])));
+      const household = segment(parts[1]);
+      // Question 62. What owes nothing is settled at nothing before it is
+      // carried, so that a set whose cooling window has closed since it was
+      // decided, or one that expired, moves as finished rather than staying
+      // behind its reserve.
+      await engine.settleWhatOwesNothing(household);
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, household));
     }
   }
 

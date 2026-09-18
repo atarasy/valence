@@ -276,7 +276,9 @@ describe("§14.2, question 57: a move carries what happened", () => {
       candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
     } as never);
     await engine.present(offer.id);
-    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })) as never);
+    // Kept, so that it owes a settlement: a set that owes nothing settles at
+    // once since question 62, and a settled set is not taken back at all.
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })) as never);
     (engine as unknown as { confirmations: Map<string, string[]> }).confirmations.delete(offer.id);
     await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     expect(engine.mustGet(offer.id).state).toBe("decided");

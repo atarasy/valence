@@ -733,3 +733,64 @@ describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoe
     expect(reported.map((r) => r.household)).toEqual([GIVER]);
   });
 });
+
+describe("§6.4, question 62: a set that owes nothing settles at nothing, at once", () => {
+  /**
+   * A set with every line returned held its reserve until the presenter
+   * settled it at 0, which nothing obliged it to do. Measured by the fifth
+   * refutation pass over question 57: such a set could not move, so the
+   * household's record of what it refused stayed behind.
+   */
+  const cooling = (seconds: number | null) => ({
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+        cooling_seconds: seconds, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    async dailyCeilingOf() { return null; },
+    async holdsAny(h: string) { return h === HOUSEHOLD; },
+  });
+  const returnedSet = async (engine: ReturnType<typeof makeEngine>["engine"], valence: "returned" | "kept" = "returned") => {
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]),
+      binding: "digital" as const,
+    });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => (valence === "kept"
+      ? { candidate: c.id, valence: "kept" as const, kept_as: "self" as const }
+      : { candidate: c.id, valence: "returned" as const })));
+    return offer;
+  };
+
+  test("with no cooling window it settles at the decision and releases the reserve", async () => {
+    // NOTE (mutation check, 2026-09-19): decide_leaves_what_owes_nothing.
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(cooling(null));
+    const offer = await returnedSet(engine);
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    expect(engine.settlement(offer.id)!.charged).toBe(0);
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+
+  test("inside a cooling window it waits, and the export's pass settles it once the window has closed", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(cooling(60));
+    const offer = await returnedSet(engine);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD, Date.now() + 61_000)).toBe(1);
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+
+  test("a set that owes something is left for the presenter to settle", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(cooling(null));
+    const offer = await returnedSet(engine, "kept");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(ledger.get(offer.id)!.status).toBe("held");
+  });
+});
