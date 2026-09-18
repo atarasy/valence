@@ -101,6 +101,31 @@ test('PostgreSQL registration persists login across independent composition and 
  const session=await after.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'});
  expect(session.status).toBe(200);expect((await session.json()).household).toBe(adopted);
 });
+test('a refused credential leaves no passkey row, because the authority refuses first',async()=>{
+ // NOTE (mutation check, 2026-09-18): enrolment_writes_before_the_refusal. It
+ // survived the package's first corpus, because the caller wraps the enrolment
+ // in a savepoint, so writing the passkey before the authority refuses rolls
+ // back and is invisible from outside. **The rule that is left is the order**,
+ // and the order is only visible from inside the store.
+ const s=await setup(),key=syntheticAuthenticator();
+ const written:string[]=[];
+ await expect(s.unit.run(store=>{
+  // The store's own identity carries its savepoint, so the map is replaced on
+  // the object rather than wrapped in a copy. The store belongs to this run.
+  const opened=store.map.bind(store);
+  (store as {map:unknown}).map=<V,>(namespace:string)=>{
+   const inner=opened<V>(namespace);
+   return new Proxy(inner,{get(target,property,receiver){
+    const value=Reflect.get(target,property,receiver);
+    if(property==='set'||property==='delete'||property==='clear')return (...args:unknown[])=>{written.push(namespace);return (value as (...a:unknown[])=>unknown).apply(target,args);};
+    return typeof value==='function'?value.bind(target):value;
+   }}) as Map<string,V>;
+  };
+  // 'member' adopted its household in setup, so it takes no further credential.
+  memberRuntime(store,s.c,now).login.enrolVerifiedPasskey('member',key.id,coseOf(s.pair),0,randomUUID().replaceAll('-',''));
+ })).rejects.toThrow('takes no further credential');
+ expect(written.filter(n=>n==='member_passkeys')).toEqual([]);
+});
 test('failed activation consumes ceremony but rolls back the inserted passkey',async()=>{
  const s=await setup(),key=syntheticAuthenticator(),invitation=await s.invite();await s.unit.run(store=>memberRuntime(store,s.c,now).authority.registerCredential(key.id,'new-member'));
  const flow=await (await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();

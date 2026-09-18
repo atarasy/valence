@@ -57,7 +57,19 @@ Two of the three causes were fixtures: `http.test.ts` now takes the household an
 
 The third was the acceptance flow and is a change to the service. `prepareDeviceAcceptance` used to invent `dev_house_<uuid>` and provision a principal with it, and `prepareStatementAcceptance` registered the device's passkey under a mandate's own name. Neither survives: the key a mandate's operations are checked against is the household's, the identifier names it, and that key is the passkey, which does not exist when the invitation is issued. **A principal is now provisioned without a household and adopts one at the first statement**, from the registered credential. `adoptHousehold` runs once, only from unclaimed and only to a name that is the name of a key; both refusals are asserted. After the change: **20 tests pass with 143 assertions**, where before the change the same 20 held 50.
 
-This package has no mutation scripts and no conformance probe, so its rules are proven here or nowhere.
+**This package had no mutation scripts and no conformance probe until 2026-09-18**, which is how seven refutation rounds each found a defect under the previous round's fix: every rule they closed arrived with no negative beside it. It has a corpus now.
+
+```bash
+export ATARASY_TEST_POSTGRES_URL="postgres://user@host:port/an_isolated_database"
+./scripts/sweep.sh                        # the whole corpus
+./scripts/mutate.sh <name>                # one break, one verdict
+```
+
+`mutate.sh` refuses while any source in scope is uncommitted, applies one break, runs **all four experiment packages** and answers CAUGHT, SURVIVED, INERT or ABORTED. It runs the siblings because a rule this package relies on is sometimes proven in the package that owns it: `gate_restates_the_mandate_form` survived while only this package's tests ran, and `member-read` catches it. A run that named no test at all is an abort rather than a catch. Measured 2026-09-18 at valence `6dcc694`: **15 mutations, 15 caught, none surviving, none inert, none aborting**, against 195 tests across the four packages.
+
+**Two of the fifteen did not start caught, and both are worth knowing.** `gate_restates_the_mandate_form` was the harness's own gap, above. `enrolment_writes_before_the_refusal` was real: swapping the passkey write back in front of the authority's refusal changed nothing observable, because the caller wraps the enrolment in a savepoint and the roll-back hides it. **What is left of that rule is the order, and the order is only visible from inside the store**, so `http.test.ts` now replaces the store's `map` for one run and requires no write to `member_passkeys` when the credential is refused. The engine met the same shape on the same day in `import-atomic.test.ts`.
+
+The corpus covers what the seven rounds closed: the household adoption's three conditions and its key reader, the two writers of a principal's household, the credential a household admits, logout and the unclaimed session, the acceptance step's credential rule, the three halves of `retire`, the enrolment's write order, the read gate's mandate form and the mandate route's path filter.
 
 A refutation pass the same day found six things under that change and one larger than it. **`adoptHousehold` checked the shape of a name and not that the key was this principal's, and checked nothing about who else held it**: two principals adopted one household, and `permitted()` keys a read on the household alone, so that was one read scope. It now refuses a household anybody holds, runs in a transaction, and its comment says what it does not check. **A principal that had not adopted could not end its own session**: `resolveSession` threw, the transport swallowed the throw, and logout answered 204 while the session stayed live for its hour; logout now revokes by the token. **`member-read/gate.ts` held a second copy of the mandate form** that accepted a name no key has, and now calls `householdOfMandate`.
 
