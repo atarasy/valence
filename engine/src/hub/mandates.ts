@@ -98,6 +98,9 @@ function shortens(before: number | null, after: number | null): boolean {
   return after < before;
 }
 
+/** A claim above this cannot be one a household reached, and signing it would leave no room to follow. */
+const MAX_CLAIMED_VERSION = 2 ** 20;
+
 export class MandateRegister {
 
   /** §13.2. Where this register keeps what it holds. Unset is in memory. */
@@ -189,6 +192,10 @@ export class MandateRegister {
     // that might is a row nobody can act on. Named by a refutation pass on
     // 2026-09-18, which measured an import carrying `lapses_at: 0`.
     if (m.lapses_at <= now) return;
+    // A version no household reaches, kept here, is one whose signing freezes
+    // the mandate: the next version would be refused as having no room. The
+    // bound leaves room for every version a household could ever record.
+    if (!Number.isSafeInteger(m.version) || m.version < 1 || m.version > MAX_CLAIMED_VERSION) return;
     this.claims.set(m.id, { ...m, co_signers: [...m.co_signers] });
   }
 
@@ -255,7 +262,7 @@ export class MandateRegister {
     // binding the claim's terms instead would let a planted row with a
     // co-signer nobody holds freeze that identifier for ever, which is the
     // defect question 56's first attempt was refused for.
-    const held = before ? undefined : this.claims.get(mandate.id);
+    const held = before ? undefined : this.claimFor(mandate.id, now);
     const claim = held && canonicalMandate(held).equals(canonicalMandate(mandate)) ? held : undefined;
     // Whose row this is comes before which version it is: a row held for
     // another household is not a version of this household's mandate at all.
@@ -279,11 +286,15 @@ export class MandateRegister {
     if (!Number.isSafeInteger(mandate.version) || mandate.version < 1 || mandate.version >= Number.MAX_SAFE_INTEGER) {
       throw unprocessable("stale_version", `version ${mandate.version} is not one a version can follow`);
     }
-    // A claim is not a signed history, so when one is all this host holds the
-    // household says which version it is at. Requiring 1 made a stranger's
-    // claim cost the household its version line: it recovered only by starting
-    // again at 1. Measured by the same pass.
-    if (!before && !claim && !held && mandate.version !== 1) {
+    // A mandate with no signed history here starts at version 1 unless what is
+    // submitted is the claim itself. For a day this let the household state
+    // the version wherever a claim was held, and a third refutation pass
+    // measured what that reopened: a raw signature is not bound to a host, so
+    // any looser version the household ever signed could be recorded at a
+    // host it moved to, over its own tighter claim. The cost of the rule is
+    // the one the second pass named, that a stranger's claim makes the
+    // household start again at 1, and that costs a number and not a protection.
+    if (!before && !claim && mandate.version !== 1) {
       throw unprocessable("stale_version", "a new mandate starts at version 1");
     }
     if (mandate.lapses_at <= now) {

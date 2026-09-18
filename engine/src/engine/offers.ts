@@ -1790,8 +1790,9 @@ export class ValenceEngine {
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
     }
-    // §14.2 and §6.4, question 57, decided 2026-09-18. **A move carries what
-    // happened and not what is in progress.** An offer arriving at `drafted`
+    // §14.2 and §6.4, question 57, decided 2026-09-18. **Money moves at the host
+    // that holds the reserve.** The import route leaves such an offer behind and
+    // names it; this refuses it where something writes one here directly. An offer arriving at `drafted`
     // or `presented` has no reservation on this host's ledger, and measured on
     // the reference the day it was decided, the import took one at `presented`
     // with a `201` and no reserve behind it. §6.4 makes the reserve the upper
@@ -1807,10 +1808,11 @@ export class ValenceEngine {
     // here and run the checks a presentation runs; it was refused because
     // arrival would then change the offer, and a move could fail on a rule
     // about an offer the household never made, §5.1's being the plain case.
-    if (offer.state === "drafted" || offer.state === "presented") {
+    if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided" ||
+      (offer.state === "expired" && needsStatement(offer))) {
       throw conflict(
         "bad_state",
-        `offer ${offer.id} is ${offer.state}, and a move carries what happened rather than what is in progress`
+        `offer ${offer.id} is ${offer.state}, and its money moves at the host that holds its reserve`
       );
     }
     // A candidate that arrives without a verdict reads as one already decided

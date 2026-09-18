@@ -173,23 +173,43 @@ describe("§14.2, question 57: a move carries what happened", () => {
     ...over,
   });
 
-  test("an offer still in progress is refused, because this ledger holds no reserve for it", () => {
-    // NOTE (mutation check, 2026-09-18): import_takes_an_offer_in_progress.
-    // Measured the day it was decided: the import took an offer at
-    // `presented` with a 201 and no reservation on the receiving ledger.
-    // §6.4 makes the reserve the upper bound of what an offer may settle at,
-    // so an offer that can still be decided and has no reserve is one whose
-    // upper bound this ledger has never seen. What stops it charging is
-    // `commit` refusing `no_reservation`, which is the ledger's answer and
-    // not this specification's.
+  test("an offer whose money has not finished moving stays where its reserve is", () => {
+    // NOTE (mutation check, 2026-09-19): import_takes_an_offer_in_progress.
+    // Measured when it was decided: the import took an offer at `presented`
+    // with a 201 and no reservation on the receiving ledger, and §6.4's upper
+    // bound was one that ledger had never seen. A third refutation pass then
+    // showed the same of every decided offer not yet settled.
     const { engine } = makeEngine();
-    for (const state of ["drafted", "presented"]) {
+    for (const state of ["drafted", "presented", "decided"]) {
       expect(() => engine.importOffer(arriving({ state }) as never, HOUSEHOLD))
         .toThrow(expect.objectContaining({ code: "bad_state" }));
     }
-    // What happened still travels.
-    engine.importOffer(arriving() as never, HOUSEHOLD);
-    expect(engine.mustGet("o-q57").state).toBe("decided");
+    // What has finished moving money still travels.
+    engine.importOffer(arriving({ state: "settled" }) as never, HOUSEHOLD);
+    expect(engine.mustGet("o-q57").state).toBe("settled");
+  });
+
+  test("the route leaves such an offer behind and names it, rather than refusing the move", async () => {
+    // NOTE (mutation check, 2026-09-19): import_refuses_the_whole_move. The
+    // first build refused the body, and a third pass measured that one
+    // presented offer then stopped the whole move: a household with a weekly
+    // box could not move at all.
+    const { engine } = makeEngine();
+    const handle = createApp(engine, {
+      deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(), registry: new Registry(),
+    });
+    const r = await handle(new Request(`https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/import`, {
+      method: "POST",
+      body: JSON.stringify({ format: "valence-node/6", offers: [
+        arriving({ id: "o-behind", state: "presented", candidates: [{ ...arriving().candidates[0], id: "c-behind", valence: "offered" }] }),
+        arriving({ id: "o-moves", state: "settled", candidates: [{ ...arriving().candidates[0], id: "c-moves" }] }),
+      ] }),
+    }));
+    expect(r.status).toBe(201);
+    expect(await r.json()).toEqual({ imported: true, left_behind: ["o-behind"] });
+    expect(engine.mustGet("o-moves").state).toBe("settled");
+    expect(() => engine.mustGet("o-behind")).toThrow();
   });
 
   test("a candidate that arrives with no verdict is refused", () => {
@@ -198,7 +218,7 @@ describe("§14.2, question 57: a move carries what happened", () => {
     // decided, so a candidate arriving with none could never be decided and
     // its line settled at nothing. Measured on a body the shape check took.
     const { engine } = makeEngine();
-    const withNone = arriving();
+    const withNone = arriving({ state: "settled" });
     delete (withNone.candidates[0] as { valence?: unknown }).valence;
     expect(() => engine.importOffer(withNone as never, HOUSEHOLD))
       .toThrow(expect.objectContaining({ code: "malformed" }));
@@ -276,13 +296,17 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
     const co = houseFor("mum").household;
     engine.mandates.importMandate(terms({ version: 3, co_signers: [co] }) as never);
     const keyOf = (k: string) => engine.publicKeyFor(k);
-    // Anything but the claim is an ordinary record, judged against what this
-    // host holds, which is a claim and not a signed history: so the household
-    // says which version it is at, and the co-signers the claim named do not
-    // bind it. Requiring version 1 here made a stranger's claim cost the
-    // household its version line, measured by a refutation pass 2026-09-18.
-    engine.mandates.record({ ...signedBy(terms({ version: 3, co_signers: [] })), keyOf });
-    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 3, co_signers: [] });
+    // Anything but the claim is an ordinary record with no signed history here,
+    // so it starts at version 1. For a day the household could state any
+    // version wherever a claim was held, and a third refutation pass measured
+    // what that reopened: a raw signature is not bound to a host, so any looser
+    // version the household ever signed could be recorded over its own tighter
+    // claim. **The cost is a number and not a protection.**
+    // NOTE (mutation check, 2026-09-19): claim_lets_any_version.
+    expect(() => engine.mandates.record({ ...signedBy(terms({ version: 3, co_signers: [] })), keyOf }))
+      .toThrow(expect.objectContaining({ code: "stale_version" }));
+    engine.mandates.record({ ...signedBy(terms({ version: 1, co_signers: [] })), keyOf });
+    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 1, co_signers: [] });
     // And the claim is gone, because the identifier now holds a mandate.
     expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
 
@@ -320,6 +344,19 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
     // And the identifier is free again, so a live claim can take its place.
     engine.mandates.importMandate(terms({ ceiling_out_of_network: 7 }) as never, soon + 1);
     expect(engine.mandates.claimFor(MANDATE, soon + 2)).toMatchObject({ ceiling_out_of_network: 7 });
+  });
+
+  test("a claim at a version no household reaches is not kept", () => {
+    // NOTE (mutation check, 2026-09-19): claim_version_unbounded. A third
+    // refutation pass measured a claim at MAX_SAFE_INTEGER - 1 accepted and,
+    // once signed as itself, a mandate every later change was refused on,
+    // tightenings included: the next version had no room. The bound leaves room
+    // for every version a household could ever record.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms({ version: 2 ** 20 + 1 }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+    engine.mandates.importMandate(terms({ version: 2 ** 20 }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toMatchObject({ version: 2 ** 20 });
   });
 
   test("a version with no room to follow it is refused", () => {

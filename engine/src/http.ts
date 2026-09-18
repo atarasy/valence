@@ -10,6 +10,7 @@ import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
 import type { Assertion, PersonalSignature } from "./shared/decisions.js";
 import { renderStatement } from "./hub/statement.js";
+import { needsStatement } from "./shared/statement.js";
 import { collectedAs } from "./shared/collected.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
@@ -168,6 +169,21 @@ export type Hub = {
  * and for whether a merchant is in the network, and holds no reference to
  * anything else of the hub's.
  */
+/**
+ * §14.2 and §6.4, question 57. Whether an offer can still move money: it can
+ * be decided, it is decided and not settled, or it is a physical box whose
+ * collection has not happened or whose statement is still owed. Such an offer
+ * stays where its reserve is.
+ */
+function moneyStillToMove(offer: Offer, collection?: { collected_at: number | null; missing?: string[] }): boolean {
+  if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided") return true;
+  if (offer.state === "expired" && offer.binding === "physical") {
+    if (!collection || collection.collected_at === null) return true;
+    if (needsStatement(offer, collection.missing ?? [])) return true;
+  }
+  return false;
+}
+
 export function createApp(
   engine: ValenceEngine,
   hub: Hub,
@@ -1325,6 +1341,30 @@ async function route(
       ) {
         throw badRequest("malformed", "confirmations must map offer ids to lists of tokens");
       }
+      // §14.2 and §6.4, question 57, decided 2026-09-18 and rebuilt 2026-09-19.
+      // **What still has money to move stays at the host that holds its
+      // reserve**, with every row that names it, and the answer names what was
+      // left. The first build refused an offer arriving in progress, and a third
+      // refutation pass measured the cost: one presented offer refused the
+      // whole move, so a household with a weekly box could not move at all, and
+      // the same reasoning reached every decided offer not yet settled. The
+      // worst case was a box awaiting its statement: it moved, the statement
+      // was refused `no_reservation` at the new host, and that presenter's next
+      // box was refused there for good. **The block is per host now**, which is
+      // the cost of this shape: a presenter can deliver at the new host while
+      // an unsigned statement waits at the old one.
+      const collectionOf = new Map((body_.collections ?? []).map((c) => [c.offer, c]));
+      const leftBehind = (body_.offers ?? []).filter((o) => moneyStillToMove(o, collectionOf.get(o.id))).map((o) => o.id);
+      if (leftBehind.length) {
+        const behind = new Set(leftBehind);
+        const behindCandidates = new Set((body_.offers ?? []).filter((o) => behind.has(o.id)).flatMap((o) => o.candidates.map((c) => c.id)));
+        body_.offers = (body_.offers ?? []).filter((o) => !behind.has(o.id));
+        body_.settlements = (body_.settlements ?? []).filter((r) => !behind.has(r.offer));
+        body_.collections = (body_.collections ?? []).filter((r) => !behind.has(r.offer));
+        body_.deliveries = (body_.deliveries ?? []).filter((r) => !behind.has(r.offer));
+        body_.notes = (body_.notes ?? []).filter((r) => !behindCandidates.has(r.candidate));
+        if (body_.confirmations) for (const id of leftBehind) delete body_.confirmations[id];
+      }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
         if (!carried.has(id)) {
@@ -1456,7 +1496,7 @@ async function route(
         for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
         deliveries.importRows(body_.deliveries ?? []);
       });
-      return json({ imported: true }, 201);
+      return json({ imported: true, left_behind: leftBehind }, 201);
     }
   }
 

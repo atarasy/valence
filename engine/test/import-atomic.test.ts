@@ -44,7 +44,7 @@ function host(store: Store) {
   return { post, holds, receipts };
 }
 
-const offer = { id: "o-1", household: H, mandate: `${H}.1`, state: "decided", candidates: [{ id: "c-1", valence: "offered" }] };
+const offer = { id: "o-1", household: H, mandate: `${H}.1`, state: "settled", candidates: [{ id: "c-1", valence: "kept" }] };
 const node = (extra: Record<string, unknown>) => ({
   format: "valence-node/6",
   offers: [offer],

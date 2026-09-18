@@ -7,13 +7,17 @@ import { Database } from 'bun:sqlite';
 import { openLocalHTTP } from './local-http.ts';
 import { validateNodeImport } from './node-import.ts';
 import { rehearseNodeImport } from './node-rehearsal.ts';
-import { seedAtomicFixture, atomicScope, fixtureTime } from './atomic-fixture.ts';
+import { seedAtomicFixture, settleFixture, atomicScope, fixtureTime } from './atomic-fixture.ts';
+import { openAtomicStore } from './atomic-store.ts';
 const cleanup: (() => void)[] = [];
 afterEach(() => { for (const f of cleanup.splice(0).reverse()) f(); });
 const policy = { environment: 'test', origin: atomicScope.audience, rpID: 'unit.example', explorationRate: 0.2, reminderLimit: 1 as const, recoveryGraceDays: 3, maximumBodyBytes: 4 * 1024 * 1024, maximumResponseBytes: 4 * 1024 * 1024, maximumPending: 8 };
-async function fixture() {
+async function fixture(settled = false) {
   const dir = mkdtempSync(join(tmpdir(), 'archive-rehearsal-')); cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
-  const source = join(dir, 'source.sqlite'); await seedAtomicFixture(source);
+  const source = join(dir, 'source.sqlite'); const [statement] = await seedAtomicFixture(source);
+  // §14.2 and §6.4, question 57. A move leaves behind what still has money to
+  // move, so an archive that must round-trip whole is one whose box has settled.
+  if (settled) { const unit = openAtomicStore(source, atomicScope); try { await unit.run(store => settleFixture(store, statement!)); } finally { unit.close(); } }
   const app = openLocalHTTP(source, policy); cleanup.push(() => app.close());
   const response = await app.fetch(new Request(policy.origin + `/households/${encodeURIComponent(HOUSE)}/export`)); expect(response.status).toBe(200);
   return { dir, source, app, node: await response.json() };
@@ -34,7 +38,7 @@ test('HTTP preflight rejects malformed archive before touching an existing store
   expect(response.status).toBe(400); expect(rows(s.source)).toEqual(before);
 });
 test('read-only source rehearses into a fresh archive with equal exports and refuses overwrite', async () => {
-  const s = await fixture(), before = rows(s.source), dest = join(s.dir, 'destination');
+  const s = await fixture(true), before = rows(s.source), dest = join(s.dir, 'destination');
   const result = await rehearseNodeImport(s.source, dest, HOUSE, policy, fixtureTime + 1);
   expect(result).toMatchObject({ mode: 'archive-only', verified: true, operationalCutover: false, offers: 1 }); expect(result.digest).toHaveLength(64); expect(rows(s.source)).toEqual(before);
   const target = rows(result.destination);
