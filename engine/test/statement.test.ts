@@ -794,3 +794,57 @@ describe("§6.4, question 62: a set that owes nothing settles at nothing, at onc
     expect(ledger.get(offer.id)!.status).toBe("held");
   });
 });
+
+describe("§6.4, §11.2, question 62: a box is not finished until it is collected", () => {
+  /**
+   * A first refutation pass over question 62 measured the household deciding
+   * every line of a physical box `returned`, the box settling at 0 on that
+   * word alone, and the collection then refused on a settled offer: the
+   * household ate the box for free.
+   */
+  const noWindow = {
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: 0,
+        cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    async dailyCeilingOf() { return null; },
+    async holdsAny(h: string) { return h === HOUSEHOLD; },
+  };
+
+  test("a box the household called returned waits for its collection, which can still find a line used", async () => {
+    // NOTE (mutation check, 2026-09-19): nothing_owed_before_collection.
+    const made = makeEngine();
+    const { engine, ledger, deliveries } = made;
+    engine.readMandatesFrom(noWindow);
+    const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })));
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(ledger.get(offer.id)!.status).toBe("held");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
+    deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
+    engine.collect({ offer: offer.id, returned: [offer.candidates[1]!.id], consumed: [offer.candidates[0]!.id], at: Date.now() });
+    expect(engine.mustGet(offer.id).candidates[0]!.valence).toBe("consumed");
+  });
+
+  test("a box collected with nothing used settles at nothing at the export, on a day already past the ceiling", async () => {
+    // NOTE (mutation check, 2026-09-19): zero_settle_meets_the_ceiling. The
+    // ceiling here is 0 and the day already holds 1, so the zero settlement
+    // was refused `mandate_ceiling_daily` and the box stayed behind its
+    // reserve, which is the case question 62 was opened for.
+    const made = makeEngine();
+    const { engine, ledger } = made;
+    engine.readMandatesFrom(noWindow);
+    engine.readTheDayFrom({ async totalSince() { return 1; }, async report() {}, async reportOffer() {} } as never);
+    const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
+    await engine.present(offer.id);
+    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    engine.applyRecoveryTo(offer.id);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(1);
+    expect(engine.settlement(offer.id)!.charged).toBe(0);
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+});

@@ -635,4 +635,16 @@ describe("§12, §14, question 61: a giver's payments move with the giver", () =
     expect((await importTo(a, giver, { format: "valence-node/7", gifts_in_flight: [1] })).status).toBe(400);
     expect((await exportOf(a, giver)).payments).toEqual([]);
   });
+
+  test("a payment arriving with more than its five fields keeps only the five", async () => {
+    // NOTE (mutation check, 2026-09-19): imported_payment_kept_whole. A row
+    // posted with `lines` was stored and exported again as it came, so an
+    // export stopped being proof of the shape §14 gives a payment.
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    const row = { offer: "o-planted", presenter: "p", settled_at: 1, charged: 5, receipt: "r" };
+    const r = await importTo(a, giver, { format: "valence-node/7", payments: [{ ...row, lines: [{ product: "secret" }], anything: { deep: true } }] });
+    expect(r.status).toBe(201);
+    expect((await exportOf(a, giver)).payments).toEqual([row]);
+  });
 });

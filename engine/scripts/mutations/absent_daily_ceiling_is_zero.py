@@ -5,7 +5,7 @@ import pathlib
 # who set nothing asked for.
 
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-a = "    if (ceilingDaily != null) {"
+a = "    if (ceilingDaily != null && charged > 0) {"
 assert a in s, "offers.ts daily ceiling anchor has drifted"
 s = s.replace(a, "    if (mandate || offer.giver) {", 1)
 b = "      if (already + charged > ceilingDaily) {"

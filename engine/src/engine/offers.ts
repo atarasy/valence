@@ -968,6 +968,12 @@ export class ValenceEngine {
   private async settleIfNothingOwed(offer: Offer, now: number): Promise<boolean> {
     if (offer.state !== "decided" && offer.state !== "expired") return false;
     if (owesSettlement(offer) || this.settlements.has(offer.id)) return false;
+    // **A box is not finished until it has been collected.** §11.2 lets the
+    // household say `returned` of a line, and the collection overrules that
+    // with what it finds. A first refutation pass measured this settling a
+    // box at 0 on the household's word alone, after which the collection was
+    // refused on a settled offer: a household ate the box for free.
+    if (offer.binding === "physical" && (this.recoveries.for(offer.id)?.collected_at ?? null) === null) return false;
     if (this.ledger.get(offer.id)?.status !== "held") return false;
     try {
       await this.settleInternal(offer.id, now);
@@ -1432,7 +1438,11 @@ export class ValenceEngine {
     const ceilingDaily = offer.giver
       ? await this.mandateSource.dailyCeilingOf(offer.giver)
       : mandate?.ceiling_daily ?? null;
-    if (ceilingDaily != null) {
+    // A settlement of nothing adds nothing to the day, so it is not refused
+    // on a day already past the ceiling: that refused question 62's own
+    // zero-settle for a household that had tightened its ceiling, and the set
+    // stayed behind its reserve.
+    if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
       // engine's settlements: an engine summing its own is a merchant
@@ -2050,8 +2060,13 @@ export class ValenceEngine {
   importPayments(household: string, rows: Payment[]): void {
     const held = this.carriedPayments.get(household) ?? [];
     const offers = new Set(held.map((p) => p.offer));
-    const added = rows.filter((p) => !offers.has(p.offer));
-    if (added.length) this.carriedPayments.set(household, [...held, ...structuredClone(added)]);
+    // Only the five fields are kept. A row arriving with anything else, the
+    // lines above all, was stored and exported again as it came, so an
+    // export stopped being proof of the shape §14 gives a payment.
+    const added = rows
+      .filter((p) => !offers.has(p.offer))
+      .map(({ offer, presenter, settled_at, charged, receipt }) => ({ offer, presenter, settled_at, charged, receipt }));
+    if (added.length) this.carriedPayments.set(household, [...held, ...added]);
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {
