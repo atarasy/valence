@@ -103,9 +103,30 @@ export class MandateRegister {
   /** §13.2. Where this register keeps what it holds. Unset is in memory. */
   constructor(store: Store = inMemoryStore()) {
     this.rows = store.map("mandates");
+    this.claims = store.map("mandate_claims");
   }
 
   private readonly rows: Map<string, Mandate>;
+  /**
+   * §14.2, question 56, decided 2026-09-18. **What a move carries is a claim
+   * and not a proof.** The import route authenticates nobody, and measured on
+   * the engine the day it was decided, a stranger planted a second mandate
+   * under a household's own identifier with a ceiling of 9,999,999 and no
+   * cooling window, beside that household's real one at a ceiling of 0.
+   *
+   * Carrying the signatures instead was refused twice over: §16.1 requires
+   * that a signature is verified at submission and not retained, and an
+   * assertion names the host it was made for, so a member who holds a passkey
+   * and nothing else, which is every member who joined through a hub, could
+   * move no mandate at all.
+   *
+   * So a claim is held here until the household signs it at this host. An
+   * offer cannot name one, because `get` does not answer for it; a household
+   * holding one counts as holding a mandate, because `forHousehold` does, so
+   * §16.2 refuses every offer and **nothing settles for that household until
+   * the person signs**. That cost is the price of a move carrying a claim.
+   */
+  private readonly claims: Map<string, Mandate>;
 
   get(id: string): Mandate | undefined {
     return this.rows.get(id);
@@ -118,11 +139,22 @@ export class MandateRegister {
    * 2026-09-09, which is what `exit/` now asks about rather than trusting.
    */
   forHousehold(household: string): Mandate[] {
-    return [...this.rows.values()].filter((m) => m.household === household);
+    return [...this.rows.values(), ...this.claims.values()].filter((m) => m.household === household);
   }
 
+  /** The claim held for an identifier, which is not a mandate until it is signed. */
+  claimFor(id: string): Mandate | undefined {
+    return this.claims.get(id);
+  }
+
+  /**
+   * §14.2. A move writes a claim. An identifier this host already holds, as a
+   * mandate or as a claim, is left as it is, for the reason §14.2 gives: the
+   * row that arrived second decided nothing about the one that arrived first.
+   */
   importMandate(m: Mandate): void {
-    this.rows.set(m.id, { ...m, co_signers: [...m.co_signers] });
+    if (this.rows.has(m.id) || this.claims.has(m.id)) return;
+    this.claims.set(m.id, { ...m, co_signers: [...m.co_signers] });
   }
 
   mustGet(id: string, now = Date.now()): Mandate {
@@ -180,17 +212,31 @@ export class MandateRegister {
       }
     }
     const before = this.rows.get(mandate.id);
+    const claim = before ? undefined : this.claims.get(mandate.id);
+    // Whose row this is comes before which version it is: a row held for
+    // another household is not a version of this household's mandate at all.
+    if ((before ?? claim) && (before ?? claim)!.household !== mandate.household) {
+      throw unprocessable("wrong_household", "a mandate does not change hands");
+    }
     if (before && mandate.version !== before.version + 1) {
       throw conflict(
         "stale_version",
         `mandate ${mandate.id} is at version ${before.version}`
       );
     }
-    if (!before && mandate.version !== 1) {
-      throw unprocessable("stale_version", "a new mandate starts at version 1");
+    // §14.2, question 56. Signing a claim records it at the version it
+    // carries, which is what lets a mandate that was at version 3 where it
+    // came from become a mandate here. Nothing is loosened by it: there is no
+    // signed version at this host to loosen, and the co-signers the household
+    // signs for are the ones that bind every version after this one.
+    if (claim && mandate.version !== claim.version) {
+      throw conflict(
+        "stale_version",
+        `mandate ${mandate.id} arrived here at version ${claim.version} and is signed as it stands`
+      );
     }
-    if (before && before.household !== mandate.household) {
-      throw unprocessable("wrong_household", "a mandate does not change hands");
+    if (!before && !claim && mandate.version !== 1) {
+      throw unprocessable("stale_version", "a new mandate starts at version 1");
     }
     if (mandate.lapses_at <= now) {
       throw unprocessable("lapsed", "a mandate that has already lapsed cannot be recorded");
@@ -235,6 +281,7 @@ export class MandateRegister {
       }
     }
     this.rows.set(mandate.id, mandate);
+    this.claims.delete(mandate.id);
     return mandate;
   }
 }

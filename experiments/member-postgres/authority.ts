@@ -248,6 +248,18 @@ export function openMemberAuthority(path: Records, options: Options) {
       name(row.household); timestamp(row.expires);
       return { id: row.id, household: row.household, presenters, expiresAt: row.expires, revoked: false, environment };
     },
+    /**
+     * Trusted internal lookup only. The principal and household a live session
+     * belongs to, for a ceremony that is about the household rather than about
+     * a resource somebody owns: §16.1's mandate signing has no bound resource
+     * to reach through, because the claim is not a mandate yet.
+     */
+    sessionPrincipal(token: string) {
+      if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;
+      const row = activeSession(digest(token), now()) as { id: string; household: string | null; principal: string } | null;
+      if (!row || row.household === null) return;
+      return { session: row.id, household: row.household, principal: row.principal };
+    },
     /** Trusted internal lookup only. Never exposed by the member HTTP handler. */
     transactionContext(token: string, mandate: string) {
       if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;

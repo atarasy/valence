@@ -77,7 +77,10 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
     const again = host(reopened);
     expect((again.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1")).toBe(true);
     expect(again.engine.notesFor("c-1").length).toBe(1);
-    expect(again.engine.mandates.get(`${H}.1`)).toBeDefined();
+    // §14.2, question 56. A mandate that arrives by a move is a claim until the
+    // household signs it here, so the row this reads back is the claim, and the
+    // property under test is that the whole move survived the failure.
+    expect(again.engine.mandates.claimFor(`${H}.1`)).toBeDefined();
     expect(again.deliveries.forHousehold(["o-1"]).length).toBe(1);
     reopened.close();
   });

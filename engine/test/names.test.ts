@@ -157,6 +157,76 @@ describe("§13.2, question 55: a name is its key", () => {
   });
 });
 
+describe("§14.2, question 56: a mandate that arrives by a move is a claim", () => {
+  const terms = (over: Record<string, unknown> = {}) => ({
+    id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+    cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 10 * HOUR, version: 1, ...over,
+  });
+  const offerFor = (mandate: string, product: string, household = HOUSEHOLD) => ({
+    binding: "digital" as const, household, purpose: "replenish" as const,
+    config_version: CONFIG_VERSION, expires_at: Date.now() + HOUR, mandate, price_band: null, giver: null,
+    candidates: [{ product, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+  });
+  const signedBy = (m: ReturnType<typeof terms>) => ({
+    mandate: m as never,
+    signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+    assertions: {}, keyOf: (k: string) => undefined as string | undefined, relyingPartyId: "unit.example",
+  });
+
+  test("an offer cannot name it, and the household settles nothing until it is signed", async () => {
+    // NOTE (mutation check, 2026-09-18): import_mandate_is_live. The claim was
+    // written as a mandate, the offer presented, and a row nobody signed
+    // carried a ceiling of a million.
+    //
+    // Measured the day it was decided: the import route authenticates nobody,
+    // so a stranger planted a second mandate under this household's own
+    // identifier with a ceiling of 9,999,999 beside its real one at 0.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms() as never);
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
+    expect(engine.mandates.claimFor(MANDATE)).toMatchObject({ ceiling_out_of_network: 1_000_000 });
+    // It counts as a mandate this household has, which is what makes §16.2
+    // refuse every offer rather than leave them alone: a move fails closed.
+    expect(engine.mandates.forHousehold(HOUSEHOLD).map((m) => m.id)).toEqual([MANDATE]);
+    const named = engine.createOffer(offerFor(MANDATE, "tea-a") as never);
+    await expect(engine.present(named.id)).rejects.toMatchObject({ code: "mandate_unknown" });
+    const other = engine.createOffer(offerFor(`${HOUSEHOLD}.2`, "tea-b") as never);
+    await expect(engine.present(other.id)).rejects.toMatchObject({ code: "mandate_unknown" });
+  });
+
+  test("signing it here records it as it stands, at the version it carries", async () => {
+    // NOTE (mutation check, 2026-09-18): record_ignores_the_claims_version. A
+    // claim that arrived at version 3 could then be signed only as version 1,
+    // so a mandate that had been amended where it came from could never become
+    // a mandate here at all.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms({ version: 3 }) as never);
+    const keyOf = (k: string) => engine.publicKeyFor(k);
+    expect(() => engine.mandates.record({ ...signedBy(terms({ version: 1 })), keyOf }))
+      .toThrow(expect.objectContaining({ code: "stale_version" }));
+    engine.mandates.record({ ...signedBy(terms({ version: 3 })), keyOf });
+    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 3 });
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+    const named = engine.createOffer(offerFor(MANDATE, "tea-a") as never);
+    expect((await engine.present(named.id)).state).toBe("presented");
+  });
+
+  test("a claim signed by anything but the household's own key is refused", () => {
+    // The claim is a stranger's to write and the household's alone to sign,
+    // which is the whole of what question 56's second half decides.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms() as never);
+    const stranger = generateKeyPairSync("ed25519");
+    const m = terms();
+    expect(() => engine.mandates.record({
+      mandate: m as never,
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), stranger.privateKey).toString("base64") },
+      assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
+    })).toThrow(expect.objectContaining({ code: "bad_signature" }));
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
+  });
+});
+
 describe("§16.2, question 56: an offer names a mandate this household has", () => {
   test("a label the household never recorded is refused, and one it has is not", async () => {
     // NOTE (mutation check, 2026-09-16): offer_names_any_label. The phantom

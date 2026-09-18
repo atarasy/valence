@@ -1392,7 +1392,10 @@ async function route(
         }
         if (seenMandates.has(m.id)) throw badRequest("malformed", `mandates names ${m.id} twice`);
         seenMandates.add(m.id);
-        const held = engine.mandates.get(m.id);
+        // §14.2, question 56. A claim counts as held here: it is a row under
+        // this identifier, and a claim under one household must not be
+        // replaced by a claim under another any more than a mandate may.
+        const held = engine.mandates.get(m.id) ?? engine.mandates.claimFor(m.id);
         // §16.1. A mandate does not change hands, which `record` refuses and
         // this route did not: an import under one household named another's
         // mandate id with tighter values and took the mandate with it, after

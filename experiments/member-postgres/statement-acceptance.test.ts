@@ -9,6 +9,14 @@ import config from './deployment/config.json';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
 import {isHouseholdName,householdOfMandate,nameOf} from '../../engine/src/common/names.ts';
 import {credentialSPKI} from '../member-login/credential-key.ts';
+// §10.5. The engine reads an assertion's three fields as base64; the synthetic
+// authenticator speaks WebAuthn, which is base64url. Converting here rather
+// than widening the engine keeps one encoding in the protocol.
+const assertionFor=(key:ReturnType<typeof syntheticAuthenticator>,challenge:string,c:MemberRuntimeConfig,counter:number)=>{
+ const r=key.authenticate(challenge,c.origin,c.rpID,'',counter).response as {clientDataJSON:string;authenticatorData:string;signature:string};
+ const b64=(v:string)=>Buffer.from(v,'base64url').toString('base64');
+ return {client_data_json:b64(r.clientDataJSON),authenticator_data:b64(r.authenticatorData),signature:b64(r.signature)};
+};
 test('trusted statement acceptance lets the registered passkey approve one physical statement through HTTP',async()=>{
  const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
  const pool=createPool(url),c=config as MemberRuntimeConfig,id={id:'statement_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1},unit=postgresStore(pool,id);
@@ -84,7 +92,15 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // a sixth refutation pass, which then read the household's mandate terms.
   const late=syntheticAuthenticator(),lateInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
   const lateFlow=await (await send('/auth/enrollment/options',{invitation:lateInvite.token})).json();
-  const statement=await unit.run(s=>prepareStatementAcceptance(s,c));
+  // §16.1, question 56. The step writes the mandate as a claim and stops; the
+  // device signs it with the passkey its household is named after, and the step
+  // presents the box on the second run. Until it is signed, no offer can name it.
+  const awaiting=await unit.run(s=>prepareStatementAcceptance(s,c)) as {mandate:string;awaitingSignature:true};
+  expect(awaiting.awaitingSignature).toBe(true);
+  const toSign=await (await send('/member/mandates/prepare',{},before)).json();
+  expect(toSign.mandate.id).toBe(awaiting.mandate);
+  expect((await send('/member/mandates/submit',{assertion:assertionFor(key,toSign.publicKey.challenge,c,3)},before)).status).toBe(200);
+  const statement=await unit.run(s=>prepareStatementAcceptance(s,c)) as {household:string;mandate:string;offer:string;presenter:string};
   expect((await send('/auth/enrollment/verify',{id:lateFlow.id,response:late.register(lateFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
   expect(await unit.run(s=>s.map('member_passkeys').has(late.id))).toBe(false);
   // And retire refuses once a statement exists, which had no test at all.
@@ -121,14 +137,14 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect((await send('/auth/session',undefined,before)).status).toBe(401);
   expect(await unit.run(s=>[...s.map<{credential:string;revoked:number}>('member_sessions').values()].filter(v=>v.revoked===0).length)).toBe(0);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({activeCredentials:1,presenterGrants:1,statement:{offer:statement.offer,mandate:statement.mandate,presenter:statement.presenter,settled:false}});
-  const token=await signIn(3);
+  const token=await signIn(4);
   expect((await (await send('/auth/session',undefined,token)).json()).presenters).toEqual([statement.presenter]);
   const list=await (await send('/offers?household='+encodeURIComponent(statement.household)+'&presenter='+statement.presenter,undefined,token)).json();
   expect(list.offers.map((o:{id:string})=>o.id)).toEqual([statement.offer]);
   expect((await send('/offers/'+statement.offer+'/statement',undefined,token)).status).toBe(200);
   const p=await (await send('/member/statements/prepare',{offer:statement.offer,disputed:[]},token)).json();
   expect(p.publicKey.allowCredentials).toEqual([{type:'public-key',id:key.id}]);
-  const path='/member/operations/'+p.operationID,submitted=await send(path+'/submit',{assertion:key.authenticate(p.publicKey.challenge,c.origin,c.rpID,userHandle,4)},token);
+  const path='/member/operations/'+p.operationID,submitted=await send(path+'/submit',{assertion:key.authenticate(p.publicKey.challenge,c.origin,c.rpID,userHandle,5)},token);
   expect(submitted.status).toBe(200);const receipt=await submitted.json();expect(receipt.operationState).toBe('committed');
   expect(await (await send(path+'/outcome',undefined,token)).json()).toEqual(receipt);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({statement:{settled:true}});
@@ -137,9 +153,9 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect(box.offer).not.toBe(statement.offer);expect(box.presenter).not.toBe(statement.presenter);
   await expect(unit.run(s=>prepareStatementBox(s,c))).rejects.toThrow('not settled');
   expect((await send('/auth/session',undefined,token)).status).toBe(401);
-  const again=await signIn(5);
+  const again=await signIn(6);
   const next=await (await send('/member/statements/prepare',{offer:box.offer,disputed:[]},again)).json();
-  const nextPath='/member/operations/'+next.operationID,approved=await send(nextPath+'/submit',{assertion:key.authenticate(next.publicKey.challenge,c.origin,c.rpID,userHandle,6)},again);
+  const nextPath='/member/operations/'+next.operationID,approved=await send(nextPath+'/submit',{assertion:key.authenticate(next.publicKey.challenge,c.origin,c.rpID,userHandle,7)},again);
   expect(approved.status).toBe(200);expect((await approved.json()).operationState).toBe('committed');
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({statement:{offer:box.offer,settled:true}});
  }finally{
