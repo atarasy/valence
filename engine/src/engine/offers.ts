@@ -40,6 +40,7 @@ import type {
   PresenterConfig,
   Purpose,
   Settlement,
+  Payment,
   Valence,
   SettlementLine,
   PriceBand,
@@ -139,6 +140,8 @@ export class ValenceEngine {
    * fact. Nothing resolves this token, and no route accepts it.
    */
   private readonly receipts: Map<string, { ref: string; at: number }[]>;
+  /** Question 61. Payments a giver brought from another host, by household. */
+  private readonly carriedPayments: Map<string, Payment[]>;
   // Journaled, because it is derived from the offers an atomic block may take back.
   private readonly candidateIndex = transientMap<string>();
 
@@ -242,6 +245,7 @@ export class ValenceEngine {
   ) {
     this.offers = store.map("offers");
     this.receipts = store.map("bare_receipts");
+    this.carriedPayments = store.map("carried_payments");
     // Appendix B: candidate lookup is derived; opaque receipt references are not.
     for (const [id, offer] of this.offers) {
       if (id !== offer.id) throw new Error('Stored offer identity mismatch');
@@ -2013,6 +2017,41 @@ export class ValenceEngine {
       const key = this.importedEdgeKey(edge, carryingEdges);
       if (key !== null) carryingEdges.set(key, edge);
     }
+  }
+
+  /**
+   * §12, §14, question 61. What this household paid as a giver: settlements
+   * made here on gifts it gave, and payments it brought from another host.
+   * The lines stay out (clause 24).
+   */
+  paymentsBy(household: string): Payment[] {
+    const here = [...this.offers.values()]
+      .filter((o) => o.giver === household)
+      .map((o) => this.settlements.get(o.id))
+      .filter((st): st is Settlement => st !== undefined)
+      .map((st) => ({ offer: st.offer, presenter: st.signed_by, settled_at: st.settled_at, charged: st.charged, receipt: st.receipt }));
+    const seen = new Set(here.map((p) => p.offer));
+    return [...here, ...structuredClone(this.carriedPayments.get(household) ?? []).filter((p) => !seen.has(p.offer))];
+  }
+
+  /**
+   * Question 61. Gifts this household pays for whose money has not finished
+   * moving here: the reserve is held on this host, so a move leaves them and
+   * names them, as it does the household's own offers (question 57).
+   */
+  giftsInFlightBy(household: string, now = Date.now()): string[] {
+    this.sweep(now);
+    return [...this.offers.values()]
+      .filter((o) => o.giver === household && !this.settlements.has(o.id) && this.ledger.get(o.id)?.status === "held")
+      .map((o) => o.id);
+  }
+
+  /** Question 61. Adds what this host does not hold, as receipts do (question 52). */
+  importPayments(household: string, rows: Payment[]): void {
+    const held = this.carriedPayments.get(household) ?? [];
+    const offers = new Set(held.map((p) => p.offer));
+    const added = rows.filter((p) => !offers.has(p.offer));
+    if (added.length) this.carriedPayments.set(household, [...held, ...structuredClone(added)]);
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {

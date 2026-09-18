@@ -1,0 +1,8 @@
+import pathlib
+# §6.4, question 62. Settle at once a set that owes something, taking the
+# charge out of the presenter's hands and the household's statement.
+p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
+old = '    if (owesSettlement(offer) || this.settlements.has(offer.id)) return false;\n'
+assert s.count(old) == 1, "anchor drifted"
+s = s.replace(old, '    if (this.settlements.has(offer.id)) return false;\n', 1)
+p.write_text(s)

@@ -245,7 +245,7 @@ function stable(v: unknown): string {
 }
 
 /** §14.2, question 52. The field a household's list rows are told apart by when an import adds to them. */
-const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"]] as const;
+const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"], ["payments", "offer"]] as const;
 
 /** §14. The field each keyed list is stored under, which a store binds as its key. */
 const ROW_KEYS = [
@@ -256,7 +256,7 @@ const ROW_KEYS = [
 /** §14. The fields of a node export that hold lists, each written row by row. */
 const LISTS_A_NODE_CARRIES = [
   "offers", "settlements", "notes", "lineage", "receipts", "recoveries",
-  "collections", "permissions", "queries", "mandates", "deliveries",
+  "collections", "permissions", "queries", "mandates", "deliveries", "payments",
 ] as const;
 
 async function route(
@@ -1249,7 +1249,9 @@ async function route(
       // import with none, which is what it recorded.
       // A /5 export may carry no `confirmations`, which §14 did not name until
       // /6; an offer it does not name reads as unconfirmed (question 50).
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      // A /6 export predates question 61 and carries no `payments` and no
+      // `gifts_in_flight`; a giver's record of what it paid did not travel.
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = segment(parts[1]);
@@ -1464,6 +1466,19 @@ async function route(
         // records it here with the signatures §16.1 asks for.
         if (held) taken.delete(m.id);
       }
+      // §12, §14, question 61. A giver's payments carry an amount and a
+      // receipt and nothing a later read trips over; the gifts still in flight
+      // are named, and nothing is written for them.
+      for (const p_ of body_.payments ?? []) {
+        if (typeof p_.presenter !== "string" || typeof p_.receipt !== "string" ||
+            !Number.isSafeInteger(p_.settled_at) || p_.settled_at < 0 || !Number.isSafeInteger(p_.charged) || p_.charged < 0) {
+          throw badRequest("malformed", "a payment names its presenter and receipt, and its moment and amount are whole numbers");
+        }
+      }
+      const inFlight = body_.gifts_in_flight;
+      if (inFlight !== undefined && (!Array.isArray(inFlight) || inFlight.some((id) => typeof id !== "string" || !id))) {
+        throw badRequest("malformed", "gifts_in_flight must be a list of offer ids");
+      }
       for (const r of body_.recoveries ?? []) {
         if (r.household !== moving) {
           throw unprocessable("wrong_household", `recovery ${r.id} belongs to ${r.household}`);
@@ -1489,6 +1504,7 @@ async function route(
         for (const n of body_.notes ?? []) engine.importNote(n);
         for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
         engine.importReceipts(moving, body_.receipts ?? []);
+        engine.importPayments(moving, body_.payments ?? []);
         // Until 2026-09-09 the loop stopped above. The export already carried the
         // recovery log, and this end dropped it; the ledger, the queries and the
         // mandates were in neither end. A member who moved kept their offers and
@@ -1506,7 +1522,9 @@ async function route(
         for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
         deliveries.importRows(body_.deliveries ?? []);
       });
-      return json({ imported: true, left_behind: leftBehind }, 201);
+      // Question 61. A gift this household pays for stays where its reserve
+      // is, as its own offers do, and the answer names it with them.
+      return json({ imported: true, left_behind: [...new Set([...leftBehind, ...(inFlight ?? [])])] }, 201);
     }
   }
 
