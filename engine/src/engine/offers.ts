@@ -1349,6 +1349,21 @@ export class ValenceEngine {
     // that moves money, the household had been charged by a settlement that
     // does not exist. Found by a refutation pass on 2026-09-12; the reserve
     // stays held on refusal, which is what the person's authorisation is for.
+    // Question 57: money moves at the host that holds its reserve, and that
+    // includes a settlement of nothing. `present` reserves every offer, so an
+    // offer this ledger has no row for arrived by a move, and its reserve is
+    // at the host it came from. Settling it here as well wrote a second
+    // settlement with a second receipt for one offer, and the two hosts then
+    // answered `GET /offers/{id}/settlement` differently. Found by the fifth
+    // refutation pass on 2026-09-19: an expired offer with every line returned
+    // travels, and was settled at 0 at both hosts. `commit` already refused a
+    // charge here; this refuses the zero as well, before anything is read.
+    // The Meter adapter keeps its holds in memory, so after a restart it
+    // refuses here what it already refused at `commit`.
+    if (!this.ledger.get(offer.id)) {
+      throw conflict("no_reservation", `no reservation for ${offer.id} on this host; it settles where it was presented`);
+    }
+
     if (mandate?.ceiling_daily != null) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
@@ -1368,7 +1383,7 @@ export class ValenceEngine {
     // records are the same event.
     if (charged > 0) {
       await this.ledger.commit({ requestId: offer.id, amount: charged });
-    } else if (this.ledger.get(offer.id)) {
+    } else {
       await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
     }
 
