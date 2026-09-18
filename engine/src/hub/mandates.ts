@@ -139,7 +139,7 @@ export class MandateRegister {
    * 2026-09-09, which is what `exit/` now asks about rather than trusting.
    */
   forHousehold(household: string): Mandate[] {
-    return [...this.rows.values(), ...this.claims.values()].filter((m) => m.household === household);
+    return [...this.rows.values()].filter((m) => m.household === household);
   }
 
   /** The claim held for an identifier, which is not a mandate until it is signed. */
@@ -148,12 +148,40 @@ export class MandateRegister {
   }
 
   /**
+   * The claims held for a household, which are what it may sign here and
+   * **nothing else**. They are not in `forHousehold`, and the reason is the
+   * whole of what the first build of this decision got wrong.
+   *
+   * A claim counted as a mandate the household held, so that a move would fail
+   * closed. A refutation pass on 2026-09-18 measured what that bought: the
+   * import route authenticates nobody, so **one unsigned POST froze any
+   * household on the host**, including one that held no mandate at all and had
+   * never moved anywhere. Every offer naming any label was then refused, a
+   * settlement already decided could not be paid, and nothing removed a claim,
+   * because the only deletion is a successful `record` and the import may
+   * carry `lapses_at: 0`, which `record` refuses as lapsed for ever.
+   *
+   * So a claim does nothing. A household that has moved and not yet signed is
+   * a household that has set no protection here, which is what §16.2 already
+   * says of every household before its first mandate. **The cost is that the
+   * protections do not apply until the person signs**, and the cost of the
+   * other direction was that anybody could stop anybody from being sold to.
+   */
+  claimsFor(household: string): Mandate[] {
+    return [...this.claims.values()].filter((m) => m.household === household);
+  }
+
+  /**
    * §14.2. A move writes a claim. An identifier this host already holds, as a
    * mandate or as a claim, is left as it is, for the reason §14.2 gives: the
    * row that arrived second decided nothing about the one that arrived first.
    */
-  importMandate(m: Mandate): void {
+  importMandate(m: Mandate, now = Date.now()): void {
     if (this.rows.has(m.id) || this.claims.has(m.id)) return;
+    // A claim that has already lapsed can never be signed, so keeping it as one
+    // that might is a row nobody can act on. Named by a refutation pass on
+    // 2026-09-18, which measured an import carrying `lapses_at: 0`.
+    if (m.lapses_at <= now) return;
     this.claims.set(m.id, { ...m, co_signers: [...m.co_signers] });
   }
 
@@ -212,7 +240,16 @@ export class MandateRegister {
       }
     }
     const before = this.rows.get(mandate.id);
-    const claim = before ? undefined : this.claims.get(mandate.id);
+    // §14.2, question 56. A claim is **an offer to sign and never a
+    // constraint**: it counts only when what is submitted is the claim itself,
+    // byte for byte. Checking the version alone let a household record its own
+    // terms at the claim's version, which dropped the co-signers it had named
+    // elsewhere: clause 47 escaped by relocation, measured 2026-09-18. And
+    // binding the claim's terms instead would let a planted row with a
+    // co-signer nobody holds freeze that identifier for ever, which is the
+    // defect question 56's first attempt was refused for.
+    const held = before ? undefined : this.claims.get(mandate.id);
+    const claim = held && canonicalMandate(held).equals(canonicalMandate(mandate)) ? held : undefined;
     // Whose row this is comes before which version it is: a row held for
     // another household is not a version of this household's mandate at all.
     if ((before ?? claim) && (before ?? claim)!.household !== mandate.household) {
@@ -224,17 +261,10 @@ export class MandateRegister {
         `mandate ${mandate.id} is at version ${before.version}`
       );
     }
-    // §14.2, question 56. Signing a claim records it at the version it
-    // carries, which is what lets a mandate that was at version 3 where it
-    // came from become a mandate here. Nothing is loosened by it: there is no
-    // signed version at this host to loosen, and the co-signers the household
-    // signs for are the ones that bind every version after this one.
-    if (claim && mandate.version !== claim.version) {
-      throw conflict(
-        "stale_version",
-        `mandate ${mandate.id} arrived here at version ${claim.version} and is signed as it stands`
-      );
-    }
+    // §14.2, question 56. Nothing checks the claim's version here, because the
+    // version is inside the canonical bytes: a submission that is the claim
+    // carries the claim's version by construction. It was a separate check
+    // until the claim stopped being matched by version alone, on 2026-09-18.
     if (!before && !claim && mandate.version !== 1) {
       throw unprocessable("stale_version", "a new mandate starts at version 1");
     }

@@ -19,23 +19,24 @@ import type { memberRuntime } from './runtime.ts';
  * they can read what they are agreeing to before they do.
  */
 export function openMandateCeremony(r: ReturnType<typeof memberRuntime>, policy: { rpID: string }) {
-  function held(token: string): { household: string; principal: string; claim: Mandate } {
+  function held(token: string, id?: string): { household: string; principal: string; claim: Mandate } {
     const session = r.authority.sessionPrincipal(token);
     if (!session) throw new Error('Mandate ceremony unavailable');
-    const claims = r.engine.mandates
-      .forHousehold(session.household)
-      .filter((m) => r.engine.mandates.claimFor(m.id) !== undefined);
-    // One at a time, on purpose: a person agreeing to two sets of protections
-    // in one gesture cannot be said to have read either.
-    if (claims.length !== 1) throw new Error(`Exactly one unsigned mandate is required; this household has ${claims.length}`);
-    const claim = claims[0]!;
+    const claims = r.engine.mandates.claimsFor(session.household);
+    // Named when there are several, because the count is not the household's
+    // to control: anybody may write a claim. A ceremony that required exactly
+    // one could be stopped by a stranger writing a second, which a refutation
+    // pass measured on 2026-09-18 while a claim still had an effect.
+    const claim = id === undefined ? (claims.length === 1 ? claims[0] : undefined) : claims.find((m) => m.id === id);
+    if (!claim) throw new Error(`No such unsigned mandate; this household has ${claims.length}`);
     if (householdOfMandate(claim.id) !== session.household) throw new Error('Mandate ceremony unavailable');
     return { household: session.household, principal: session.principal, claim };
   }
+
   return {
     /** What the device is being asked to sign, and the options to sign it with. */
-    prepare(token: string) {
-      const { principal, claim } = held(token);
+    prepare(token: string, id?: string) {
+      const { principal, claim } = held(token, id);
       return {
         mandate: claim,
         publicKey: {
@@ -47,12 +48,15 @@ export function openMandateCeremony(r: ReturnType<typeof memberRuntime>, policy:
       };
     },
     /**
-     * Record the claim as it stands. The engine verifies the assertion against
-     * the household's own key, which is the key the identifier names, so a
-     * submission signed by anything else is refused there rather than here.
+     * Record the claim as it stands, which is the only thing a claim is for:
+     * the engine takes a submission as the claim only when its bytes are the
+     * claim's, so nothing here can quietly sign different terms. It verifies
+     * the assertion against the household's own key, which is the key the
+     * identifier names, so a submission signed by anything else is refused
+     * there rather than here.
      */
-    submit(token: string, assertion: Assertion) {
-      const { household, claim } = held(token);
+    submit(token: string, assertion: Assertion, id?: string) {
+      const { household, claim } = held(token, id);
       return r.engine.mandates.record({
         mandate: claim,
         signatures: {},

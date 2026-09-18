@@ -68,10 +68,11 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
       // beside the statement ceremony because it is the same shape: the device
       // is shown what it is agreeing to, and the engine verifies the assertion.
       if(mandate){
-       if(action==='mandate-submit'&&(!inputBody||typeof inputBody!=='object'||Object.keys(inputBody).join(',')!=='assertion'))throw new Error('Invalid assertion');
-       if(action==='mandate-prepare'&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).length))throw new Error('Invalid request');
+       if(action==='mandate-submit'&&(!inputBody||typeof inputBody!=='object'||!['assertion','assertion,mandate'].includes(Object.keys(inputBody).sort().join(','))))throw new Error('Invalid assertion');
+       if(action==='mandate-prepare'&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||!['','mandate'].includes(Object.keys(inputBody).join(','))))throw new Error('Invalid request');
        const ceremony=openMandateCeremony(r,{rpID:c.rpID});
-       const value=action==='mandate-prepare'?ceremony.prepare(token):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion);
+       const named=(inputBody as {mandate?:unknown}).mandate;if(named!==undefined&&typeof named!=='string')throw new Error('Invalid mandate');
+       const value=action==='mandate-prepare'?ceremony.prepare(token,named):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion,named);
        return {status:200,body:JSON.stringify(value)};
       }
       const api=openStatementAuthorisations(r,{environment:c.environment,origin:c.origin,rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs,maxSessionLifetimeMs:c.maxSessionLifetimeMs,engine:r.engine.config,now});

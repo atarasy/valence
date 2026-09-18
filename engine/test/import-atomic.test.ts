@@ -33,7 +33,9 @@ function host(store: Store) {
     handle(new Request(`https://unit.example/households/${household}/import`, { method: "POST", body: JSON.stringify(body) }));
   const holds = () => ({
     offer: (engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1"),
-    mandate: engine.mandates.forHousehold(H).length > 0,
+    // §14.2, question 56. A move writes a claim, so this is what the body left
+    // behind rather than a mandate the household holds.
+    mandate: engine.mandates.claimsFor(H).length > 0,
     collection: engine.recoveries.for("o-1") !== undefined,
     delivery: deliveries.forHousehold(["o-1"]).length > 0,
   });

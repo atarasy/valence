@@ -99,7 +99,15 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect(awaiting.awaitingSignature).toBe(true);
   const toSign=await (await send('/member/mandates/prepare',{},before)).json();
   expect(toSign.mandate.id).toBe(awaiting.mandate);
-  expect((await send('/member/mandates/submit',{assertion:assertionFor(key,toSign.publicKey.challenge,c,3)},before)).status).toBe(200);
+  // A stranger's claim beside it does not stop the ceremony: the count is not
+  // the household's to control, so the one being signed can be named.
+  await unit.run(s=>memberRuntime(s,c).engine.mandates.importMandate({...toSign.mandate,id:toSign.mandate.household+'.squatted',ceiling_out_of_network:9_999_999}));
+  expect((await send('/member/mandates/prepare',{},before)).status).toBe(404);
+  const named=await (await send('/member/mandates/prepare',{mandate:awaiting.mandate},before)).json();
+  expect(named.mandate.id).toBe(awaiting.mandate);
+  expect((await send('/member/mandates/submit',{assertion:assertionFor(key,named.publicKey.challenge,c,3),mandate:awaiting.mandate},before)).status).toBe(200);
+  // And the squatted claim did nothing at any point: the household presents.
+  expect(await unit.run(s=>memberRuntime(s,c).engine.mandates.claimsFor(toSign.mandate.household).length)).toBe(1);
   const statement=await unit.run(s=>prepareStatementAcceptance(s,c)) as {household:string;mandate:string;offer:string;presenter:string};
   expect((await send('/auth/enrollment/verify',{id:lateFlow.id,response:late.register(lateFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
   expect(await unit.run(s=>s.map('member_passkeys').has(late.id))).toBe(false);

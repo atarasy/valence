@@ -320,8 +320,8 @@ describe("§16.1: a mandate does not change hands", () => {
     });
     expect(taken.status).toBe(422);
     expect(await taken.json()).toMatchObject({ error: "name_is_not_the_key" });
-    expect(h.engine.mandates.forHousehold(VICTIM.household).map((m) => m.id)).toEqual([M_VICTIM]);
-    expect(h.engine.mandates.forHousehold(ATTACKER.household)).toEqual([]);
+    expect(h.engine.mandates.claimsFor(VICTIM.household).map((m) => m.id)).toEqual([M_VICTIM]);
+    expect(h.engine.mandates.claimsFor(ATTACKER.household)).toEqual([]);
   });
 
   test("a held row under an id of this household's still refuses a change of hands", async () => {
