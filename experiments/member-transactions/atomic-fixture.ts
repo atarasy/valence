@@ -9,6 +9,7 @@ import { canonicalStatement, statementLines } from '../../engine/src/shared/stat
 import { MANDATE_PAIR, MERCHANT_PAIR, PRESENTER_PAIR, PHYSICAL, disclosureFor, signConfig } from '../../engine/test/helpers.ts';
 import { nameOf } from '../../engine/src/common/names.ts';
 import { openAtomicStore } from './atomic-store.ts';
+import { canonicalMandate } from '../../engine/src/hub/mandates.ts';
 
 // §13.2, question 55. A household's identifier is the name of its key and a
 // mandate's is that identifier with a label, so the fixture derives both from
@@ -27,6 +28,24 @@ export function localRuntime(store: Store) {
   engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
   return { engine, ledger, deliveries };
 }
+/**
+ * Record a mandate the way §16.1 asks for it, with the household's own
+ * signature over the canonical bytes. The pair is the household's, because
+ * question 55 made the household the name of that key.
+ */
+export function recordFixtureMandate(
+  engine: ValenceEngine,
+  pair: typeof MANDATE_PAIR,
+  terms: Omit<Parameters<typeof engine.mandates.record>[0]['mandate'], 'id' | 'household'>,
+) {
+  const mandate = { ...terms, id: mandateOf(pair), household: houseOf(pair) } as Parameters<typeof engine.mandates.record>[0]['mandate'];
+  const bytes = canonicalMandate(mandate);
+  const signatures: Record<string, string> = {
+    [houseOf(pair)]: sign(pair.privateKey.asymmetricKeyType === 'ed25519' ? null : 'sha256', bytes, pair.privateKey).toString('base64'),
+  };
+  return engine.mandates.record({ mandate, signatures, assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: 'unit.example' });
+}
+
 export async function seedAtomicFixture(path: string, count = 1, ceiling: number | null = null, mandatePair = MANDATE_PAIR): Promise<FixtureStatement[]> {
   const unit = openAtomicStore(path, atomicScope);
   try { return await unit.run(async store => {
@@ -34,8 +53,10 @@ export async function seedAtomicFixture(path: string, count = 1, ceiling: number
     for (const [id, pair] of [['merchant-1', PRESENTER_PAIR], ['maker-a', MERCHANT_PAIR], [houseOf(mandatePair), mandatePair]] as const) engine.registerIdentity(id, pair.publicKey.export({ type: 'spki', format: 'pem' }).toString());
     const config = { version: 'atomic-cfg', presenter: 'merchant-1', products: Object.fromEntries(Array.from({ length: count }, (_, i) => ['tea-' + i, { merchant: 'maker-a', maker: 'made-by-tea', ships: 'carrier-a', price: 1200, physical: { ...PHYSICAL, keeps_for_days: 10000 } }])) };
     engine.registerConfig(config, signConfig(config)); engine.putDisclosure(disclosureFor('maker-a'));
-    // Trusted fixture import, not a member provisioning or mandate-change ceremony.
-    engine.mandates.importMandate({ id: mandateOf(mandatePair), household: houseOf(mandatePair), ceiling_out_of_network: 10000, ceiling_daily: ceiling, cooling_seconds: null, co_signers: [], lapses_at: fixtureTime + 10000000, version: 1 });
+    // §16.1, question 56. The fixture signs its own mandate rather than
+    // importing one. An import writes a claim now, which no offer can name, and
+    // a fixture that skipped the ceremony would be hiding the ceremony.
+    recordFixtureMandate(engine, mandatePair, { ceiling_out_of_network: 10000, ceiling_daily: ceiling, cooling_seconds: null, co_signers: [], lapses_at: fixtureTime + 10000000, version: 1 });
     const offers = [];
     for (let i = 0; i < count; i++) {
       const offer = engine.createOffer({ binding: 'physical', household: houseOf(mandatePair), purpose: 'replenish', config_version: config.version, expires_at: fixtureTime + 3600000, mandate: mandateOf(mandatePair), price_band: null, giver: null, candidates: [{ product: 'tea-' + i, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }] });

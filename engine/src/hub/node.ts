@@ -239,7 +239,14 @@ export function exportNode(
       .filter((r): r is Recovery => r !== undefined),
     confirmations: engine.confirmationsFor(offers.map((o) => o.id)),
     ...permissions.exportFor(household),
-    mandates: mandates.forHousehold(household),
+    // §14.2, question 56. The signed rows and the claims together, because the
+    // export is the record of what this household has and an offer that moved
+    // with its mandate needs that mandate in the next export or the archive is
+    // invalid. They are not marked apart, and nothing downstream could verify
+    // the difference in any case: every mandate row arrives at the next host as
+    // a claim, whichever it was here, which is what makes the semantics uniform
+    // rather than a thing a relay can lie about.
+    mandates: [...mandates.forHousehold(household), ...mandates.claimsFor(household)],
     deliveries: deliveries.forHousehold(offers.map((o) => o.id)),
   };
 }

@@ -6,6 +6,7 @@ import {openPostgresMemberHTTP} from './http.ts';
 import {memberRuntime} from './runtime.ts';
 import {registerPresenter} from './presenter-http.ts';
 import {canonicalConfig} from '../../engine/src/engine/offers.ts';
+import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
 import {houseOf,mandateOf} from '../member-transactions/atomic-fixture.ts';
 import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
 import type {MemberRuntimeConfig} from './config.ts';
@@ -35,7 +36,12 @@ async function setup(){
  const identity:Identity={id:'presenter_'+randomUUID().replaceAll('-',''),environment:'test',origin:config.origin,epoch:1};ids.push(identity.id);await initialiseDeployment(pool,identity);
  const app=await openPostgresMemberHTTP(pool,identity,config),unit=postgresStore(pool,identity);
  const a=shop('a'),b=shop('b');
- await unit.run(store=>{memberRuntime(store,config).engine.mandates.importMandate({id:MANDATE,household:HOUSE,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:Date.now()+86_400_000*7,version:1});});
+ // §16.1, question 56. An import writes a claim now, which no offer can name,
+ // so the fixture signs its own mandate with the household's key.
+ await unit.run(store=>{const e=memberRuntime(store,config).engine;
+  e.registerIdentity(HOUSE,HOUSEHOLD_PAIR.publicKey.export({type:'spki',format:'pem'}).toString());
+  const mandate={id:MANDATE,household:HOUSE,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:Date.now()+86_400_000*7,version:1};
+  e.mandates.record({mandate,signatures:{[HOUSE]:sign(null,canonicalMandate(mandate),HOUSEHOLD_PAIR.privateKey).toString('base64')},assertions:{},keyOf:(k:string)=>e.publicKeyFor(k),relyingPartyId:config.rpID});});
  // One registration per unit, as the operator command does: a unit opens each record namespace once.
  const register=(s:ReturnType<typeof shop>)=>unit.run(store=>registerPresenter(memberRuntime(store,config),{presenter:s.presenter.id,presenterKey:pem(s.presenter.pair),merchant:s.merchant.id,merchantKey:pem(s.merchant.pair),at:Date.now()}).token);
  const tokenA=await register(a),tokenB=await register(b);

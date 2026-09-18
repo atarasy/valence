@@ -107,14 +107,12 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  else if(household!==nameOf(createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString()))throw new AcceptanceError('Acceptance household is not this credential');
  const mandate=household+'.1';
  r.engine.registerIdentity(household,createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
- // **Nobody signed this mandate.** §16.1's signed route is `record`; this is
- // `importMandate`, which checks no signature, name or version, and the
- // household is now the real name of a real key, so what it writes is a
- // version 1 the key's holder never agreed to and can only ever build a
- // version 2 on top of. Named by a refutation pass on 2026-09-16 and open as
- // the second half of question 56. The fix is for the device to record its own
- // mandate with an assertion, which `record` already accepts and this service
- // has no route for.
+ // §16.1 and §14.2, question 56, decided 2026-09-18. **Nobody signs a mandate
+ // here.** This step writes it as a claim, which is what an import writes, and
+ // the device signs it through `/member/mandates/prepare` and `/submit` with
+ // the passkey the household is named after. Until then no offer can name it,
+ // so this step writes the claim and stops; run it again once the device has
+ // signed and it presents the box.
  //
  // The ceiling below is one box's price. **It bounds nothing on this service**,
  // because `memberRuntime` supplies no registry and the engine then reads every
@@ -124,8 +122,11 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  // anything here. The other three fields are the widest the shape allows and
  // are not narrowed: a cooling window would stop the acceptance settling, a
  // daily ceiling would stop the second box, and a co-signer is a key nobody
- // holds. What contains this is that it is a development deployment.
- r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:ACCEPTANCE_PRICE,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
+ // holds. **What the device signs is what it can read before it signs.**
+ if(!r.engine.mandates.get(mandate)){
+  r.engine.mandates.importMandate({id:mandate,household,ceiling_out_of_network:ACCEPTANCE_PRICE,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:at+7*DAY_MS,version:1});
+  return {household,mandate,awaitingSignature:true as const};
+ }
  const box=await presentBox(r,household,mandate,at);
  // Changing grants revokes the device's current session; it signs in again afterwards.
  r.authority.setPresenterGrants(value.principal,[box.presenter]);

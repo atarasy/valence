@@ -33,7 +33,9 @@ function host(store: Store) {
     handle(new Request(`https://unit.example/households/${household}/import`, { method: "POST", body: JSON.stringify(body) }));
   const holds = () => ({
     offer: (engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1"),
-    mandate: engine.mandates.forHousehold(H).length > 0,
+    // §14.2, question 56. A move writes a claim, so this is what the body left
+    // behind rather than a mandate the household holds.
+    mandate: engine.mandates.claimsFor(H).length > 0,
     collection: engine.recoveries.for("o-1") !== undefined,
     delivery: deliveries.forHousehold(["o-1"]).length > 0,
   });
@@ -42,7 +44,7 @@ function host(store: Store) {
   return { post, holds, receipts };
 }
 
-const offer = { id: "o-1", household: H, mandate: `${H}.1`, candidates: [{ id: "c-1" }] };
+const offer = { id: "o-1", household: H, mandate: `${H}.1`, state: "settled", candidates: [{ id: "c-1", valence: "kept" }] };
 const node = (extra: Record<string, unknown>) => ({
   format: "valence-node/6",
   offers: [offer],
@@ -101,7 +103,7 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       const engine = new ValenceEngine(new InMemoryLedger(), {
         explorationRate: 0.2, reminderLimit: 1, recoveryGraceDays: 3, relyingPartyId: "unit.example",
       }, open());
-      const twice = [offer, { ...offer, candidates: [{ id: "c-2" }] }] as unknown as Parameters<typeof engine.checkImport>[0];
+      const twice = [offer, { ...offer, candidates: [{ id: "c-2", valence: "offered" }] }] as unknown as Parameters<typeof engine.checkImport>[0];
       expect(() => engine.checkImport(twice, H, [])).toThrow(/already here/);
       expect(() => engine.checkImport([offer] as unknown as typeof twice, H, [])).not.toThrow();
     });
@@ -112,7 +114,7 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
       const { post, holds } = host(open());
       // The second copy carries a candidate of its own, or the shared candidate
       // identifier refuses it first and the offer check is never reached.
-      const r = await post(H, node({ offers: [offer, { ...offer, candidates: [{ id: "c-2" }] }] }));
+      const r = await post(H, node({ offers: [offer, { ...offer, candidates: [{ id: "c-2", valence: "offered" }] }] }));
       expect(r.status).toBe(409);
       expect(holds()).toEqual(nothing);
     });

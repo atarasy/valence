@@ -4,7 +4,7 @@ import { badRequest, conflict, notFound, unprocessable } from "../common/errors.
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
-import { canonicalStatement, disputable, needsStatement, statementLines } from "../shared/statement.js";
+import { canonicalStatement, disputable, needsStatement, owesSettlement, statementLines } from "../shared/statement.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -1349,6 +1349,21 @@ export class ValenceEngine {
     // that moves money, the household had been charged by a settlement that
     // does not exist. Found by a refutation pass on 2026-09-12; the reserve
     // stays held on refusal, which is what the person's authorisation is for.
+    // Question 57: money moves at the host that holds its reserve, and that
+    // includes a settlement of nothing. `present` reserves every offer, so an
+    // offer this ledger has no row for arrived by a move, and its reserve is
+    // at the host it came from. Settling it here as well wrote a second
+    // settlement with a second receipt for one offer, and the two hosts then
+    // answered `GET /offers/{id}/settlement` differently. Found by the fifth
+    // refutation pass on 2026-09-19: an expired offer with every line returned
+    // travels, and was settled at 0 at both hosts. `commit` already refused a
+    // charge here; this refuses the zero as well, before anything is read.
+    // The Meter adapter keeps its holds in memory, so after a restart it
+    // refuses here what it already refused at `commit`.
+    if (!this.ledger.get(offer.id)) {
+      throw conflict("no_reservation", `no reservation for ${offer.id} on this host; it settles where it was presented`);
+    }
+
     if (mandate?.ceiling_daily != null) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
@@ -1368,7 +1383,7 @@ export class ValenceEngine {
     // records are the same event.
     if (charged > 0) {
       await this.ledger.commit({ requestId: offer.id, amount: charged });
-    } else if (this.ledger.get(offer.id)) {
+    } else {
       await this.ledger.release({ requestId: offer.id, reason: "nothing_kept" });
     }
 
@@ -1789,6 +1804,40 @@ export class ValenceEngine {
         "bad_state",
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
+    }
+    // §14.2 and §6.4, question 57, decided 2026-09-18. **Money moves at the host
+    // that holds the reserve.** The import route leaves such an offer behind and
+    // names it; this refuses it where something writes one here directly. An offer arriving at `drafted`
+    // or `presented` has no reservation on this host's ledger, and measured on
+    // the reference the day it was decided, the import took one at `presented`
+    // with a `201` and no reserve behind it. §6.4 makes the reserve the upper
+    // bound of what an offer may settle at, so an offer that can still be
+    // decided and has no reserve is one whose upper bound this ledger has
+    // never seen; what stops it charging here is `commit` refusing with
+    // `no_reservation`, which is the ledger's answer and not this
+    // specification's, and another adapter may answer differently.
+    //
+    // **The cost is that a proposal in flight is lost by a move**, which the
+    // presenter can make again at the host the household arrived at. The other
+    // shape considered was presenting it again on arrival, which would reserve
+    // here and run the checks a presentation runs; it was refused because
+    // arrival would then change the offer, and a move could fail on a rule
+    // about an offer the household never made, §5.1's being the plain case.
+    if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided" ||
+      (offer.state === "expired" && owesSettlement(offer))) {
+      throw conflict(
+        "bad_state",
+        `offer ${offer.id} is ${offer.state}, and its money moves at the host that holds its reserve`
+      );
+    }
+    // A candidate that arrives without a verdict reads as one already decided
+    // (`valence !== "offered"`), so the offer could never be decided again and
+    // its lines settle at nothing. Measured the same day, on a body the shape
+    // check accepted.
+    for (const c of offer.candidates) {
+      if (typeof c.valence !== "string" || !c.valence) {
+        throw unprocessable("malformed", `candidate ${c.id} arrived with no verdict`);
+      }
     }
     this.assertCandidateIdentifiers(offer, carrying?.candidates);
   }

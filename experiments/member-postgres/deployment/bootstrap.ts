@@ -1,4 +1,5 @@
 import { migrateDatabase } from '../migrate.ts';
+import {DEPLOYMENT_ID} from './identity.ts';
 import { createPool,initialiseDeployment } from '../store.ts';
 import { openPostgresMemberHTTP } from '../http.ts';
 import type { MemberRuntimeConfig } from '../config.ts';
@@ -8,7 +9,7 @@ if(process.env.NEON_PROJECT_ID!=='young-pond-73223516'||!process.env.DATABASE_UR
 await migrateDatabase(process.env.DATABASE_URL_UNPOOLED);
 const pool=createPool(process.env.DATABASE_URL_UNPOOLED),c=config as MemberRuntimeConfig;
 try{
- const identity={id:'atarasy_api_dev',environment:c.environment,origin:c.origin,epoch:1};
+ const identity={id:DEPLOYMENT_ID,environment:c.environment,origin:c.origin,epoch:1};
  await initialiseDeployment(pool,identity);await openPostgresMemberHTTP(pool,identity,c);
  console.log('Atarasy development schema and runtime identity initialised; no member fixtures provisioned');
 }finally{await pool.end();}

@@ -27,15 +27,23 @@ test('HTTP writes and fresh reads share persistent candidate lookup', async () =
   expect((await s.app.fetch(s.request(`/candidates/${candidate}/note`, { author: HOUSE, text: 'Again' }))).status).toBe(409);
 });
 test('router error rolls back an earlier successful import prefix', async () => {
-  const s = await setup(), other = structuredClone(s.offer); other.id = 'import-prefix'; other.candidates[0]!.id = 'imported-candidate';
+  // §14.2 and §6.4, question 57. Both offers are copies in a state a move
+  // carries (withdrawn: no money left to move, and no settlement row the
+  // archive would then require), so the held one reaches the rule under test
+  // instead of being left behind.
+  const s = await setup(), other = structuredClone(s.offer); other.id = 'import-prefix'; other.candidates[0]!.id = 'imported-candidate'; other.state = 'withdrawn';
+  const held = { ...structuredClone(s.offer), state: 'withdrawn' };
   const archive = await (await s.app.fetch(s.request(`/households/${encodeURIComponent(HOUSE)}/export`))).json();
-  const response = await s.app.fetch(s.request(`/households/${encodeURIComponent(HOUSE)}/import`, { ...archive, offers: [other, s.offer], collections: [{ ...archive.collections[0], offer: other.id, consumed: [other.candidates[0]!.id] }, ...archive.collections] }));
+  const response = await s.app.fetch(s.request(`/households/${encodeURIComponent(HOUSE)}/import`, { ...archive, offers: [other, held], collections: [{ ...archive.collections[0], offer: other.id, consumed: [other.candidates[0]!.id] }, ...archive.collections] }));
   expect(response.status).toBe(409);
   expect(await s.unit.run(store => { try { localRuntime(store).engine.mustGet(other.id, fixtureTime); return true; } catch { return false; } })).toBe(false);
 });
 test('GET expiry writes commit through the same boundary', async () => {
   const s = await setup(), expired = structuredClone(s.offer); expired.id = 'expired-read'; expired.binding = 'digital'; expired.state = 'presented'; expired.expires_at = Date.now() - 1000; expired.candidates[0]!.id = 'expiry-candidate'; expired.candidates[0]!.valence = 'offered';
-  await s.unit.run(store => localRuntime(store).engine.importOffer(expired, HOUSE));
+  // §14.2, question 57. An import no longer carries an offer still in
+  // progress, and this fixture wants one that is: it is planted as the store
+  // holds it rather than routed through the import.
+  await s.unit.run(store => { store.map<typeof expired>('offers').set(expired.id, expired); });
   expect((await s.app.fetch(s.request('/offers/expired-read'))).status).toBe(200);
   const stored = await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.query("SELECT v FROM atomic_rows WHERE namespace='offers' AND k='expired-read'").get()) as { v: string };
   expect(JSON.parse(stored.v)).toMatchObject({ state: 'expired', candidates: [{ valence: 'returned' }] });

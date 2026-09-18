@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStatementAuthorisations, AUTHORISATION_PROFILE } from './statement-authorisation.ts';
 import { openAtomicStore } from './atomic-store.ts';
-import { atomicScope, fixtureTime } from './atomic-fixture.ts';
+import { atomicScope, fixtureTime, recordFixtureMandate } from './atomic-fixture.ts';
 import { seedUnified, unifiedRuntime, inspectUnified, loginResponse } from './unified-fixture.ts';
 import { databaseFor } from './shared-database.ts';
 import { verifyAssertion } from '../../engine/src/shared/decisions.ts';
@@ -68,7 +68,7 @@ test('wrong scope credential type challenge presence verification or signing key
 });
 test('changed displayed mandate invalidates the review even with unchanged canonical bytes', async () => {
   const s = await setup(), prepared = await s.prepare(), response = assertion(s, prepared);
-  await s.unit.run((store, db) => { const r = unifiedRuntime(store, db), m = r.engine.mandates.get(s.input.mandate)!; r.engine.mandates.importMandate({ ...m, ceiling_daily: 5000, version: m.version + 1 }); });
+  await s.unit.run((store, db) => { const r = unifiedRuntime(store, db), m = r.engine.mandates.get(s.input.mandate)!; recordFixtureMandate(r.engine, s.pair, { ...m, ceiling_daily: 5000, version: m.version + 1 }); });
   await expect(s.service.verify(s.input.token, prepared.operationID, response)).rejects.toThrow('Review changed');
   expect((await s.inspect()).counter).toBe(1);
 });
@@ -213,7 +213,7 @@ test('accepted approval does not bypass fresh review expiry or revoked access at
   for (const mode of ['review', 'expiry', 'revocation']) {
     const s = await setup(), p = await s.prepare(), proof = assertion(s, p);
     await s.service.verify(s.input.token, p.operationID, proof);
-    if (mode === 'review') await s.unit.run((store, db) => { const r = unifiedRuntime(store, db), m = r.engine.mandates.get(s.input.mandate)!; r.engine.mandates.importMandate({ ...m, ceiling_daily: 5000, version: m.version + 1 }); });
+    if (mode === 'review') await s.unit.run((store, db) => { const r = unifiedRuntime(store, db), m = r.engine.mandates.get(s.input.mandate)!; recordFixtureMandate(r.engine, s.pair, { ...m, ceiling_daily: 5000, version: m.version + 1 }); });
     if (mode === 'expiry') s.clock.at += 6000;
     if (mode === 'revocation') await s.unit.run((store, db) => unifiedRuntime(store, db).authority.revokeCredential(s.input.credential));
     await expect(s.service.settle(s.input.token, p.operationID, proof)).rejects.toThrow();

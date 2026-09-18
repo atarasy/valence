@@ -457,27 +457,30 @@ describe("§6.5, §14.2: a move carries what the route found", () => {
    * merchant's export carried the rows all along, so the shop kept what the
    * person lost.
    */
-  test("without the rows the block lifts, and with them it holds", async () => {
+  test("a box whose statement is still owed stays at its host, and the block is per host", async () => {
+    // §14.2 and §6.4, question 57, decided 2026-09-18 and rebuilt 2026-09-19.
+    // This test used to carry the block across a move, because a refutation
+    // pass on 2026-09-12 found the move lifted it. A third pass on question 57
+    // then measured the other half: the box moved, the household's statement
+    // was refused `no_reservation` at the new host, and **that presenter's next
+    // box was refused there for good**, because the one act that lifts the
+    // block could not succeed where there was no reserve. So what still has
+    // money to move stays where its reserve is, and the block with it.
     const madeFirst = makeEngine();
     const first = madeFirst.engine;
     const offer = await collected(madeFirst, HOUSEHOLD);
-    // The sending host blocks the next box.
     const next = first.createOffer(physical(HOUSEHOLD, [{ product: "nori-a" }, { product: "coffee-a" }]));
     await expect(first.present(next.id)).rejects.toMatchObject({ code: "statement_unsigned" });
 
-    // A move that carries the offers and not the collections: the receiving
-    // host has the `consumed` valences and no record of a collection.
-    const { engine: blind } = makeEngine();
-    blind.importOffer(first.mustGet(offer.id), HOUSEHOLD);
-    const atBlind = blind.createOffer(physical(HOUSEHOLD, [{ product: "nori-a" }, { product: "coffee-a" }]));
-    expect((await blind.present(atBlind.id)).state).toBe("presented");
-
-    // The same move carrying them.
+    // The box does not move: its statement is owed and its reserve is here.
     const { engine: second } = makeEngine();
-    second.importOffer(first.mustGet(offer.id), HOUSEHOLD);
-    second.recoveries.importRows([first.recoveries.for(offer.id)!]);
+    expect(() => second.importOffer(first.mustGet(offer.id), HOUSEHOLD))
+      .toThrow(expect.objectContaining({ code: "bad_state" }));
+
+    // **The cost, stated**: the block is per host, so the new host presents the
+    // next box while the old host still waits for the statement.
     const atSecond = second.createOffer(physical(HOUSEHOLD, [{ product: "nori-a" }, { product: "coffee-a" }]));
-    await expect(second.present(atSecond.id)).rejects.toMatchObject({ code: "statement_unsigned" });
+    expect((await second.present(atSecond.id)).state).toBe("presented");
   });
 
   test("an import never replaces a row this host already holds", async () => {

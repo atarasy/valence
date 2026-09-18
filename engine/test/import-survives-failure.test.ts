@@ -40,7 +40,7 @@ function host(store: Store) {
 
 const node = {
   format: "valence-node/6",
-  offers: [{ id: "o-1", household: H, mandate: `${H}.1`, candidates: [{ id: "c-1" }] }],
+  offers: [{ id: "o-1", household: H, mandate: `${H}.1`, state: "settled", candidates: [{ id: "c-1", valence: "kept" }] }],
   notes: [{ candidate: "c-1", author: "a", text: "t", shared_with: [], created_at: 1 }],
   collections: [{ offer: "o-1", due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} }],
   mandates: [{ id: `${H}.1`, household: H, ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }],
@@ -77,7 +77,10 @@ describe("§14.2, question 53: an accepted import that fails partway leaves noth
     const again = host(reopened);
     expect((again.engine as unknown as { offers: Map<string, unknown> }).offers.has("o-1")).toBe(true);
     expect(again.engine.notesFor("c-1").length).toBe(1);
-    expect(again.engine.mandates.get(`${H}.1`)).toBeDefined();
+    // §14.2, question 56. A mandate that arrives by a move is a claim until the
+    // household signs it here, so the row this reads back is the claim, and the
+    // property under test is that the whole move survived the failure.
+    expect(again.engine.mandates.claimFor(`${H}.1`)).toBeDefined();
     expect(again.deliveries.forHousehold(["o-1"]).length).toBe(1);
     reopened.close();
   });

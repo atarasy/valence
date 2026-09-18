@@ -17,6 +17,10 @@ async function fixture() {
   const offer = await unit.run(store => localRuntime(store).engine.mustGet(statement!.offer, fixtureTime));
   return { file, unit, offer, candidate: offer.candidates[0]!.id };
 }
+// §14.2 and §6.4, question 57. An import carries what has finished moving
+// money, and these tests are about what a fresh runtime reconstructs rather
+// than about a move, so the copy they import is one a move would carry.
+function settledCopy<T extends { state: string }>(offer: T): T { return { ...structuredClone(offer), state: 'settled' }; }
 function signedEdge(store: Store) {
   const { engine } = localRuntime(store), pair = generateKeyPairSync('ed25519');
   engine.registerIdentity('giver', pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(), true);
@@ -44,7 +48,7 @@ test('imported offers notes edges and explicit receipt references survive recons
   const target = openAtomicStore(path(), atomicScope); cleanup.push(() => target.close());
   await target.run(store => {
     const e = localRuntime(store).engine;
-    e.importOffer(s.offer, HOUSE); e.importNote({ candidate: s.candidate, author: 'previous-author', text: 'Moved note', shared_with: [], created_at: fixtureTime }); e.registerIdentity('giver', accepted.key, true); e.importEdge(accepted.edge, 'recipient');
+    e.importOffer(settledCopy(s.offer), HOUSE); e.importNote({ candidate: s.candidate, author: 'previous-author', text: 'Moved note', shared_with: [], created_at: fixtureTime }); e.registerIdentity('giver', accepted.key, true); e.importEdge(accepted.edge, 'recipient');
     expect(e.receiptsFor('recipient')).toEqual([]);
     const rows = structuredClone(accepted.receipts); e.importReceipts('recipient', rows); rows[0]!.ref = 'caller-mutated';
   });
@@ -59,7 +63,7 @@ test('ambiguous candidate imports fail before adding an offer or changing existi
     if (within) { other.candidates[0]!.id = 'new-candidate'; other.candidates.push(structuredClone(other.candidates[0]!)); }
     await s.unit.run(store => {
       const e = localRuntime(store).engine;
-      expect(() => e.importOffer(other, HOUSE)).toThrow('unambiguous');
+      expect(() => e.importOffer(settledCopy(other), HOUSE)).toThrow('unambiguous');
       expect(() => e.mustGet(other.id, fixtureTime)).toThrow();
     });
   }
@@ -78,7 +82,7 @@ test('receipt write failure rolls back signed lineage and its identity registrat
 });
 test('ordinary store reopen preserves exact receipts and imported candidate lookup', async () => {
   const s = await fixture(), file = path(), first = openStore(file);
-  const e = localRuntime(first).engine; e.importOffer(s.offer, HOUSE); e.importReceipts(HOUSE, [{ ref: 'exported-opaque-reference', at: fixtureTime }]); first.close();
+  const e = localRuntime(first).engine; e.importOffer(settledCopy(s.offer), HOUSE); e.importReceipts(HOUSE, [{ ref: 'exported-opaque-reference', at: fixtureTime }]); first.close();
   const second = openStore(file); try {
     const reopened = localRuntime(second).engine;
     expect(reopened.receiptsFor(HOUSE)).toEqual([{ ref: 'exported-opaque-reference', at: fixtureTime }]);

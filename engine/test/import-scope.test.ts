@@ -51,7 +51,9 @@ const mandate = (household: string, over: Record<string, unknown> = {}) => ({
   cooling_seconds: 3600, lapses_at: 9e15, version: 3, ...over,
 });
 // §13.2, question 55. An export always carries a mandate, and its identifier is the household's.
-const offer = (id: string, household: string) => ({ id, household, mandate: `${household}.1`, candidates: [{ id: `${id}-c` }] });
+// §14.2, question 57. A move carries what has finished moving money, so an
+// arriving offer here is settled and its candidates carry a verdict.
+const offer = (id: string, household: string) => ({ id, household, mandate: `${household}.1`, state: "settled", candidates: [{ id: `${id}-c`, valence: "kept" }] });
 const collection = (id: string) => ({ offer: id, due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} });
 
 describe("§14.2: an import writes only its own household's rows", () => {
@@ -62,7 +64,7 @@ describe("§14.2: an import writes only its own household's rows", () => {
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household)] })).status).toBe(201);
     const r = await h.post(ATTACKER.household, { mandates: [mandate(VICTIM.household, { ceiling_out_of_network: 1e12, co_signers: [], cooling_seconds: null, version: 1 })] });
     expect(r.status).toBe(422);
-    expect(h.engine.mandates.get(M_VICTIM)).toMatchObject({ ceiling_out_of_network: 1000, co_signers: [CO], cooling_seconds: 3600, version: 3 });
+    expect(h.engine.mandates.claimFor(M_VICTIM)).toMatchObject({ ceiling_out_of_network: 1000, co_signers: [CO], cooling_seconds: 3600, version: 3 });
   });
 
   test("a mandate this host already holds is not replaced, even by its own household", async () => {
@@ -80,7 +82,7 @@ describe("§14.2: an import writes only its own household's rows", () => {
     for (const over of [{ co_signers: [] }, { co_signers: [CO, houseFor("cs2").household], ceiling_out_of_network: 0, lapses_at: 1, version: 9 }]) {
       const again = await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household, over)] });
       expect(again.status).toBe(201);
-      expect(h.engine.mandates.get(M_VICTIM)).toMatchObject({ co_signers: [CO], ceiling_out_of_network: 1000, version: 3 });
+      expect(h.engine.mandates.claimFor(M_VICTIM)).toMatchObject({ co_signers: [CO], ceiling_out_of_network: 1000, version: 3 });
     }
   });
 
@@ -185,6 +187,9 @@ describe("§14.2, §7.1: an imported edge", () => {
   });
 });
 
+// §14.2, question 56, decided 2026-09-18. A mandate that arrives by a move is
+// a claim until the household signs it here, so these read `claimFor` and not
+// `get`: an offer cannot name one, and that is the point of the decision.
 describe("§14.2: a mandate that arrives again", () => {
   test("unchanged, it is accepted and left as it was", async () => {
     // NOTE (mutation check, 2026-09-15): import_mandate_identical_refused. The
@@ -194,7 +199,7 @@ describe("§14.2: a mandate that arrives again", () => {
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household)] })).status).toBe(201);
     const reordered = Object.fromEntries(Object.entries(mandate(VICTIM.household)).reverse());
     expect((await h.post(VICTIM.household, { mandates: [reordered] })).status).toBe(201);
-    expect(h.engine.mandates.get(M_VICTIM)?.co_signers).toEqual([CO]);
+    expect(h.engine.mandates.claimFor(M_VICTIM)?.co_signers).toEqual([CO]);
   });
 });
 
@@ -262,7 +267,7 @@ describe("§14.2, §16.1: mandates that arrive by a move", () => {
     const h = host();
     const r = await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household, { ceiling_out_of_network: 10, version: 5 }), mandate(VICTIM.household, { ceiling_out_of_network: 1e9, co_signers: [], version: 6 })] });
     expect(r.status).toBe(400);
-    expect(h.engine.mandates.get(M_VICTIM)).toBeUndefined();
+    expect(h.engine.mandates.claimFor(M_VICTIM)).toBeUndefined();
   });
 
   test("a lapse that is not a number is refused", async () => {
@@ -271,7 +276,7 @@ describe("§14.2, §16.1: mandates that arrive by a move", () => {
     // lapsed.
     const h = host();
     expect((await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household, { lapses_at: "never" })] })).status).toBe(400);
-    expect(h.engine.mandates.get(M_VICTIM)).toBeUndefined();
+    expect(h.engine.mandates.claimFor(M_VICTIM)).toBeUndefined();
   });
 });
 
@@ -317,8 +322,8 @@ describe("§16.1: a mandate does not change hands", () => {
     });
     expect(taken.status).toBe(422);
     expect(await taken.json()).toMatchObject({ error: "name_is_not_the_key" });
-    expect(h.engine.mandates.forHousehold(VICTIM.household).map((m) => m.id)).toEqual([M_VICTIM]);
-    expect(h.engine.mandates.forHousehold(ATTACKER.household)).toEqual([]);
+    expect(h.engine.mandates.claimsFor(VICTIM.household).map((m) => m.id)).toEqual([M_VICTIM]);
+    expect(h.engine.mandates.claimsFor(ATTACKER.household)).toEqual([]);
   });
 
   test("a held row under an id of this household's still refuses a change of hands", async () => {
@@ -331,7 +336,7 @@ describe("§16.1: a mandate does not change hands", () => {
     h.engine.mandates.importMandate({ ...mandate(VICTIM.household), id, household: VICTIM.household } as never);
     const r = await h.post(ATTACKER.household, { mandates: [{ ...mandate(ATTACKER.household), id }] });
     expect(r.status).toBe(409);
-    expect(h.engine.mandates.get(id)?.household).toBe(VICTIM.household);
+    expect(h.engine.mandates.claimFor(id)?.household).toBe(VICTIM.household);
   });
 
   test("a mandate's numbers are whole and in range", async () => {
@@ -342,7 +347,7 @@ describe("§16.1: a mandate does not change hands", () => {
     for (const bad of [{ lapses_at: -5 }, { version: 1.5 }, { ceiling_out_of_network: null }]) {
       expect([Object.keys(bad)[0], (await h.post(VICTIM.household, { mandates: [mandate(VICTIM.household, bad)] })).status]).toEqual([Object.keys(bad)[0], 400]);
     }
-    expect(h.engine.mandates.get(M_VICTIM)).toBeUndefined();
+    expect(h.engine.mandates.claimFor(M_VICTIM)).toBeUndefined();
   });
 });
 

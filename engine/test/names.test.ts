@@ -4,6 +4,7 @@ import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, h
 import { canonicalMandate } from "../src/hub/mandates.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
 import { createApp } from "../src/http.js";
+import { exportNode } from "../src/hub/node.js";
 import { ApprovalDesk } from "../src/hub/approval.js";
 import { DeliveryRegister } from "../src/hub/delivery.js";
 import { RecoveryRegister } from "../src/hub/node.js";
@@ -145,15 +146,322 @@ describe("§13.2, question 55: a name is its key", () => {
     // one nothing proves.
     const { engine } = makeEngine();
     const elsewhere = houseFor("somebody-else").household;
-    engine.mandates.importMandate({
+    // A claim is inert and an identifier that carries a household is that
+    // household's, so the row a host running the older rule holds is a
+    // **mandate** and is planted as one: there is no route that writes it.
+    (engine.mandates as unknown as { rows: Map<string, unknown> }).rows.set(MANDATE, {
       id: MANDATE, household: elsewhere, ceiling_out_of_network: 1, co_signers: [],
       ceiling_daily: null, cooling_seconds: null, lapses_at: Date.now() + 3_600_000, version: 1,
-    } as never);
+    });
     expect(() => engine.mandates.record({
       mandate: { id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null,
         cooling_seconds: null, lapses_at: Date.now() + 3_600_000, version: 2 } as never,
       signatures: {}, assertions: {}, keyOf: () => undefined, relyingPartyId: "unit.example",
     })).toThrow(expect.objectContaining({ code: "wrong_household" }));
+  });
+});
+
+describe("§14.2, question 57: a move carries what happened", () => {
+  const arriving = (over: Record<string, unknown> = {}) => ({
+    id: "o-q57", household: HOUSEHOLD, mandate: MANDATE, state: "decided",
+    purpose: "replenish", binding: "digital", config_version: CONFIG_VERSION,
+    expires_at: Date.now() + HOUR, presenter: "merchant-1", price_band: null, giver: null,
+    disclosures: [{ merchant: "maker-a", product: null, version: "d-1" }],
+    candidates: [{ id: "c-q57", product: "tea-a", quantity: 1, unit_price: 1200, merchant: "maker-a",
+      maker: "made-by-tea", ships: "carrier-a", category: null, predicted_conversion: 0.5,
+      is_exploration: true, given_by: null, valence: "kept" }],
+    ...over,
+  });
+
+  test("an offer whose money has not finished moving stays where its reserve is", () => {
+    // NOTE (mutation check, 2026-09-19): import_takes_an_offer_in_progress.
+    // Measured when it was decided: the import took an offer at `presented`
+    // with a 201 and no reservation on the receiving ledger, and §6.4's upper
+    // bound was one that ledger had never seen. A third refutation pass then
+    // showed the same of every decided offer not yet settled.
+    const { engine } = makeEngine();
+    for (const state of ["drafted", "presented", "decided"]) {
+      expect(() => engine.importOffer(arriving({ state }) as never, HOUSEHOLD))
+        .toThrow(expect.objectContaining({ code: "bad_state" }));
+    }
+    // What has finished moving money still travels.
+    engine.importOffer(arriving({ state: "settled" }) as never, HOUSEHOLD);
+    expect(engine.mustGet("o-q57").state).toBe("settled");
+  });
+
+  test("the route leaves such an offer behind and names it, rather than refusing the move", async () => {
+    // NOTE (mutation check, 2026-09-19): import_refuses_the_whole_move. The
+    // first build refused the body, and a third pass measured that one
+    // presented offer then stopped the whole move: a household with a weekly
+    // box could not move at all.
+    const { engine } = makeEngine();
+    const handle = createApp(engine, {
+      deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(), registry: new Registry(),
+    });
+    const r = await handle(new Request(`https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/import`, {
+      method: "POST",
+      body: JSON.stringify({ format: "valence-node/6", offers: [
+        arriving({ id: "o-behind", state: "presented", candidates: [{ ...arriving().candidates[0], id: "c-behind", valence: "offered" }] }),
+        arriving({ id: "o-moves", state: "settled", candidates: [{ ...arriving().candidates[0], id: "c-moves" }] }),
+      ] }),
+    }));
+    expect(r.status).toBe(201);
+    expect(await r.json()).toEqual({ imported: true, left_behind: ["o-behind"] });
+    expect(engine.mustGet("o-moves").state).toBe("settled");
+    expect(() => engine.mustGet("o-behind")).toThrow();
+  });
+
+  test("an expired offer that still owes a settlement stays behind too", () => {
+    // NOTE (mutation check, 2026-09-19): expired_owing_travels. A fourth
+    // refutation pass measured two the first rule let travel: a digital offer
+    // kept in part and then expired, and a ceremonial offer defaulted. Each
+    // held a reserve at the host it left and could never settle where it
+    // arrived; on an adapter that commits without a reserve it was charged
+    // at both.
+    const { engine } = makeEngine();
+    for (const valence of ["kept", "defaulted", "consumed", "lost"]) {
+      expect(() => engine.importOffer(arriving({ state: "expired", candidates: [{ ...arriving().candidates[0], valence }] }) as never, HOUSEHOLD))
+        .toThrow(expect.objectContaining({ code: "bad_state" }));
+    }
+    // An expired offer with nothing to charge has finished moving money.
+    engine.importOffer(arriving({ id: "o-returned", state: "expired", binding: "digital", candidates: [{ ...arriving().candidates[0], id: "c-returned", valence: "returned" }] }) as never, HOUSEHOLD);
+    expect(engine.mustGet("o-returned").state).toBe("expired");
+  });
+
+  test("every row naming an offer left behind stays behind with it", async () => {
+    // NOTE (mutation check, 2026-09-19): left_behind_keeps_its_deliveries,
+    // left_behind_keeps_its_notes, left_behind_keeps_its_collections,
+    // left_behind_keeps_its_settlements and left_behind_keeps_its_register.
+    // A fourth pass measured that removing any one of these filters was caught
+    // by nothing, and that without the delivery filter a delivered box alone
+    // refused the whole move again: the row named an offer the body no longer
+    // carried.
+    const { engine } = makeEngine();
+    const handle = createApp(engine, {
+      deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(), registry: new Registry(),
+    });
+    const behind = arriving({ id: "o-box", state: "presented", binding: "physical", candidates: [{ ...arriving().candidates[0], id: "c-box", valence: "offered" }] });
+    const r = await handle(new Request(`https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/import`, {
+      method: "POST",
+      body: JSON.stringify({
+        format: "valence-node/6",
+        offers: [behind],
+        deliveries: [{ offer: "o-box", carriage: 550, code: "dc-box", status: "delivered", updated_at: 1 }],
+        collections: [{ offer: "o-box", due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} }],
+        settlements: [{ offer: "o-box", settled_at: 1, kept_amount: 0, consumed_amount: 0 }],
+        notes: [{ candidate: "c-box", author: HOUSEHOLD, text: "left with the box", shared_with: [], created_at: 1 }],
+        confirmations: { "o-box": ["token"] },
+      }),
+    }));
+    expect(r.status).toBe(201);
+    expect(await r.json()).toEqual({ imported: true, left_behind: ["o-box"] });
+    expect(() => engine.mustGet("o-box")).toThrow();
+    expect(engine.notesFor("c-box")).toEqual([]);
+  });
+
+  test("a set with no confirmation behind it cannot be taken back, on a row an older host holds", async () => {
+    // NOTE (mutation check, 2026-09-19): withdraw_a_set_nobody_signed. Its only
+    // probe built a decided set that arrived by a move without its register,
+    // and question 57 rebuilt made that unreachable: a decided set no longer
+    // moves. A fourth refutation pass measured the mutation caught by nothing
+    // afterwards, so the guard is reached the way this project reaches every
+    // guard the routes no longer can, by planting the row a host running the
+    // older rule would hold. An unreachable guard is one nothing proves.
+    const { engine } = makeEngine();
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: null, giver: null,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })) as never);
+    (engine as unknown as { confirmations: Map<string, string[]> }).confirmations.delete(offer.id);
+    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+  });
+
+  test("a candidate that arrives with no verdict is refused", () => {
+    // NOTE (mutation check, 2026-09-18): import_candidate_without_a_verdict.
+    // `decide` reads a candidate whose valence is not `offered` as one already
+    // decided, so a candidate arriving with none could never be decided and
+    // its line settled at nothing. Measured on a body the shape check took.
+    const { engine } = makeEngine();
+    const withNone = arriving({ state: "settled" });
+    delete (withNone.candidates[0] as { valence?: unknown }).valence;
+    expect(() => engine.importOffer(withNone as never, HOUSEHOLD))
+      .toThrow(expect.objectContaining({ code: "malformed" }));
+  });
+});
+
+describe("§14.2, question 56: a mandate that arrives by a move is a claim", () => {
+  const terms = (over: Record<string, unknown> = {}) => ({
+    id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+    cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 10 * HOUR, version: 1, ...over,
+  });
+  const offerFor = (mandate: string, product: string, household = HOUSEHOLD) => ({
+    binding: "digital" as const, household, purpose: "replenish" as const,
+    config_version: CONFIG_VERSION, expires_at: Date.now() + HOUR, mandate, price_band: null, giver: null,
+    candidates: [{ product, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+  });
+  const signedBy = (m: ReturnType<typeof terms>) => ({
+    mandate: m as never,
+    signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+    assertions: {}, keyOf: (k: string) => undefined as string | undefined, relyingPartyId: "unit.example",
+  });
+
+  test("a claim does nothing at all, and the household that has not signed has set nothing here", async () => {
+    // NOTE (mutation check, 2026-09-18): claim_is_held_for_the_household. A
+    // claim counted as a mandate this household held, so that a move would
+    // fail closed, and a refutation pass measured what that bought: **one
+    // unsigned POST froze any household on the host**, including one that held
+    // no mandate at all and had never moved. Every offer naming any label was
+    // refused, a settlement already decided could not be paid, and nothing
+    // removed a claim.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms() as never);
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
+    expect(engine.mandates.claimFor(MANDATE)).toMatchObject({ ceiling_out_of_network: 1_000_000 });
+    // It is the household's to read and to sign, and nothing else reads it.
+    expect(engine.mandates.claimsFor(HOUSEHOLD).map((m) => m.id)).toEqual([MANDATE]);
+    expect(engine.mandates.forHousehold(HOUSEHOLD)).toEqual([]);
+    // So the household is one that has set no protection here, which is what
+    // §16.2 already says of every household before its first mandate.
+    const named = engine.createOffer(offerFor(MANDATE, "tea-a") as never);
+    expect((await engine.present(named.id)).state).toBe("presented");
+  });
+
+  test("a claim that has already lapsed is not kept", () => {
+    // NOTE (mutation check, 2026-09-18): import_keeps_a_lapsed_claim. A claim
+    // that can never be signed is a row nobody can act on, and the import
+    // route's own shape check admits `lapses_at: 0` where `record` refuses it.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms({ lapses_at: 0 }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+  });
+
+  test("signing the claim itself records it at the version it carries", async () => {
+    // NOTE (mutation check, 2026-09-18): record_ignores_the_claims_version.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms({ version: 3 }) as never);
+    const keyOf = (k: string) => engine.publicKeyFor(k);
+    engine.mandates.record({ ...signedBy(terms({ version: 3 })), keyOf });
+    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 3 });
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+    const named = engine.createOffer(offerFor(MANDATE, "tea-a") as never);
+    expect((await engine.present(named.id)).state).toBe("presented");
+  });
+
+  test("a claim is an offer to sign and never a constraint", () => {
+    // NOTE (mutation check, 2026-09-18): record_takes_the_claims_version_alone.
+    // Checking the version and not the terms let a household record **its own**
+    // terms at the claim's version, which dropped the co-signers it had named
+    // where it came from: clause 47 escaped by relocation, measured 2026-09-18.
+    // Binding the claim's terms instead would let a planted row with a
+    // co-signer nobody holds freeze that identifier for ever, which is what
+    // question 56's first attempt was refused for. So the claim counts only
+    // when what is submitted is the claim itself.
+    const { engine } = makeEngine();
+    const co = houseFor("mum").household;
+    engine.mandates.importMandate(terms({ version: 3, co_signers: [co] }) as never);
+    const keyOf = (k: string) => engine.publicKeyFor(k);
+    // Anything but the claim is an ordinary record with no signed history here,
+    // so it starts at version 1. For a day the household could state any
+    // version wherever a claim was held, and a third refutation pass measured
+    // what that reopened: a raw signature is not bound to a host, so any looser
+    // version the household ever signed could be recorded over its own tighter
+    // claim. **The cost is a number and not a protection.**
+    // NOTE (mutation check, 2026-09-19): claim_lets_any_version.
+    expect(() => engine.mandates.record({ ...signedBy(terms({ version: 3, co_signers: [] })), keyOf }))
+      .toThrow(expect.objectContaining({ code: "stale_version" }));
+    engine.mandates.record({ ...signedBy(terms({ version: 1, co_signers: [] })), keyOf });
+    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 1, co_signers: [] });
+    // And the claim is gone, because the identifier now holds a mandate.
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+
+    // And with nothing held at all, a mandate still starts at version 1.
+    const fresh = makeEngine().engine;
+    expect(() => fresh.mandates.record({ ...signedBy(terms({ version: 3 })), keyOf: (k: string) => fresh.publicKeyFor(k) }))
+      .toThrow(expect.objectContaining({ code: "stale_version" }));
+  });
+
+  test("the export carries the claims beside the signed rows", () => {
+    // NOTE (mutation check, 2026-09-18): export_drops_claims. An offer that
+    // moved with its mandate names a mandate the next archive would not carry,
+    // which makes that archive invalid, and the record of what the household
+    // had would stop at the first host it left. The MUST had no test at all
+    // until a refutation pass measured that deleting the line changed nothing.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms() as never);
+    const exported = exportNode(engine, new RecoveryRegister(), new PermissionLedger(),
+      engine.mandates, new DeliveryRegister(), HOUSEHOLD);
+    expect(exported.mandates.map((m) => m.id)).toEqual([MANDATE]);
+  });
+
+  test("a claim that lapses after it arrives is not one this host offers", () => {
+    // NOTE (mutation check, 2026-09-18): claim_outlives_its_lapse. A claim can
+    // only be signed while it is live, because `record` refuses a lapsed
+    // mandate, and nothing removed one that died after it was written. The
+    // acceptance flow writes a claim with a week's fuse, and a household that
+    // approved late was locked out for good. **No attacker, only a week.**
+    const { engine } = makeEngine();
+    const soon = Date.now() + 50;
+    engine.mandates.importMandate(terms({ lapses_at: soon }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toBeDefined();
+    expect(engine.mandates.claimFor(MANDATE, soon + 1)).toBeUndefined();
+    expect(engine.mandates.claimsFor(HOUSEHOLD, soon + 1)).toEqual([]);
+    // And the identifier is free again, so a live claim can take its place.
+    engine.mandates.importMandate(terms({ ceiling_out_of_network: 7 }) as never, soon + 1);
+    expect(engine.mandates.claimFor(MANDATE, soon + 2)).toMatchObject({ ceiling_out_of_network: 7 });
+  });
+
+  test("a claim at a version no household reaches is not kept", () => {
+    // NOTE (mutation check, 2026-09-19): claim_version_unbounded. A third
+    // refutation pass measured a claim at MAX_SAFE_INTEGER - 1 accepted and,
+    // once signed as itself, a mandate every later change was refused on,
+    // tightenings included: the next version had no room. The bound leaves room
+    // for every version a household could ever record.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms({ version: 2 ** 20 + 1 }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+    engine.mandates.importMandate(terms({ version: 2 ** 20 }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toMatchObject({ version: 2 ** 20 });
+  });
+
+  test("a version with no room to follow it is refused", () => {
+    // NOTE (mutation check, 2026-09-18): version_ceiling_unchecked. At 2^53
+    // `before.version + 1 === before.version`, so the version stops rising and
+    // the property the canonical bytes rest on fails: a household tightened a
+    // ceiling at that number and its own earlier submission replayed the loose
+    // one back. Measured 2026-09-18.
+    const { engine } = makeEngine();
+    const keyOf = (k: string) => engine.publicKeyFor(k);
+    // A claim carries the version, so signing one is the route by which such a
+    // number would otherwise reach a record: the claim is what makes the case
+    // reachable at all.
+    for (const version of [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, 0, 1.5]) {
+      const fresh = makeEngine().engine;
+      fresh.mandates.importMandate(terms({ version }) as never);
+      expect(() => fresh.mandates.record({ ...signedBy(terms({ version })), keyOf: (k: string) => fresh.publicKeyFor(k) }))
+        .toThrow(expect.objectContaining({ code: "stale_version" }));
+    }
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
+  });
+
+  test("a claim signed by anything but the household's own key is refused", () => {
+    // The claim is a stranger's to write and the household's alone to sign,
+    // which is the whole of what question 56's second half decides.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms() as never);
+    const stranger = generateKeyPairSync("ed25519");
+    const m = terms();
+    expect(() => engine.mandates.record({
+      mandate: m as never,
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), stranger.privateKey).toString("base64") },
+      assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
+    })).toThrow(expect.objectContaining({ code: "bad_signature" }));
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
   });
 });
 

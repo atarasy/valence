@@ -98,14 +98,38 @@ function shortens(before: number | null, after: number | null): boolean {
   return after < before;
 }
 
+/** A claim above this cannot be one a household reached, and signing it would leave no room to follow. */
+const MAX_CLAIMED_VERSION = 2 ** 20;
+
 export class MandateRegister {
 
   /** §13.2. Where this register keeps what it holds. Unset is in memory. */
   constructor(store: Store = inMemoryStore()) {
     this.rows = store.map("mandates");
+    this.claims = store.map("mandate_claims");
   }
 
   private readonly rows: Map<string, Mandate>;
+  /**
+   * §14.2, question 56, decided 2026-09-18. **What a move carries is a claim
+   * and not a proof.** The import route authenticates nobody, and measured on
+   * the engine the day it was decided, a stranger planted a second mandate
+   * under a household's own identifier with a ceiling of 9,999,999 and no
+   * cooling window, beside that household's real one at a ceiling of 0.
+   *
+   * Carrying the signatures instead was refused twice over: §16.1 requires
+   * that a signature is verified at submission and not retained, and an
+   * assertion names the host it was made for, so a member who holds a passkey
+   * and nothing else, which is every member who joined through a hub, could
+   * move no mandate at all.
+   *
+   * So a claim is held here until the household signs it at this host. An
+   * offer cannot name one, because `get` does not answer for it; a household
+   * holding one counts as holding a mandate, because `forHousehold` does, so
+   * §16.2 refuses every offer and **nothing settles for that household until
+   * the person signs**. That cost is the price of a move carrying a claim.
+   */
+  private readonly claims: Map<string, Mandate>;
 
   get(id: string): Mandate | undefined {
     return this.rows.get(id);
@@ -121,8 +145,58 @@ export class MandateRegister {
     return [...this.rows.values()].filter((m) => m.household === household);
   }
 
-  importMandate(m: Mandate): void {
-    this.rows.set(m.id, { ...m, co_signers: [...m.co_signers] });
+  /** The claim held for an identifier, which is not a mandate until it is signed. */
+  claimFor(id: string, now = Date.now()): Mandate | undefined {
+    const claim = this.claims.get(id);
+    // A claim that has lapsed can never be signed, because `record` refuses a
+    // lapsed mandate, so it is not one this host offers and not one that keeps
+    // the identifier. A refutation pass on 2026-09-18 measured the other way:
+    // the acceptance flow writes a claim with a week's lapse, and a household
+    // that did not sign within the week could never sign and no route removed
+    // the row. **No attacker was needed for that one, only a week.**
+    return claim && claim.lapses_at > now ? claim : undefined;
+  }
+
+  /**
+   * The claims held for a household, which are what it may sign here and
+   * **nothing else**. They are not in `forHousehold`, and the reason is the
+   * whole of what the first build of this decision got wrong.
+   *
+   * A claim counted as a mandate the household held, so that a move would fail
+   * closed. A refutation pass on 2026-09-18 measured what that bought: the
+   * import route authenticates nobody, so **one unsigned POST froze any
+   * household on the host**, including one that held no mandate at all and had
+   * never moved anywhere. Every offer naming any label was then refused, a
+   * settlement already decided could not be paid, and nothing removed a claim,
+   * because the only deletion is a successful `record` and the import may
+   * carry `lapses_at: 0`, which `record` refuses as lapsed for ever.
+   *
+   * So a claim does nothing. A household that has moved and not yet signed is
+   * a household that has set no protection here, which is what §16.2 already
+   * says of every household before its first mandate. **The cost is that the
+   * protections do not apply until the person signs**, and the cost of the
+   * other direction was that anybody could stop anybody from being sold to.
+   */
+  claimsFor(household: string, now = Date.now()): Mandate[] {
+    return [...this.claims.values()].filter((m) => m.household === household && m.lapses_at > now);
+  }
+
+  /**
+   * §14.2. A move writes a claim. An identifier this host already holds, as a
+   * mandate or as a claim, is left as it is, for the reason §14.2 gives: the
+   * row that arrived second decided nothing about the one that arrived first.
+   */
+  importMandate(m: Mandate, now = Date.now()): void {
+    if (this.rows.has(m.id) || this.claimFor(m.id, now)) return;
+    // A claim that has already lapsed can never be signed, so keeping it as one
+    // that might is a row nobody can act on. Named by a refutation pass on
+    // 2026-09-18, which measured an import carrying `lapses_at: 0`.
+    if (m.lapses_at <= now) return;
+    // A version no household reaches, kept here, is one whose signing freezes
+    // the mandate: the next version would be refused as having no room. The
+    // bound leaves room for every version a household could ever record.
+    if (!Number.isSafeInteger(m.version) || m.version < 1 || m.version > MAX_CLAIMED_VERSION) return;
+    this.claims.set(m.id, { ...m, co_signers: [...m.co_signers] });
   }
 
   mustGet(id: string, now = Date.now()): Mandate {
@@ -180,17 +254,48 @@ export class MandateRegister {
       }
     }
     const before = this.rows.get(mandate.id);
+    // §14.2, question 56. A claim is **an offer to sign and never a
+    // constraint**: it counts only when what is submitted is the claim itself,
+    // byte for byte. Checking the version alone let a household record its own
+    // terms at the claim's version, which dropped the co-signers it had named
+    // elsewhere: clause 47 escaped by relocation, measured 2026-09-18. And
+    // binding the claim's terms instead would let a planted row with a
+    // co-signer nobody holds freeze that identifier for ever, which is the
+    // defect question 56's first attempt was refused for.
+    const held = before ? undefined : this.claimFor(mandate.id, now);
+    const claim = held && canonicalMandate(held).equals(canonicalMandate(mandate)) ? held : undefined;
+    // Whose row this is comes before which version it is: a row held for
+    // another household is not a version of this household's mandate at all.
+    if ((before ?? claim) && (before ?? claim)!.household !== mandate.household) {
+      throw unprocessable("wrong_household", "a mandate does not change hands");
+    }
     if (before && mandate.version !== before.version + 1) {
       throw conflict(
         "stale_version",
         `mandate ${mandate.id} is at version ${before.version}`
       );
     }
-    if (!before && mandate.version !== 1) {
-      throw unprocessable("stale_version", "a new mandate starts at version 1");
+    // §14.2, question 56. Nothing checks the claim's version here, because the
+    // version is inside the canonical bytes: a submission that is the claim
+    // carries the claim's version by construction. It was a separate check
+    // until the claim stopped being matched by version alone, on 2026-09-18.
+    // §16.1. A version that cannot be incremented stops rising, and the version
+    // is what keeps an old signature off a new record: at 2^53 a household
+    // tightened a ceiling at the same number and its own earlier submission
+    // replayed the loose one back. Measured by a refutation pass on 2026-09-18.
+    if (!Number.isSafeInteger(mandate.version) || mandate.version < 1 || mandate.version >= Number.MAX_SAFE_INTEGER) {
+      throw unprocessable("stale_version", `version ${mandate.version} is not one a version can follow`);
     }
-    if (before && before.household !== mandate.household) {
-      throw unprocessable("wrong_household", "a mandate does not change hands");
+    // A mandate with no signed history here starts at version 1 unless what is
+    // submitted is the claim itself. For a day this let the household state
+    // the version wherever a claim was held, and a third refutation pass
+    // measured what that reopened: a raw signature is not bound to a host, so
+    // any looser version the household ever signed could be recorded at a
+    // host it moved to, over its own tighter claim. The cost of the rule is
+    // the one the second pass named, that a stranger's claim makes the
+    // household start again at 1, and that costs a number and not a protection.
+    if (!before && !claim && mandate.version !== 1) {
+      throw unprocessable("stale_version", "a new mandate starts at version 1");
     }
     if (mandate.lapses_at <= now) {
       throw unprocessable("lapsed", "a mandate that has already lapsed cannot be recorded");
@@ -235,6 +340,7 @@ export class MandateRegister {
       }
     }
     this.rows.set(mandate.id, mandate);
+    this.claims.delete(mandate.id);
     return mandate;
   }
 }

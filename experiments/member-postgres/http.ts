@@ -4,6 +4,8 @@ import { postgresStore,type Identity } from './store.ts';
 import { memberRuntimeIdentity,type MemberRuntimeConfig } from './config.ts';
 import { memberRuntime } from './runtime.ts';
 import { openStatementAuthorisations } from './statement-authorisation.ts';
+import { openMandateCeremony } from './mandate-ceremony.ts';
+import type { Assertion } from '../../engine/src/shared/decisions.ts';
 import { memberTransport } from '../member-login/transport.ts';
 import { memberReadBoundary } from '../member-read/gate.ts';
 import { createApp } from '../../engine/src/http.ts';
@@ -28,7 +30,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',member=prepare||!!match,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),member=prepare||!!match||!!mandate,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -59,9 +61,20 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
      if(presenter)return presenterRequest(r,{deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
      if(member){
       if(url.search)return {status:404,body:JSON.stringify({error:'operation_unavailable'})};
-      const action=prepare?'prepare':match![2]??'review',method=['review','outcome'].includes(action)?'GET':'POST';
+      const action=mandate?('mandate-'+mandate[1]):prepare?'prepare':match![2]??'review',method=['review','outcome'].includes(action)?'GET':'POST';
       if(request.method!==method)return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
       const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
+      // §16.1, question 56. Signing a mandate that arrived by a move. It sits
+      // beside the statement ceremony because it is the same shape: the device
+      // is shown what it is agreeing to, and the engine verifies the assertion.
+      if(mandate){
+       if(action==='mandate-submit'&&(!inputBody||typeof inputBody!=='object'||!['assertion','assertion,mandate'].includes(Object.keys(inputBody).sort().join(','))))throw new Error('Invalid assertion');
+       if(['mandate-prepare','mandate-list'].includes(action)&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||!['','mandate'].includes(Object.keys(inputBody).join(','))))throw new Error('Invalid request');
+       const ceremony=openMandateCeremony(r,{rpID:c.rpID});
+       const named=(inputBody as {mandate?:unknown}).mandate;if(named!==undefined&&typeof named!=='string')throw new Error('Invalid mandate');
+       const value=action==='mandate-list'?ceremony.list(token):action==='mandate-prepare'?ceremony.prepare(token,named):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion,named);
+       return {status:200,body:JSON.stringify(value)};
+      }
       const api=openStatementAuthorisations(r,{environment:c.environment,origin:c.origin,rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs,maxSessionLifetimeMs:c.maxSessionLifetimeMs,engine:r.engine.config,now});
       if(action==='submit'&&(!inputBody||typeof inputBody!=='object'||Object.keys(inputBody).join(',')!=='assertion'))throw new Error('Invalid assertion');
       if(action==='cancel'&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).length))throw new Error('Invalid cancellation');
