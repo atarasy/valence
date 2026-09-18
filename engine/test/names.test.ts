@@ -212,6 +212,76 @@ describe("§14.2, question 57: a move carries what happened", () => {
     expect(() => engine.mustGet("o-behind")).toThrow();
   });
 
+  test("an expired offer that still owes a settlement stays behind too", () => {
+    // NOTE (mutation check, 2026-09-19): expired_owing_travels. A fourth
+    // refutation pass measured two the first rule let travel: a digital offer
+    // kept in part and then expired, and a ceremonial offer defaulted. Each
+    // held a reserve at the host it left and could never settle where it
+    // arrived; on an adapter that commits without a reserve it was charged
+    // at both.
+    const { engine } = makeEngine();
+    for (const valence of ["kept", "defaulted", "consumed", "lost"]) {
+      expect(() => engine.importOffer(arriving({ state: "expired", candidates: [{ ...arriving().candidates[0], valence }] }) as never, HOUSEHOLD))
+        .toThrow(expect.objectContaining({ code: "bad_state" }));
+    }
+    // An expired offer with nothing to charge has finished moving money.
+    engine.importOffer(arriving({ id: "o-returned", state: "expired", binding: "digital", candidates: [{ ...arriving().candidates[0], id: "c-returned", valence: "returned" }] }) as never, HOUSEHOLD);
+    expect(engine.mustGet("o-returned").state).toBe("expired");
+  });
+
+  test("every row naming an offer left behind stays behind with it", async () => {
+    // NOTE (mutation check, 2026-09-19): left_behind_keeps_its_deliveries,
+    // left_behind_keeps_its_notes, left_behind_keeps_its_collections,
+    // left_behind_keeps_its_settlements and left_behind_keeps_its_register.
+    // A fourth pass measured that removing any one of these filters was caught
+    // by nothing, and that without the delivery filter a delivered box alone
+    // refused the whole move again: the row named an offer the body no longer
+    // carried.
+    const { engine } = makeEngine();
+    const handle = createApp(engine, {
+      deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(), registry: new Registry(),
+    });
+    const behind = arriving({ id: "o-box", state: "presented", binding: "physical", candidates: [{ ...arriving().candidates[0], id: "c-box", valence: "offered" }] });
+    const r = await handle(new Request(`https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/import`, {
+      method: "POST",
+      body: JSON.stringify({
+        format: "valence-node/6",
+        offers: [behind],
+        deliveries: [{ offer: "o-box", carriage: 550, code: "dc-box", status: "delivered", updated_at: 1 }],
+        collections: [{ offer: "o-box", due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} }],
+        settlements: [{ offer: "o-box", settled_at: 1, kept_amount: 0, consumed_amount: 0 }],
+        notes: [{ candidate: "c-box", author: HOUSEHOLD, text: "left with the box", shared_with: [], created_at: 1 }],
+        confirmations: { "o-box": ["token"] },
+      }),
+    }));
+    expect(r.status).toBe(201);
+    expect(await r.json()).toEqual({ imported: true, left_behind: ["o-box"] });
+    expect(() => engine.mustGet("o-box")).toThrow();
+    expect(engine.notesFor("c-box")).toEqual([]);
+  });
+
+  test("a set with no confirmation behind it cannot be taken back, on a row an older host holds", async () => {
+    // NOTE (mutation check, 2026-09-19): withdraw_a_set_nobody_signed. Its only
+    // probe built a decided set that arrived by a move without its register,
+    // and question 57 rebuilt made that unreachable: a decided set no longer
+    // moves. A fourth refutation pass measured the mutation caught by nothing
+    // afterwards, so the guard is reached the way this project reaches every
+    // guard the routes no longer can, by planting the row a host running the
+    // older rule would hold. An unreachable guard is one nothing proves.
+    const { engine } = makeEngine();
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: null, giver: null,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })) as never);
+    (engine as unknown as { confirmations: Map<string, string[]> }).confirmations.delete(offer.id);
+    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+  });
+
   test("a candidate that arrives with no verdict is refused", () => {
     // NOTE (mutation check, 2026-09-18): import_candidate_without_a_verdict.
     // `decide` reads a candidate whose valence is not `offered` as one already

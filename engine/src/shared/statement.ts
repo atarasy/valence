@@ -117,6 +117,18 @@ export function challengeForStatement(
  * lines the household signed at the decision, has nothing in it the household
  * has not already signed for.
  */
+/**
+ * §14.2 and §6.4, question 57. Whether an offer that has not settled still has
+ * a line a settlement would charge: kept, defaulted or consumed, or one the
+ * collection recorded lost. A fourth refutation pass measured two that the
+ * first rule let travel: a digital offer kept in part and then expired, and a
+ * ceremonial offer defaulted. Both held a reserve at the host they left and
+ * could never settle at the one they reached.
+ */
+export function owesSettlement(offer: Offer): boolean {
+  return offer.candidates.some((c) => c.valence === "kept" || c.valence === "defaulted" || c.valence === "consumed" || c.valence === "lost");
+}
+
 export function needsStatement(offer: Offer, missing: readonly string[] = []): boolean {
   return (
     offer.binding === "physical" &&

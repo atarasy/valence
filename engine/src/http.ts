@@ -10,7 +10,7 @@ import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
 import type { Assertion, PersonalSignature } from "./shared/decisions.js";
 import { renderStatement } from "./hub/statement.js";
-import { needsStatement } from "./shared/statement.js";
+import { owesSettlement } from "./shared/statement.js";
 import { collectedAs } from "./shared/collected.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
@@ -177,9 +177,9 @@ export type Hub = {
  */
 function moneyStillToMove(offer: Offer, collection?: { collected_at: number | null; missing?: string[] }): boolean {
   if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided") return true;
-  if (offer.state === "expired" && offer.binding === "physical") {
-    if (!collection || collection.collected_at === null) return true;
-    if (needsStatement(offer, collection.missing ?? [])) return true;
+  if (offer.state === "expired") {
+    if (owesSettlement(offer)) return true;
+    if (offer.binding === "physical" && (!collection || collection.collected_at === null)) return true;
   }
   return false;
 }

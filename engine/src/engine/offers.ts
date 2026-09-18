@@ -4,7 +4,7 @@ import { badRequest, conflict, notFound, unprocessable } from "../common/errors.
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
-import { canonicalStatement, disputable, needsStatement, statementLines } from "../shared/statement.js";
+import { canonicalStatement, disputable, needsStatement, owesSettlement, statementLines } from "../shared/statement.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -1809,7 +1809,7 @@ export class ValenceEngine {
     // arrival would then change the offer, and a move could fail on a rule
     // about an offer the household never made, §5.1's being the plain case.
     if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided" ||
-      (offer.state === "expired" && needsStatement(offer))) {
+      (offer.state === "expired" && owesSettlement(offer))) {
       throw conflict(
         "bad_state",
         `offer ${offer.id} is ${offer.state}, and its money moves at the host that holds its reserve`
