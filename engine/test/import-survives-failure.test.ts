@@ -40,7 +40,7 @@ function host(store: Store) {
 
 const node = {
   format: "valence-node/6",
-  offers: [{ id: "o-1", household: H, mandate: `${H}.1`, candidates: [{ id: "c-1" }] }],
+  offers: [{ id: "o-1", household: H, mandate: `${H}.1`, state: "decided", candidates: [{ id: "c-1", valence: "offered" }] }],
   notes: [{ candidate: "c-1", author: "a", text: "t", shared_with: [], created_at: 1 }],
   collections: [{ offer: "o-1", due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} }],
   mandates: [{ id: `${H}.1`, household: H, ceiling_out_of_network: 1, co_signers: [], ceiling_daily: null, cooling_seconds: null, lapses_at: 9e15, version: 1 }],

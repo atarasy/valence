@@ -160,6 +160,50 @@ describe("§13.2, question 55: a name is its key", () => {
   });
 });
 
+describe("§14.2, question 57: a move carries what happened", () => {
+  const arriving = (over: Record<string, unknown> = {}) => ({
+    id: "o-q57", household: HOUSEHOLD, mandate: MANDATE, state: "decided",
+    purpose: "replenish", binding: "digital", config_version: CONFIG_VERSION,
+    expires_at: Date.now() + HOUR, presenter: "merchant-1", price_band: null, giver: null,
+    disclosures: [{ merchant: "maker-a", product: null, version: "d-1" }],
+    candidates: [{ id: "c-q57", product: "tea-a", quantity: 1, unit_price: 1200, merchant: "maker-a",
+      maker: "made-by-tea", ships: "carrier-a", category: null, predicted_conversion: 0.5,
+      is_exploration: true, given_by: null, valence: "kept" }],
+    ...over,
+  });
+
+  test("an offer still in progress is refused, because this ledger holds no reserve for it", () => {
+    // NOTE (mutation check, 2026-09-18): import_takes_an_offer_in_progress.
+    // Measured the day it was decided: the import took an offer at
+    // `presented` with a 201 and no reservation on the receiving ledger.
+    // §6.4 makes the reserve the upper bound of what an offer may settle at,
+    // so an offer that can still be decided and has no reserve is one whose
+    // upper bound this ledger has never seen. What stops it charging is
+    // `commit` refusing `no_reservation`, which is the ledger's answer and
+    // not this specification's.
+    const { engine } = makeEngine();
+    for (const state of ["drafted", "presented"]) {
+      expect(() => engine.importOffer(arriving({ state }) as never, HOUSEHOLD))
+        .toThrow(expect.objectContaining({ code: "bad_state" }));
+    }
+    // What happened still travels.
+    engine.importOffer(arriving() as never, HOUSEHOLD);
+    expect(engine.mustGet("o-q57").state).toBe("decided");
+  });
+
+  test("a candidate that arrives with no verdict is refused", () => {
+    // NOTE (mutation check, 2026-09-18): import_candidate_without_a_verdict.
+    // `decide` reads a candidate whose valence is not `offered` as one already
+    // decided, so a candidate arriving with none could never be decided and
+    // its line settled at nothing. Measured on a body the shape check took.
+    const { engine } = makeEngine();
+    const withNone = arriving();
+    delete (withNone.candidates[0] as { valence?: unknown }).valence;
+    expect(() => engine.importOffer(withNone as never, HOUSEHOLD))
+      .toThrow(expect.objectContaining({ code: "malformed" }));
+  });
+});
+
 describe("§14.2, question 56: a mandate that arrives by a move is a claim", () => {
   const terms = (over: Record<string, unknown> = {}) => ({
     id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,

@@ -35,7 +35,10 @@ test('router error rolls back an earlier successful import prefix', async () => 
 });
 test('GET expiry writes commit through the same boundary', async () => {
   const s = await setup(), expired = structuredClone(s.offer); expired.id = 'expired-read'; expired.binding = 'digital'; expired.state = 'presented'; expired.expires_at = Date.now() - 1000; expired.candidates[0]!.id = 'expiry-candidate'; expired.candidates[0]!.valence = 'offered';
-  await s.unit.run(store => localRuntime(store).engine.importOffer(expired, HOUSE));
+  // §14.2, question 57. An import no longer carries an offer still in
+  // progress, and this fixture wants one that is: it is planted as the store
+  // holds it rather than routed through the import.
+  await s.unit.run(store => { store.map<typeof expired>('offers').set(expired.id, expired); });
   expect((await s.app.fetch(s.request('/offers/expired-read'))).status).toBe(200);
   const stored = await s.unit.run((_store, database) => databaseFor(database, atomicScope).db.query("SELECT v FROM atomic_rows WHERE namespace='offers' AND k='expired-read'").get()) as { v: string };
   expect(JSON.parse(stored.v)).toMatchObject({ state: 'expired', candidates: [{ valence: 'returned' }] });

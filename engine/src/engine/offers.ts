@@ -1790,6 +1790,38 @@ export class ValenceEngine {
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
     }
+    // §14.2 and §6.4, question 57, decided 2026-09-18. **A move carries what
+    // happened and not what is in progress.** An offer arriving at `drafted`
+    // or `presented` has no reservation on this host's ledger, and measured on
+    // the reference the day it was decided, the import took one at `presented`
+    // with a `201` and no reserve behind it. §6.4 makes the reserve the upper
+    // bound of what an offer may settle at, so an offer that can still be
+    // decided and has no reserve is one whose upper bound this ledger has
+    // never seen; what stops it charging here is `commit` refusing with
+    // `no_reservation`, which is the ledger's answer and not this
+    // specification's, and another adapter may answer differently.
+    //
+    // **The cost is that a proposal in flight is lost by a move**, which the
+    // presenter can make again at the host the household arrived at. The other
+    // shape considered was presenting it again on arrival, which would reserve
+    // here and run the checks a presentation runs; it was refused because
+    // arrival would then change the offer, and a move could fail on a rule
+    // about an offer the household never made, §5.1's being the plain case.
+    if (offer.state === "drafted" || offer.state === "presented") {
+      throw conflict(
+        "bad_state",
+        `offer ${offer.id} is ${offer.state}, and a move carries what happened rather than what is in progress`
+      );
+    }
+    // A candidate that arrives without a verdict reads as one already decided
+    // (`valence !== "offered"`), so the offer could never be decided again and
+    // its lines settle at nothing. Measured the same day, on a body the shape
+    // check accepted.
+    for (const c of offer.candidates) {
+      if (typeof c.valence !== "string" || !c.valence) {
+        throw unprocessable("malformed", `candidate ${c.id} arrived with no verdict`);
+      }
+    }
     this.assertCandidateIdentifiers(offer, carrying?.candidates);
   }
 

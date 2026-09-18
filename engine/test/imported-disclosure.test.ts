@@ -18,16 +18,28 @@ test("an imported presented offer needs its merchant disclosure before a decisio
   const decisions = offer.candidates.map((c) => ({
     candidate: c.id, valence: "kept" as const, kept_as: "self" as const,
   }));
+  // §14.2, question 57, decided 2026-09-18. A move no longer carries an offer
+  // that is still in progress, so the case this test was written for is
+  // reached on an offer presented here rather than on one that arrived.
   const { engine: missing } = makeEngine();
-  missing.importOffer({ ...structuredClone(offer), disclosures: [] }, offer.household);
-  await expect(decideSigned(missing, offer.id, decisions)).rejects.toMatchObject({
+  expect(() => missing.importOffer(structuredClone(offer), offer.household))
+    .toThrow(expect.objectContaining({ code: "bad_state" }));
+
+  const { engine: local } = makeEngine();
+  const here = local.createOffer({
+    binding: "digital", household: HOUSEHOLD, purpose: "replenish",
+    config_version: CONFIG_VERSION, expires_at: Date.now() + HOUR,
+    mandate: MANDATE, price_band: null, giver: null,
+    candidates: [{ product: "coffee-a", quantity: 1, predicted_conversion: 0.5,
+      is_exploration: true, given_by: null }],
+  });
+  await local.present(here.id);
+  const theirs = here.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const }));
+  // The disclosure the merchant signed, taken off the offer this host holds.
+  (local.mustGet(here.id) as { disclosures: unknown[] }).disclosures = [];
+  await expect(decideSigned(local, here.id, theirs)).rejects.toMatchObject({
     status: 422, code: "disclosure_missing",
   });
-  expect(missing.mustGet(offer.id).state).toBe("presented");
-  expect(missing.mustGet(offer.id).candidates[0]!.valence).toBe("offered");
-
-  const { engine: complete } = makeEngine();
-  complete.importOffer(structuredClone(offer), offer.household);
-  await decideSigned(complete, offer.id, decisions);
-  expect(complete.mustGet(offer.id).state).toBe("decided");
+  expect(local.mustGet(here.id).state).toBe("presented");
+  expect(local.mustGet(here.id).candidates[0]!.valence).toBe("offered");
 });

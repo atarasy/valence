@@ -51,7 +51,9 @@ const mandate = (household: string, over: Record<string, unknown> = {}) => ({
   cooling_seconds: 3600, lapses_at: 9e15, version: 3, ...over,
 });
 // §13.2, question 55. An export always carries a mandate, and its identifier is the household's.
-const offer = (id: string, household: string) => ({ id, household, mandate: `${household}.1`, candidates: [{ id: `${id}-c` }] });
+// §14.2, question 57. A move carries what happened, so an arriving offer is
+// decided or later and its candidates carry a verdict.
+const offer = (id: string, household: string) => ({ id, household, mandate: `${household}.1`, state: "decided", candidates: [{ id: `${id}-c`, valence: "offered" }] });
 const collection = (id: string) => ({ offer: id, due_at: 1, grace_days: 3, collected_at: null, returned: [], consumed: [], missing: [], missing_notes: {} });
 
 describe("§14.2: an import writes only its own household's rows", () => {
