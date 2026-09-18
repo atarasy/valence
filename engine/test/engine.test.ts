@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ValenceEngine, explorationFloor } from "../src/engine/offers.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { ValenceError } from "../src/common/errors.js";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, settleSigned, signConfig, signer } from "./helpers.js";
+import { CONFIG_VERSION, GIFT_GIVER, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, presentGift, settleSigned, signConfig, signer } from "./helpers.js";
 
 const baseOffer = (candidates: {
   product: string;
@@ -206,10 +206,10 @@ describe("silence", () => {
           { product: "nori-a" },
           { product: "miso-a", is_exploration: true, predicted_conversion: 0.05 },
         ],
-        { purpose: "ceremonial", expires_at: now + 1000, price_band: { min: 0, max: 100000 }, giver: "giver-1" }
+        { purpose: "ceremonial", expires_at: now + 1000, price_band: { min: 0, max: 100000 }, giver: GIFT_GIVER.household }
       )
     );
-    await engine.present(offer.id, now);
+    await presentGift(engine, offer.id, now);
     const settlement = await engine.settle(offer.id, now + 2000);
     const defaulted = offer.candidates.filter((c) => c.valence === "defaulted");
     expect(defaulted.length).toBe(1);

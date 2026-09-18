@@ -5,6 +5,7 @@ import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
 import { canonicalStatement, disputable, needsStatement, owesSettlement, statementLines } from "../shared/statement.js";
+import { canonicalGift, type GiftTerms } from "../shared/gift.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -665,7 +666,21 @@ export class ValenceEngine {
     return offer;
   }
 
-  async present(offerId: string, now = Date.now()): Promise<Offer> {
+  /**
+   * §12, question 64. The terms a gift's giver signs, as this host reads them.
+   * The giver recomputes them from the offer rather than trusting these.
+   */
+  giftTerms(offerId: string): GiftTerms {
+    const offer = this.mustGet(offerId);
+    if (!offer.giver || !offer.price_band) throw conflict("not_a_gift", `offer ${offerId} names no giver`);
+    return {
+      offer: offer.id, giver: offer.giver, recipient: offer.household, presenter: offer.presenter,
+      price_band: { min: offer.price_band.min, max: offer.price_band.max },
+      upper_bound: this.upperBound(offer), expires_at: offer.expires_at,
+    };
+  }
+
+  async present(offerId: string, now = Date.now(), giverSignature?: PersonalSignature): Promise<Offer> {
     const offer = this.mustGet(offerId);
     if (offer.state !== "drafted") {
       throw conflict("bad_state", `cannot present an offer in ${offer.state}`);
@@ -747,6 +762,25 @@ export class ValenceEngine {
           `this offer could cost ${outside} at merchants outside the network, above the ceiling of ${mandate.ceiling_out_of_network}`
         );
       }
+    }
+
+    // §12, question 64, decided 2026-09-19. **A gift is presented only on its
+    // giver's signature**, because the reserve below is held against the giver
+    // and the giver was whatever household the presenter wrote. Checked last
+    // among the refusals, so that a giver is asked to sign only an offer that
+    // would otherwise present, and before the reserve, so that nothing is
+    // held against a giver who did not sign.
+    if (offer.giver) {
+      if (!giverSignature) {
+        throw unprocessable("gift_unsigned", "a ceremonial offer is presented on its giver's signature over the gift (§12)");
+      }
+      const key = this.identities.get(offer.giver);
+      if (!key) throw unprocessable("unsigned", `no key is registered for giver ${offer.giver}`);
+      if (!verifyPersonal(canonicalGift(this.giftTerms(offer.id)), giverSignature, key, this.config.relyingPartyId)) {
+        throw unprocessable("bad_signature", "the signature does not cover this gift");
+      }
+    } else if (giverSignature) {
+      throw badRequest("malformed", "only a ceremonial offer carries a giver's signature");
     }
 
     await this.ledger.reserve({

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift } from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { canonicalConfig } from "../src/engine/offers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
@@ -560,11 +560,11 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
       ...physical(HOUSEHOLD, [{ product: "coffee-a", given_by: "maker-a" }]),
       binding: "digital" as const,
       purpose: "ceremonial" as const,
-      giver: "a-giver",
+      giver: GIFT_GIVER.household,
       price_band: { min: 1, max: 100_000 },
       expires_at: Date.now() + 700,
     });
-    await engine.present(offer.id);
+    await presentGift(engine, offer.id);
     await new Promise((r) => setTimeout(r, 900));
     const settled = engine.mustGet(offer.id, Date.now());
     expect(settled.candidates[0]!.valence).toBe("defaulted");
@@ -678,7 +678,7 @@ describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoe
    * giver with a ceiling of 500 was charged 1200, and a recipient with a
    * ceiling of 500 had a gift refused that it pays nothing for.
    */
-  const GIVER = "giver-1";
+  const GIVER = GIFT_GIVER.household;
   const ceilings = (recipient: number | null, giver: number | null) => ({
     async get(_id?: string) {
       return {
@@ -701,7 +701,7 @@ describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoe
       price_band: { min: 0, max: 1_000_000 },
       giver: GIVER,
     });
-    await engine.present(offer.id);
+    await presentGift(engine, offer.id);
     await decideSigned(engine, offer.id, [
       { candidate: offer.candidates[0]!.id, valence: "kept" as const, kept_as: "self" as const },
       { candidate: offer.candidates[1]!.id, valence: "returned" as const },

@@ -1,4 +1,5 @@
 import { type Mandate } from "./hub/mandates.js";
+import { challengeForGift } from "./shared/gift.js";
 import { tightestDailyCeiling } from "./engine/mandate-source.js";
 import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
@@ -555,8 +556,30 @@ async function route(
     if (id && parts.length === 3) {
       const action = parts[2];
       if (method === "POST" && action === "present") {
-        strict(await body(request), [], "present");
-        return json(view(await engine.present(id)));
+        // §12, question 64. A gift carries its giver's signature over the
+        // gift, a bare signature or a passkey's assertion; anything else
+        // presents on an empty body as before.
+        const raw = strict(await body(request), ["signature", "assertion"], "present");
+        if (raw.signature !== undefined && raw.assertion !== undefined) {
+          throw badRequest("malformed", "a gift carries a signature or an assertion, and not both");
+        }
+        let giver: PersonalSignature | undefined;
+        if (raw.signature !== undefined) {
+          giver = { signature: requireString(raw, "signature", "present") };
+        } else if (raw.assertion !== undefined) {
+          const a = strict(raw.assertion, ["authenticator_data", "client_data_json", "signature"], "assertion");
+          giver = { assertion: {
+            authenticator_data: requireString(a, "authenticator_data", "assertion"),
+            client_data_json: requireString(a, "client_data_json", "assertion"),
+            signature: requireString(a, "signature", "assertion"),
+          } };
+        }
+        return json(view(await engine.present(id, Date.now(), giver)));
+      }
+      // §12, question 64. What a gift's giver signs, as this host reads it.
+      if (method === "GET" && action === "gift") {
+        const terms = engine.giftTerms(id);
+        return json({ ...terms, challenge: challengeForGift(terms) });
       }
       if (method === "POST" && action === "decisions") {
         const raw = strict(
