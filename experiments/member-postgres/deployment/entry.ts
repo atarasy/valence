@@ -1,4 +1,5 @@
 import { attachDatabasePool } from '@vercel/functions';
+import {DEPLOYMENT_ID} from './identity.ts';
 import { isIP } from 'node:net';
 import { createPool } from '../store.ts';
 import { openPostgresMemberHTTP } from '../http.ts';
@@ -6,7 +7,7 @@ import type { MemberRuntimeConfig } from '../config.ts';
 import config from './config.json';
 import aasa from './aasa.json';
 const c=config as MemberRuntimeConfig;
-const identity={id:'atarasy_api_dev',environment:c.environment,origin:c.origin,epoch:1};
+const identity={id:DEPLOYMENT_ID,environment:c.environment,origin:c.origin,epoch:1};
 const unavailable=()=>Response.json({error:'temporarily_unavailable'},{status:503,headers:{'cache-control':'no-store'}});
 let app:Promise<Awaited<ReturnType<typeof openPostgresMemberHTTP>>>|undefined;
 function runtime(){
