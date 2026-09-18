@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { tightestDailyCeiling } from "../src/engine/mandate-source.js";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift } from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
@@ -846,5 +847,74 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
     expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(1);
     expect(engine.settlement(offer.id)!.charged).toBe(0);
     expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+});
+
+describe("questions 60 and 62: what a second refutation pass found", () => {
+  const source = (over: Partial<{ daily: () => Promise<number | null> }> = {}) => ({
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+        cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    dailyCeilingOf: over.daily ?? (async () => null),
+    async holdsAny(h: string) { return h === HOUSEHOLD; },
+  });
+
+  test("a failed report to the day leaves a settled offer, and a retry answers with the settlement", async () => {
+    // NOTE (mutation check, 2026-09-19): report_before_settled.
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(source());
+    let fail = true;
+    engine.readTheDayFrom({
+      async totalSince() { return 0; },
+      async report() { if (fail) throw new Error("hub down"); },
+      async reportOffer() {},
+    } as never);
+    const offer = engine.createOffer({ ...physical(HOUSEHOLD, [{ product: "coffee-a" }]), binding: "digital" as const });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    await expect(engine.settle(offer.id)).rejects.toThrow();
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    fail = false;
+    expect((await engine.settle(offer.id)).offer).toBe(offer.id);
+  });
+
+  test("a set of gifts kept owes nothing and settles at once", async () => {
+    // NOTE (mutation check, 2026-09-19): kept_gift_owes.
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(source());
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a", given_by: "maker-1" }]),
+      binding: "digital" as const,
+    });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    expect(engine.settlement(offer.id)!.charged).toBe(0);
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+
+  test("a declined gift settles at nothing without asking for the giver's ceiling", async () => {
+    // NOTE (mutation check, 2026-09-19): zero_settle_asks_the_giver.
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(source({ daily: async () => { throw Object.assign(new Error("old hub"), { code: "hub_refused" }); } }));
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a" }]),
+      binding: "digital" as const, purpose: "ceremonial" as const, price_band: { min: 0, max: 1_000_000 }, giver: GIFT_GIVER.household,
+    });
+    await presentGift(engine, offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })));
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+  });
+
+  test("a lapsed mandate does not govern a giver", () => {
+    // NOTE (mutation check, 2026-09-19): lapsed_mandate_governs_the_giver.
+    const past = Date.now() - 1_000, future = Date.now() + 86_400_000;
+    expect(tightestDailyCeiling([
+      { ceiling_daily: 100, lapses_at: past } as never,
+      { ceiling_daily: 100_000, lapses_at: future } as never,
+    ])).toBe(100_000);
   });
 });

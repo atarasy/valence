@@ -47,9 +47,12 @@ export type MandateSource = {
 };
 
 /** §16.3. The tightest `ceiling_daily` among the rows, or null. */
-export function tightestDailyCeiling(rows: Mandate[]): number | null {
+export function tightestDailyCeiling(rows: Mandate[], now = Date.now()): number | null {
   let tightest: number | null = null;
   for (const m of rows) {
+    // A lapsed mandate governs nothing, and a second refutation pass measured
+    // one with a ceiling of 100 refusing a gift under a live one of 100,000.
+    if (m.lapses_at <= now) continue;
     if (m.ceiling_daily == null) continue;
     if (tightest === null || m.ceiling_daily < tightest) tightest = m.ceiling_daily;
   }

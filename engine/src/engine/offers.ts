@@ -1001,7 +1001,12 @@ export class ValenceEngine {
    */
   private async settleIfNothingOwed(offer: Offer, now: number): Promise<boolean> {
     if (offer.state !== "decided" && offer.state !== "expired") return false;
-    if (owesSettlement(offer) || this.settlements.has(offer.id)) return false;
+    // What a household kept and a maker or merchant gave is never charged
+    // (clause 10), so a set of gifts kept owes nothing either; a second
+    // refutation pass found it waiting for its presenter like the declines.
+    const owes = offer.candidates.some((c) =>
+      ((c.valence === "kept" || c.valence === "defaulted") && !c.given_by) || c.valence === "consumed" || c.valence === "lost");
+    if (owes || this.settlements.has(offer.id)) return false;
     // **A box is not finished until it has been collected.** §11.2 lets the
     // household say `returned` of a line, and the collection overrules that
     // with what it finds. A first refutation pass measured this settling a
@@ -1246,6 +1251,13 @@ export class ValenceEngine {
       memberIdentity = memberStatementIdentity(memberEnvelope, sent.assertion);
     }
     const existing = this.settlements.get(offer.id);
+    if (existing && offer.state !== "settled") {
+      // A settlement written and its offer never marked: what a failed report
+      // to the day source left behind before 2026-09-19, when the state moved
+      // ahead of it. Found by a second refutation pass over question 62.
+      offer.state = "settled";
+      this.commit(offer);
+    }
     if (existing) {
       const recorded = this.memberStatementConfirmations.get(offer.id);
       if (memberIdentity !== undefined || (recorded !== undefined && confirmation.signed)) {
@@ -1469,13 +1481,16 @@ export class ValenceEngine {
     // moves. The recipient's mandate still governs what the recipient does:
     // the cooling window above, and whether the offer names a mandate at all.
     const payer = offer.giver ?? offer.household;
-    const ceilingDaily = offer.giver
-      ? await this.mandateSource.dailyCeilingOf(offer.giver)
-      : mandate?.ceiling_daily ?? null;
     // A settlement of nothing adds nothing to the day, so it is not refused
     // on a day already past the ceiling: that refused question 62's own
     // zero-settle for a household that had tightened its ceiling, and the set
-    // stayed behind its reserve.
+    // stayed behind its reserve. Nor is the giver's ceiling asked for, so a
+    // hub that predates question 60 cannot refuse a declined gift.
+    const ceilingDaily = charged === 0
+      ? null
+      : offer.giver
+        ? await this.mandateSource.dailyCeilingOf(offer.giver)
+        : mandate?.ceiling_daily ?? null;
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
@@ -1528,6 +1543,15 @@ export class ValenceEngine {
     // carries an amount and a date and nothing about what was in the offer: a
     // copy that carried products would be a second vertical ledger on the
     // person's side rather than the person's own.
+    // **The offer is settled before the day is told.** The report goes to the
+    // hub, which on a split deployment is another process, and a failure there
+    // left the settlement written and the reserve moved while the offer stayed
+    // `decided`: nothing could withdraw it, settle it or move it again. Found
+    // by a second refutation pass over question 62. A failed report now leaves
+    // a settled offer and a day copy short by this amount, which §16.3 already
+    // says is not atomic across processes.
+    offer.state = "settled";
+    this.commit(offer);
     await this.daySource.report({
       offer: offer.id,
       // Question 60: counted to the day of whoever paid.
@@ -1535,8 +1559,6 @@ export class ValenceEngine {
       amount: charged,
       settled_at: now,
     });
-    offer.state = "settled";
-    this.commit(offer);
     return settlement;
   }
 
