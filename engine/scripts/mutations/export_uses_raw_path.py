@@ -4,6 +4,6 @@ import pathlib
 # carries a colon, so the route then answers for a household nobody has while
 # the import beside it writes under the decoded one.
 p = pathlib.Path('src/http.ts'); s = p.read_text()
-old = 'deliveries, segment(parts[1])));'
+old = '      const household = segment(parts[1]);\n      // Question 62. What owes nothing'
 assert s.count(old) == 1, "anchor drifted"
-p.write_text(s.replace(old, 'deliveries, parts[1]));', 1))
+p.write_text(s.replace(old, '      const household = parts[1];\n      // Question 62. What owes nothing', 1))

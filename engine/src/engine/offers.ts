@@ -1,10 +1,11 @@
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
-import { badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
+import { ValenceError, badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
 import { canonicalStatement, disputable, needsStatement, owesSettlement, statementLines } from "../shared/statement.js";
+import { canonicalGift, type GiftTerms } from "../shared/gift.js";
 import {
   canonicalDecisions,
   confirmationToken,
@@ -40,6 +41,7 @@ import type {
   PresenterConfig,
   Purpose,
   Settlement,
+  Payment,
   Valence,
   SettlementLine,
   PriceBand,
@@ -139,6 +141,8 @@ export class ValenceEngine {
    * fact. Nothing resolves this token, and no route accepts it.
    */
   private readonly receipts: Map<string, { ref: string; at: number }[]>;
+  /** Question 61. Payments a giver brought from another host, by household. */
+  private readonly carriedPayments: Map<string, Payment[]>;
   // Journaled, because it is derived from the offers an atomic block may take back.
   private readonly candidateIndex = transientMap<string>();
 
@@ -242,6 +246,7 @@ export class ValenceEngine {
   ) {
     this.offers = store.map("offers");
     this.receipts = store.map("bare_receipts");
+    this.carriedPayments = store.map("carried_payments");
     // Appendix B: candidate lookup is derived; opaque receipt references are not.
     for (const [id, offer] of this.offers) {
       if (id !== offer.id) throw new Error('Stored offer identity mismatch');
@@ -661,7 +666,21 @@ export class ValenceEngine {
     return offer;
   }
 
-  async present(offerId: string, now = Date.now()): Promise<Offer> {
+  /**
+   * §12, question 64. The terms a gift's giver signs, as this host reads them.
+   * The giver recomputes them from the offer rather than trusting these.
+   */
+  giftTerms(offerId: string): GiftTerms {
+    const offer = this.mustGet(offerId);
+    if (!offer.giver || !offer.price_band) throw conflict("not_a_gift", `offer ${offerId} names no giver`);
+    return {
+      offer: offer.id, giver: offer.giver, recipient: offer.household, presenter: offer.presenter,
+      price_band: { min: offer.price_band.min, max: offer.price_band.max },
+      upper_bound: this.upperBound(offer), expires_at: offer.expires_at,
+    };
+  }
+
+  async present(offerId: string, now = Date.now(), giverSignature?: PersonalSignature): Promise<Offer> {
     const offer = this.mustGet(offerId);
     if (offer.state !== "drafted") {
       throw conflict("bad_state", `cannot present an offer in ${offer.state}`);
@@ -743,6 +762,25 @@ export class ValenceEngine {
           `this offer could cost ${outside} at merchants outside the network, above the ceiling of ${mandate.ceiling_out_of_network}`
         );
       }
+    }
+
+    // §12, question 64, decided 2026-09-19. **A gift is presented only on its
+    // giver's signature**, because the reserve below is held against the giver
+    // and the giver was whatever household the presenter wrote. Checked last
+    // among the refusals, so that a giver is asked to sign only an offer that
+    // would otherwise present, and before the reserve, so that nothing is
+    // held against a giver who did not sign.
+    if (offer.giver) {
+      if (!giverSignature) {
+        throw unprocessable("gift_unsigned", "a ceremonial offer is presented on its giver's signature over the gift (§12)");
+      }
+      const key = this.identities.get(offer.giver);
+      if (!key) throw unprocessable("unsigned", `no key is registered for giver ${offer.giver}`);
+      if (!verifyPersonal(canonicalGift(this.giftTerms(offer.id)), giverSignature, key, this.config.relyingPartyId)) {
+        throw unprocessable("bad_signature", "the signature does not cover this gift");
+      }
+    } else if (giverSignature) {
+      throw badRequest("malformed", "only a ceremonial offer carries a giver's signature");
     }
 
     await this.ledger.reserve({
@@ -934,7 +972,70 @@ export class ValenceEngine {
       });
     }
     this.confirmations.set(offerId, [...used, ...spent]);
-    return this.commit(offer);
+    this.commit(offer);
+    if (offer.state === "decided") await this.settleIfNothingOwed(offer, now);
+    return offer;
+  }
+
+  /**
+   * §6.4, question 62, decided 2026-09-19. **A set that owes nothing settles
+   * at nothing, at once, and releases its reserve.** Before this, a set the
+   * household decided with every line returned, or one that expired with
+   * nothing kept, held its reserve until the presenter settled it at 0, and
+   * nothing obliged the presenter to. §6.4's table already said expiry with
+   * nothing kept releases. Measured by the fifth refutation pass over
+   * question 57: such a set could not move, because its reserve was here, so
+   * the household's record of what it refused did not reach the host it moved
+   * to, and a presenter that wanted that record gone had only to leave the
+   * zero-settle unmade.
+   *
+   * **Where it happens**: at the decision itself, and at the household's
+   * export for everything else, which is a set whose cooling window has
+   * closed since, an offer that expired, and a box a collection resolved with
+   * nothing used. A set inside a cooling window can be taken back and decided
+   * again, so it waits. Nothing here settles on a timer, so a reserve on an
+   * expired offer is still held until the presenter settles or the household
+   * exports; §6.4's release at expiry is met at the first of those. A refusal
+   * of any kind leaves the set as it was, because this is the engine tidying
+   * up and not a party asking.
+   */
+  private async settleIfNothingOwed(offer: Offer, now: number): Promise<boolean> {
+    if (offer.state !== "decided" && offer.state !== "expired") return false;
+    // What a household kept and a maker or merchant gave is never charged
+    // (clause 10), so a set of gifts kept owes nothing either; a second
+    // refutation pass found it waiting for its presenter like the declines.
+    const owes = offer.candidates.some((c) =>
+      ((c.valence === "kept" || c.valence === "defaulted") && !c.given_by) || c.valence === "consumed" || c.valence === "lost");
+    if (owes || this.settlements.has(offer.id)) return false;
+    // **A box is not finished until it has been collected.** §11.2 lets the
+    // household say `returned` of a line, and the collection overrules that
+    // with what it finds. A first refutation pass measured this settling a
+    // box at 0 on the household's word alone, after which the collection was
+    // refused on a settled offer: a household ate the box for free.
+    if (offer.binding === "physical" && (this.recoveries.for(offer.id)?.collected_at ?? null) === null) return false;
+    if (this.ledger.get(offer.id)?.status !== "held") return false;
+    try {
+      await this.settleInternal(offer.id, now);
+      return true;
+    } catch (err) {
+      if (err instanceof ValenceError) return false;
+      throw err;
+    }
+  }
+
+  /**
+   * Question 62. Settle at nothing every set of this household's, or one it
+   * pays for as a giver, that owes nothing and still holds a reserve here.
+   * The export asks first, so that what a move carries is what has finished.
+   */
+  async settleWhatOwesNothing(household: string, now = Date.now()): Promise<number> {
+    this.sweep(now);
+    let settled = 0;
+    for (const offer of [...this.offers.values()]) {
+      if (offer.household !== household && offer.giver !== household) continue;
+      if (await this.settleIfNothingOwed(offer, now)) settled++;
+    }
+    return settled;
   }
 
   /**
@@ -1150,6 +1251,13 @@ export class ValenceEngine {
       memberIdentity = memberStatementIdentity(memberEnvelope, sent.assertion);
     }
     const existing = this.settlements.get(offer.id);
+    if (existing && offer.state !== "settled") {
+      // A settlement written and its offer never marked: what a failed report
+      // to the day source left behind before 2026-09-19, when the state moved
+      // ahead of it. Found by a second refutation pass over question 62.
+      offer.state = "settled";
+      this.commit(offer);
+    }
     if (existing) {
       const recorded = this.memberStatementConfirmations.get(offer.id);
       if (memberIdentity !== undefined || (recorded !== undefined && confirmation.signed)) {
@@ -1364,17 +1472,36 @@ export class ValenceEngine {
       throw conflict("no_reservation", `no reservation for ${offer.id} on this host; it settles where it was presented`);
     }
 
-    if (mandate?.ceiling_daily != null) {
+    // §12 and §16.3, question 60, decided 2026-09-19. **The ceiling is the
+    // payer's.** A ceremonial offer names the recipient's mandate and charges
+    // the giver, and until this question the recipient's ceiling was read and
+    // the recipient's day was counted: a giver with a ceiling of 500 was
+    // charged 1200, and a recipient with a ceiling of 500 had a gift it pays
+    // nothing for refused. A daily ceiling protects the person whose money
+    // moves. The recipient's mandate still governs what the recipient does:
+    // the cooling window above, and whether the offer names a mandate at all.
+    const payer = offer.giver ?? offer.household;
+    // A settlement of nothing adds nothing to the day, so it is not refused
+    // on a day already past the ceiling: that refused question 62's own
+    // zero-settle for a household that had tightened its ceiling, and the set
+    // stayed behind its reserve. Nor is the giver's ceiling asked for, so a
+    // hub that predates question 60 cannot refuse a declined gift.
+    const ceilingDaily = charged === 0
+      ? null
+      : offer.giver
+        ? await this.mandateSource.dailyCeilingOf(offer.giver)
+        : mandate?.ceiling_daily ?? null;
+    if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
       // engine's settlements: an engine summing its own is a merchant
       // computing a household's union (clause 38), and two engines would give
       // one household two ceilings.
-      const already = await this.daySource.totalSince(offer.household, dayStart);
-      if (already + charged > mandate.ceiling_daily) {
+      const already = await this.daySource.totalSince(payer, dayStart);
+      if (already + charged > ceilingDaily) {
         throw unprocessable(
           "mandate_ceiling_daily",
-          `${already + charged} would settle for this household today, above the daily ceiling of ${mandate.ceiling_daily}`
+          `${already + charged} would settle for this payer today, above the daily ceiling of ${ceilingDaily}`
         );
       }
     }
@@ -1401,7 +1528,7 @@ export class ValenceEngine {
       // §6.5. The household's signature over the statement, where one was
       // needed. Null for the digital binding and for a box with nothing used.
       confirmation: signed,
-      payer: offer.giver ?? offer.household,
+      payer,
       // Clause 11. The presenter is not the seller; it signs for the
       // merchants named on the lines, as their disclosed agent.
       signed_by: offer.presenter,
@@ -1416,14 +1543,22 @@ export class ValenceEngine {
     // carries an amount and a date and nothing about what was in the offer: a
     // copy that carried products would be a second vertical ledger on the
     // person's side rather than the person's own.
+    // **The offer is settled before the day is told.** The report goes to the
+    // hub, which on a split deployment is another process, and a failure there
+    // left the settlement written and the reserve moved while the offer stayed
+    // `decided`: nothing could withdraw it, settle it or move it again. Found
+    // by a second refutation pass over question 62. A failed report now leaves
+    // a settled offer and a day copy short by this amount, which §16.3 already
+    // says is not atomic across processes.
+    offer.state = "settled";
+    this.commit(offer);
     await this.daySource.report({
       offer: offer.id,
-      household: offer.household,
+      // Question 60: counted to the day of whoever paid.
+      household: payer,
       amount: charged,
       settled_at: now,
     });
-    offer.state = "settled";
-    this.commit(offer);
     return settlement;
   }
 
@@ -1948,6 +2083,46 @@ export class ValenceEngine {
       const key = this.importedEdgeKey(edge, carryingEdges);
       if (key !== null) carryingEdges.set(key, edge);
     }
+  }
+
+  /**
+   * §12, §14, question 61. What this household paid as a giver: settlements
+   * made here on gifts it gave, and payments it brought from another host.
+   * The lines stay out (clause 24).
+   */
+  paymentsBy(household: string): Payment[] {
+    const here = [...this.offers.values()]
+      .filter((o) => o.giver === household)
+      .map((o) => this.settlements.get(o.id))
+      .filter((st): st is Settlement => st !== undefined)
+      .map((st) => ({ offer: st.offer, presenter: st.signed_by, settled_at: st.settled_at, charged: st.charged, receipt: st.receipt }));
+    const seen = new Set(here.map((p) => p.offer));
+    return [...here, ...structuredClone(this.carriedPayments.get(household) ?? []).filter((p) => !seen.has(p.offer))];
+  }
+
+  /**
+   * Question 61. Gifts this household pays for whose money has not finished
+   * moving here: the reserve is held on this host, so a move leaves them and
+   * names them, as it does the household's own offers (question 57).
+   */
+  giftsInFlightBy(household: string, now = Date.now()): string[] {
+    this.sweep(now);
+    return [...this.offers.values()]
+      .filter((o) => o.giver === household && !this.settlements.has(o.id) && this.ledger.get(o.id)?.status === "held")
+      .map((o) => o.id);
+  }
+
+  /** Question 61. Adds what this host does not hold, as receipts do (question 52). */
+  importPayments(household: string, rows: Payment[]): void {
+    const held = this.carriedPayments.get(household) ?? [];
+    const offers = new Set(held.map((p) => p.offer));
+    // Only the five fields are kept. A row arriving with anything else, the
+    // lines above all, was stored and exported again as it came, so an
+    // export stopped being proof of the shape §14 gives a payment.
+    const added = rows
+      .filter((p) => !offers.has(p.offer))
+      .map(({ offer, presenter, settled_at, charged, receipt }) => ({ offer, presenter, settled_at, charged, receipt }));
+    if (added.length) this.carriedPayments.set(household, [...held, ...added]);
   }
 
   importReceipts(household: string, rows: { ref: string; at: number }[]): void {

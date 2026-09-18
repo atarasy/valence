@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, houseFor, makeEngine } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, houseFor, makeEngine, presentGift } from "./helpers.js";
 import { canonicalMandate } from "../src/hub/mandates.js";
+import { canonicalGift } from "../src/shared/gift.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
 import { createApp } from "../src/http.js";
 import { exportNode } from "../src/hub/node.js";
@@ -276,7 +277,9 @@ describe("§14.2, question 57: a move carries what happened", () => {
       candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
     } as never);
     await engine.present(offer.id);
-    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })) as never);
+    // Kept, so that it owes a settlement: a set that owes nothing settles at
+    // once since question 62, and a settled set is not taken back at all.
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })) as never);
     (engine as unknown as { confirmations: Map<string, string[]> }).confirmations.delete(offer.id);
     await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     expect(engine.mustGet(offer.id).state).toBe("decided");
@@ -557,5 +560,153 @@ describe("§13.2: a path segment a caller wrote", () => {
       expect([path, r.status]).toEqual([path, 400]);
       expect([path, ((await r.json()) as { error: string }).error]).toEqual([path, "malformed"]);
     }
+  });
+});
+
+describe("§12, §14, question 61: a giver's payments move with the giver", () => {
+  /**
+   * A settlement lives with the recipient's offer, so a giver who moved took no
+   * record of what it paid, and a gift in flight at the old host was named in
+   * nobody's `left_behind`. Measured by the fifth refutation pass over
+   * question 57: the giver's move answered `left_behind: []`, the gift then
+   * settled at the old host charging the giver, and the giver's export at the
+   * new host had no settlement before or after.
+   */
+  const giverHouse = houseFor("q61-giver");
+  const giver = giverHouse.household;
+  const hub = () => ({
+    deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+    permissions: new PermissionLedger(), registry: new Registry(),
+  });
+  const giftFrom = async (engine: ReturnType<typeof makeEngine>["engine"]) => {
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 }, giver,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await presentGift(engine, offer.id, Date.now(), giverHouse);
+    return offer;
+  };
+  const exportOf = async (handle: ReturnType<typeof createApp>, who: string) =>
+    (await handle(new Request(`https://unit.example/households/${encodeURIComponent(who)}/export`))).json() as Promise<Record<string, unknown>>;
+  const importTo = (handle: ReturnType<typeof createApp>, who: string, body: unknown) =>
+    handle(new Request(`https://unit.example/households/${encodeURIComponent(who)}/import`, { method: "POST", body: JSON.stringify(body) }));
+
+  test("a gift in flight is named in the giver's move, and a settled one arrives as a payment without its lines", async () => {
+    // NOTE (mutation check, 2026-09-19): export_drops_payments and
+    // gifts_in_flight_unnamed.
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    const offer = await giftFrom(engine);
+
+    const inFlight = await exportOf(a, giver);
+    expect(inFlight.format).toBe("valence-node/7");
+    expect(inFlight.gifts_in_flight).toEqual([offer.id]);
+    expect(inFlight.payments).toEqual([]);
+    const { engine: engineB } = makeEngine();
+    const b = createApp(engineB, hub());
+    const moved = await importTo(b, giver, inFlight);
+    expect(moved.status).toBe(201);
+    expect(((await moved.json()) as { left_behind: string[] }).left_behind).toEqual([offer.id]);
+
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })) as never);
+    const settlement = await engine.settle(offer.id);
+    expect(settlement.payer).toBe(giver);
+    const after = await exportOf(a, giver);
+    expect(after.gifts_in_flight).toEqual([]);
+    expect(after.payments).toEqual([{ offer: offer.id, presenter: settlement.signed_by, settled_at: settlement.settled_at, charged: settlement.charged, receipt: settlement.receipt }]);
+    expect(JSON.stringify(after.payments)).not.toContain("tea-a");
+
+    const { engine: engineC } = makeEngine();
+    const c = createApp(engineC, hub());
+    expect((await importTo(c, giver, after)).status).toBe(201);
+    expect((await exportOf(c, giver)).payments).toEqual(after.payments);
+  });
+
+  test("a payment that is not whole numbers is refused before anything is written", async () => {
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    for (const bad of [
+      { offer: "o-1", presenter: "p", settled_at: 1, charged: -1, receipt: "r" },
+      { offer: "o-1", presenter: "p", settled_at: 1.5, charged: 1, receipt: "r" },
+      { offer: "o-1", presenter: 1, settled_at: 1, charged: 1, receipt: "r" },
+    ]) {
+      const r = await importTo(a, giver, { format: "valence-node/7", payments: [bad] });
+      expect(r.status).toBe(400);
+    }
+    expect((await importTo(a, giver, { format: "valence-node/7", gifts_in_flight: [1] })).status).toBe(400);
+    expect((await exportOf(a, giver)).payments).toEqual([]);
+  });
+
+  test("a payment arriving with more than its five fields keeps only the five", async () => {
+    // NOTE (mutation check, 2026-09-19): imported_payment_kept_whole. A row
+    // posted with `lines` was stored and exported again as it came, so an
+    // export stopped being proof of the shape §14 gives a payment.
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    const row = { offer: "o-planted", presenter: "p", settled_at: 1, charged: 5, receipt: "r" };
+    const r = await importTo(a, giver, { format: "valence-node/7", payments: [{ ...row, lines: [{ product: "secret" }], anything: { deep: true } }] });
+    expect(r.status).toBe(201);
+    expect((await exportOf(a, giver)).payments).toEqual([row]);
+  });
+});
+
+describe("§12, question 64: a gift is presented only on its giver's signature", () => {
+  /**
+   * A ceremonial offer charges its giver, and the giver was whatever household
+   * the presenter wrote. Measured by a refutation pass on 2026-09-19: a
+   * household named as giver was charged 1500 without any act of its own.
+   */
+  const giver = houseFor("q64-giver");
+  const draft = (engine: ReturnType<typeof makeEngine>["engine"]) => engine.createOffer({
+    binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+    expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 }, giver: giver.household,
+    candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+  } as never);
+
+  test("unsigned, or signed by another key, or over other terms, it is refused and nothing is held", async () => {
+    // NOTE (mutation check, 2026-09-19): gift_presented_unsigned and
+    // gift_signature_unchecked.
+    const { engine, ledger } = makeEngine();
+    engine.registerIdentity(giver.household, giver.pem);
+    const offer = draft(engine);
+    await expect(engine.present(offer.id)).rejects.toMatchObject({ code: "gift_unsigned" });
+    const other = houseFor("q64-stranger");
+    const terms = engine.giftTerms(offer.id);
+    await expect(engine.present(offer.id, Date.now(), { signature: other.sign(canonicalGift(terms)) }))
+      .rejects.toMatchObject({ code: "bad_signature" });
+    await expect(engine.present(offer.id, Date.now(), { signature: giver.sign(canonicalGift({ ...terms, upper_bound: terms.upper_bound + 1 })) }))
+      .rejects.toMatchObject({ code: "bad_signature" });
+    expect(ledger.get(offer.id)).toBeUndefined();
+    expect(engine.mustGet(offer.id).state).toBe("drafted");
+  });
+
+  test("signed over its own terms, it presents and the reserve is the giver's", async () => {
+    const { engine, ledger } = makeEngine();
+    const offer = draft(engine);
+    await presentGift(engine, offer.id, Date.now(), giver);
+    expect(engine.mustGet(offer.id).state).toBe("presented");
+    expect(ledger.get(offer.id)!.household).toBe(giver.household);
+  });
+
+  test("an offer that is not a gift carries no giver's signature, and the route serves the terms", async () => {
+    const { engine } = makeEngine();
+    const plain = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: null, giver: null,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await expect(engine.present(plain.id, Date.now(), { signature: "x" })).rejects.toMatchObject({ code: "malformed" });
+    const offer = draft(engine);
+    const handle = createApp(engine, {
+      deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(), registry: new Registry(),
+    });
+    const r = await handle(new Request(`https://unit.example/offers/${offer.id}/gift`));
+    expect(r.status).toBe(200);
+    const body = await r.json() as Record<string, unknown>;
+    expect(body.giver).toBe(giver.household);
+    expect(body.recipient).toBe(HOUSEHOLD);
+    expect(typeof body.challenge).toBe("string");
   });
 });

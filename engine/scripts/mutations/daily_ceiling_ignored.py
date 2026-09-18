@@ -5,7 +5,7 @@ import pathlib
 # household's day across presenters.
 
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-a = "    if (mandate?.ceiling_daily != null) {"
+a = "    if (ceilingDaily != null && charged > 0) {"
 assert a in s, "offers.ts daily ceiling anchor has drifted"
-s = s.replace(a, "    if (false && mandate?.ceiling_daily != null) {", 1)
+s = s.replace(a, "    if (false && ceilingDaily != null && charged > 0) {", 1)
 p.write_text(s)

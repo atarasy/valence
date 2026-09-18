@@ -23,6 +23,10 @@ describe("§16, question 54: the mandate an offer reads is its own household's",
         ceiling_daily: null, cooling_seconds: null, co_signers: [], lapses_at: 1, version: 1,
       } as never;
     },
+    async dailyCeilingOf() {
+      // Question 60. Read only for a gift's giver, which these stubs never are.
+      return null;
+    },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
       // whose it is, or an offer of that household naming another label is

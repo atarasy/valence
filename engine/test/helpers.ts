@@ -5,6 +5,7 @@ import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
 import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
+import { canonicalGift } from "../src/shared/gift.js";
 import { DeliveryRegister } from "../src/hub/delivery.js";
 import { LocalDeliveries } from "../src/engine/delivery-source.js";
 import { nameOf } from "../src/common/names.js";
@@ -175,3 +176,19 @@ export function signer() {
 }
 
 export const HOUR = 3600_000;
+
+/**
+ * §12, question 64. A gift is presented on its giver's signature, so a fixture
+ * that presents one registers the giver's key and signs the terms the engine
+ * reads, as a giver's device would after recomputing them.
+ */
+export const GIFT_GIVER = houseFor("gift-giver");
+export async function presentGift(
+  engine: ValenceEngine,
+  offerId: string,
+  now = Date.now(),
+  giver: ReturnType<typeof houseFor> = GIFT_GIVER
+) {
+  try { engine.registerIdentity(giver.household, giver.pem); } catch { /* already held */ }
+  return engine.present(offerId, now, { signature: giver.sign(canonicalGift(engine.giftTerms(offerId))) });
+}

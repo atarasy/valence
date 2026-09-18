@@ -247,6 +247,10 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
           version: 1,
         } as never;
       },
+      async dailyCeilingOf() {
+        // Question 60. Read only for a gift's giver, which these stubs never are.
+        return null;
+      },
       async holdsAny(h: string) {
         // §16.2, question 56. A stub that answers with a mandate must also say
         // whose it is, or an offer of that household naming another label is
@@ -292,6 +296,10 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
             lapses_at: Date.now() + 90 * DAY,
             version: 1,
           } as never;
+        },
+        async dailyCeilingOf() {
+          // Question 60. Read only for a gift's giver, which these stubs never are.
+          return null;
         },
         async holdsAny(h: string) {
           // §16.2, question 56. A stub that answers with a mandate must also say

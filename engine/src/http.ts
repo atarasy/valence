@@ -1,4 +1,6 @@
 import { type Mandate } from "./hub/mandates.js";
+import { challengeForGift } from "./shared/gift.js";
+import { tightestDailyCeiling } from "./engine/mandate-source.js";
 import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
@@ -244,7 +246,7 @@ function stable(v: unknown): string {
 }
 
 /** §14.2, question 52. The field a household's list rows are told apart by when an import adds to them. */
-const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"]] as const;
+const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", "id"], ["queries", "id"], ["payments", "offer"]] as const;
 
 /** §14. The field each keyed list is stored under, which a store binds as its key. */
 const ROW_KEYS = [
@@ -255,7 +257,7 @@ const ROW_KEYS = [
 /** §14. The fields of a node export that hold lists, each written row by row. */
 const LISTS_A_NODE_CARRIES = [
   "offers", "settlements", "notes", "lineage", "receipts", "recoveries",
-  "collections", "permissions", "queries", "mandates", "deliveries",
+  "collections", "permissions", "queries", "mandates", "deliveries", "payments",
 ] as const;
 
 async function route(
@@ -554,8 +556,30 @@ async function route(
     if (id && parts.length === 3) {
       const action = parts[2];
       if (method === "POST" && action === "present") {
-        strict(await body(request), [], "present");
-        return json(view(await engine.present(id)));
+        // §12, question 64. A gift carries its giver's signature over the
+        // gift, a bare signature or a passkey's assertion; anything else
+        // presents on an empty body as before.
+        const raw = strict(await body(request), ["signature", "assertion"], "present");
+        if (raw.signature !== undefined && raw.assertion !== undefined) {
+          throw badRequest("malformed", "a gift carries a signature or an assertion, and not both");
+        }
+        let giver: PersonalSignature | undefined;
+        if (raw.signature !== undefined) {
+          giver = { signature: requireString(raw, "signature", "present") };
+        } else if (raw.assertion !== undefined) {
+          const a = strict(raw.assertion, ["authenticator_data", "client_data_json", "signature"], "assertion");
+          giver = { assertion: {
+            authenticator_data: requireString(a, "authenticator_data", "assertion"),
+            client_data_json: requireString(a, "client_data_json", "assertion"),
+            signature: requireString(a, "signature", "assertion"),
+          } };
+        }
+        return json(view(await engine.present(id, Date.now(), giver)));
+      }
+      // §12, question 64. What a gift's giver signs, as this host reads it.
+      if (method === "GET" && action === "gift") {
+        const terms = engine.giftTerms(id);
+        return json({ ...terms, challenge: challengeForGift(terms) });
       }
       if (method === "POST" && action === "decisions") {
         const raw = strict(
@@ -1148,7 +1172,10 @@ async function route(
     // already hands every mandate a household has to whoever asks, and a
     // presenter can read this bit by presenting under a label of its own and
     // reading the answer. What closes that read is question 41.
-    return json({ has: engine.mandates.forHousehold(household).length > 0 });
+    // Question 60: and the tightest daily ceiling, which a gift's giver is
+    // held to at settlement (§12, §16.3).
+    const held = engine.mandates.forHousehold(household);
+    return json({ has: held.length > 0, ceiling_daily: tightestDailyCeiling(held) });
   }
 
   if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {
@@ -1227,7 +1254,13 @@ async function route(
       // §13.2, question 55. The segment is decoded, as it is on the import
       // beside it: a household identifier carries a colon, so a route that read
       // the raw segment answered for a household nobody has.
-      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, segment(parts[1])));
+      const household = segment(parts[1]);
+      // Question 62. What owes nothing is settled at nothing before it is
+      // carried, so that a set whose cooling window has closed since it was
+      // decided, or one that expired, moves as finished rather than staying
+      // behind its reserve.
+      await engine.settleWhatOwesNothing(household);
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, household));
     }
   }
 
@@ -1239,7 +1272,9 @@ async function route(
       // import with none, which is what it recorded.
       // A /5 export may carry no `confirmations`, which §14 did not name until
       // /6; an offer it does not name reads as unconfirmed (question 50).
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      // A /6 export predates question 61 and carries no `payments` and no
+      // `gifts_in_flight`; a giver's record of what it paid did not travel.
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = segment(parts[1]);
@@ -1454,6 +1489,19 @@ async function route(
         // records it here with the signatures §16.1 asks for.
         if (held) taken.delete(m.id);
       }
+      // §12, §14, question 61. A giver's payments carry an amount and a
+      // receipt and nothing a later read trips over; the gifts still in flight
+      // are named, and nothing is written for them.
+      for (const p_ of body_.payments ?? []) {
+        if (typeof p_.presenter !== "string" || typeof p_.receipt !== "string" ||
+            !Number.isSafeInteger(p_.settled_at) || p_.settled_at < 0 || !Number.isSafeInteger(p_.charged) || p_.charged < 0) {
+          throw badRequest("malformed", "a payment names its presenter and receipt, and its moment and amount are whole numbers");
+        }
+      }
+      const inFlight = body_.gifts_in_flight;
+      if (inFlight !== undefined && (!Array.isArray(inFlight) || inFlight.some((id) => typeof id !== "string" || !id))) {
+        throw badRequest("malformed", "gifts_in_flight must be a list of offer ids");
+      }
       for (const r of body_.recoveries ?? []) {
         if (r.household !== moving) {
           throw unprocessable("wrong_household", `recovery ${r.id} belongs to ${r.household}`);
@@ -1479,6 +1527,7 @@ async function route(
         for (const n of body_.notes ?? []) engine.importNote(n);
         for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
         engine.importReceipts(moving, body_.receipts ?? []);
+        engine.importPayments(moving, body_.payments ?? []);
         // Until 2026-09-09 the loop stopped above. The export already carried the
         // recovery log, and this end dropped it; the ledger, the queries and the
         // mandates were in neither end. A member who moved kept their offers and
@@ -1496,7 +1545,9 @@ async function route(
         for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
         deliveries.importRows(body_.deliveries ?? []);
       });
-      return json({ imported: true, left_behind: leftBehind }, 201);
+      // Question 61. A gift this household pays for stays where its reserve
+      // is, as its own offers do, and the answer names it with them.
+      return json({ imported: true, left_behind: [...new Set([...leftBehind, ...(inFlight ?? [])])] }, 201);
     }
   }
 

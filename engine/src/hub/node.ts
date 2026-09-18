@@ -1,7 +1,7 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { ValenceEngine } from "../engine/offers.js";
-import type { LineageEdge, Note, Offer, Settlement, PresenterConfig, Recovery } from "../common/types.js";
+import type { LineageEdge, Note, Offer, Payment, Settlement, PresenterConfig, Recovery } from "../common/types.js";
 import type { Permission, Query, PermissionLedger } from "./permissions.js";
 import type { Mandate, MandateRegister } from "./mandates.js";
 import type { Delivery, DeliveryRegister } from "./delivery.js";
@@ -43,7 +43,7 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * `missing_notes` (question 46), for the same reason. A /4 export is still
  * read: it carries no missing items, and its rows import with none.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/6";
+export const EXPORT_FORMAT_VERSION = "valence-node/7";
 
 export type NodeExport = {
   format: string;
@@ -67,6 +67,14 @@ export type NodeExport = {
    */
   lineage: LineageEdge[];
   receipts: { ref: string; at: number }[];
+  /**
+   * §12, §14, question 61. What this household paid as a giver, without the
+   * lines, and the gifts it pays for whose money has not finished moving on
+   * the host it is leaving. Both are new in `valence-node/7`, because a
+   * receiving host that does not know them would drop the giver's record.
+   */
+  payments: Payment[];
+  gifts_in_flight: string[];
   /**
    * Clause 53 says recovery is logged and the person is notified; **it does not
    * say the log leaves with the node**, and this comment attributed that to it
@@ -233,6 +241,8 @@ export function exportNode(
     notes,
     lineage: engine.edgesTouching(household),
     receipts: engine.receiptsFor(household),
+    payments: engine.paymentsBy(household),
+    gifts_in_flight: engine.giftsInFlightBy(household, now),
     recoveries: recovery.logFor(household),
     collections: offers
       .map((o) => engine.recoveries.for(o.id))

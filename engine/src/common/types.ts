@@ -252,6 +252,22 @@ export type Settlement = {
   confirmation: string | null;
 };
 
+/**
+ * §12, §14, question 61, decided 2026-09-19. What a giver paid for a gift,
+ * carried in the giver's own export. A settlement lives with the recipient's
+ * offer, so a giver who moved took no record of what it paid, and a gift in
+ * flight at the old host was named in nobody's `left_behind`. It carries the
+ * amount and not the lines: clause 24 keeps what the recipient chose from the
+ * giver.
+ */
+export type Payment = {
+  offer: string;
+  presenter: string;
+  settled_at: number;
+  charged: number;
+  receipt: string;
+};
+
 export type SettlementLine = {
   candidate: string;
   product: string;

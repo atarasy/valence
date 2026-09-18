@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { tightestDailyCeiling } from "../src/engine/mandate-source.js";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift } from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { canonicalConfig } from "../src/engine/offers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
@@ -207,6 +208,10 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
         version: 1,
       } as never;
     },
+    async dailyCeilingOf() {
+      // Question 60. Read only for a gift's giver, which these stubs never are.
+      return null;
+    },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
       // whose it is, or an offer of that household naming another label is
@@ -395,6 +400,10 @@ describe("§6, §16.3: nothing is written on refusal, at the ledger as well", ()
         version: 1,
       } as never;
     },
+    async dailyCeilingOf() {
+      // Question 60. Read only for a gift's giver, which these stubs never are.
+      return null;
+    },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
       // whose it is, or an offer of that household naming another label is
@@ -552,11 +561,11 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
       ...physical(HOUSEHOLD, [{ product: "coffee-a", given_by: "maker-a" }]),
       binding: "digital" as const,
       purpose: "ceremonial" as const,
-      giver: "a-giver",
+      giver: GIFT_GIVER.household,
       price_band: { min: 1, max: 100_000 },
       expires_at: Date.now() + 700,
     });
-    await engine.present(offer.id);
+    await presentGift(engine, offer.id);
     await new Promise((r) => setTimeout(r, 900));
     const settled = engine.mustGet(offer.id, Date.now());
     expect(settled.candidates[0]!.valence).toBe("defaulted");
@@ -659,5 +668,253 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
       deliveries.record({ offer: "o-carriage", carriage: 800, code: "dc-1", status: "delivered" })
     ).toThrow(/carriage/);
     expect(deliveries.mustGet("o-carriage").carriage).toBe(500);
+  });
+});
+
+describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoever pays", () => {
+  /**
+   * A ceremonial offer names the recipient's mandate and charges the giver.
+   * Measured on 2026-09-19 by the fifth refutation pass over question 57: the
+   * recipient's ceiling was read and the recipient's day was counted, so a
+   * giver with a ceiling of 500 was charged 1200, and a recipient with a
+   * ceiling of 500 had a gift refused that it pays nothing for.
+   */
+  const GIVER = GIFT_GIVER.household;
+  const ceilings = (recipient: number | null, giver: number | null) => ({
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: recipient,
+        cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    async dailyCeilingOf(h: string) {
+      return h === GIVER ? giver : null;
+    },
+    async holdsAny(h: string) {
+      return h === HOUSEHOLD;
+    },
+  });
+  const gift = async (engine: ReturnType<typeof makeEngine>["engine"]) => {
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]),
+      binding: "digital" as const,
+      purpose: "ceremonial" as const,
+      price_band: { min: 0, max: 1_000_000 },
+      giver: GIVER,
+    });
+    await presentGift(engine, offer.id);
+    await decideSigned(engine, offer.id, [
+      { candidate: offer.candidates[0]!.id, valence: "kept" as const, kept_as: "self" as const },
+      { candidate: offer.candidates[1]!.id, valence: "returned" as const },
+    ]);
+    return offer;
+  };
+
+  test("the giver's ceiling refuses the gift, and nothing is committed", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(ceilings(null, 1));
+    const offer = await gift(engine);
+    await expect(engine.settle(offer.id)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+    expect(ledger.get(offer.id)!.status).toBe("held");
+  });
+
+  test("the recipient's ceiling does not refuse a gift the recipient does not pay for, and the day counted is the giver's", async () => {
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(ceilings(1, null));
+    const reported: { household: string; amount: number }[] = [];
+    engine.readTheDayFrom({
+      async totalSince() { return 0; },
+      async report(r: { household: string; amount: number }) { reported.push(r); },
+      async reportOffer() {},
+    } as never);
+    const offer = await gift(engine);
+    const settlement = await engine.settle(offer.id);
+    expect(settlement.payer).toBe(GIVER);
+    expect(settlement.charged).toBeGreaterThan(1);
+    expect(reported.map((r) => r.household)).toEqual([GIVER]);
+  });
+});
+
+describe("§6.4, question 62: a set that owes nothing settles at nothing, at once", () => {
+  /**
+   * A set with every line returned held its reserve until the presenter
+   * settled it at 0, which nothing obliged it to do. Measured by the fifth
+   * refutation pass over question 57: such a set could not move, so the
+   * household's record of what it refused stayed behind.
+   */
+  const cooling = (seconds: number | null) => ({
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+        cooling_seconds: seconds, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    async dailyCeilingOf() { return null; },
+    async holdsAny(h: string) { return h === HOUSEHOLD; },
+  });
+  const returnedSet = async (engine: ReturnType<typeof makeEngine>["engine"], valence: "returned" | "kept" = "returned") => {
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]),
+      binding: "digital" as const,
+    });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => (valence === "kept"
+      ? { candidate: c.id, valence: "kept" as const, kept_as: "self" as const }
+      : { candidate: c.id, valence: "returned" as const })));
+    return offer;
+  };
+
+  test("with no cooling window it settles at the decision and releases the reserve", async () => {
+    // NOTE (mutation check, 2026-09-19): decide_leaves_what_owes_nothing.
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(cooling(null));
+    const offer = await returnedSet(engine);
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    expect(engine.settlement(offer.id)!.charged).toBe(0);
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+
+  test("inside a cooling window it waits, and the export's pass settles it once the window has closed", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(cooling(60));
+    const offer = await returnedSet(engine);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD, Date.now() + 61_000)).toBe(1);
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+
+  test("a set that owes something is left for the presenter to settle", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(cooling(null));
+    const offer = await returnedSet(engine, "kept");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(ledger.get(offer.id)!.status).toBe("held");
+  });
+});
+
+describe("§6.4, §11.2, question 62: a box is not finished until it is collected", () => {
+  /**
+   * A first refutation pass over question 62 measured the household deciding
+   * every line of a physical box `returned`, the box settling at 0 on that
+   * word alone, and the collection then refused on a settled offer: the
+   * household ate the box for free.
+   */
+  const noWindow = {
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: 0,
+        cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    async dailyCeilingOf() { return null; },
+    async holdsAny(h: string) { return h === HOUSEHOLD; },
+  };
+
+  test("a box the household called returned waits for its collection, which can still find a line used", async () => {
+    // NOTE (mutation check, 2026-09-19): nothing_owed_before_collection.
+    const made = makeEngine();
+    const { engine, ledger, deliveries } = made;
+    engine.readMandatesFrom(noWindow);
+    const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })));
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(ledger.get(offer.id)!.status).toBe("held");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
+    deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
+    engine.collect({ offer: offer.id, returned: [offer.candidates[1]!.id], consumed: [offer.candidates[0]!.id], at: Date.now() });
+    expect(engine.mustGet(offer.id).candidates[0]!.valence).toBe("consumed");
+  });
+
+  test("a box collected with nothing used settles at nothing at the export, on a day already past the ceiling", async () => {
+    // NOTE (mutation check, 2026-09-19): zero_settle_meets_the_ceiling. The
+    // ceiling here is 0 and the day already holds 1, so the zero settlement
+    // was refused `mandate_ceiling_daily` and the box stayed behind its
+    // reserve, which is the case question 62 was opened for.
+    const made = makeEngine();
+    const { engine, ledger } = made;
+    engine.readMandatesFrom(noWindow);
+    engine.readTheDayFrom({ async totalSince() { return 1; }, async report() {}, async reportOffer() {} } as never);
+    const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
+    await engine.present(offer.id);
+    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    engine.applyRecoveryTo(offer.id);
+    expect(engine.mustGet(offer.id).state).toBe("decided");
+    expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(1);
+    expect(engine.settlement(offer.id)!.charged).toBe(0);
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+});
+
+describe("questions 60 and 62: what a second refutation pass found", () => {
+  const source = (over: Partial<{ daily: () => Promise<number | null> }> = {}) => ({
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+        cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    dailyCeilingOf: over.daily ?? (async () => null),
+    async holdsAny(h: string) { return h === HOUSEHOLD; },
+  });
+
+  test("a failed report to the day leaves a settled offer, and a retry answers with the settlement", async () => {
+    // NOTE (mutation check, 2026-09-19): report_before_settled.
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(source());
+    let fail = true;
+    engine.readTheDayFrom({
+      async totalSince() { return 0; },
+      async report() { if (fail) throw new Error("hub down"); },
+      async reportOffer() {},
+    } as never);
+    const offer = engine.createOffer({ ...physical(HOUSEHOLD, [{ product: "coffee-a" }]), binding: "digital" as const });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    await expect(engine.settle(offer.id)).rejects.toThrow();
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    fail = false;
+    expect((await engine.settle(offer.id)).offer).toBe(offer.id);
+  });
+
+  test("a set of gifts kept owes nothing and settles at once", async () => {
+    // NOTE (mutation check, 2026-09-19): kept_gift_owes.
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(source());
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a", given_by: "maker-1" }]),
+      binding: "digital" as const,
+    });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+    expect(engine.settlement(offer.id)!.charged).toBe(0);
+    expect(ledger.get(offer.id)!.status).toBe("released");
+  });
+
+  test("a declined gift settles at nothing without asking for the giver's ceiling", async () => {
+    // NOTE (mutation check, 2026-09-19): zero_settle_asks_the_giver.
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(source({ daily: async () => { throw Object.assign(new Error("old hub"), { code: "hub_refused" }); } }));
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a" }]),
+      binding: "digital" as const, purpose: "ceremonial" as const, price_band: { min: 0, max: 1_000_000 }, giver: GIFT_GIVER.household,
+    });
+    await presentGift(engine, offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "returned" as const })));
+    expect(engine.mustGet(offer.id).state).toBe("settled");
+  });
+
+  test("a lapsed mandate does not govern a giver", () => {
+    // NOTE (mutation check, 2026-09-19): lapsed_mandate_governs_the_giver.
+    const past = Date.now() - 1_000, future = Date.now() + 86_400_000;
+    expect(tightestDailyCeiling([
+      { ceiling_daily: 100, lapses_at: past } as never,
+      { ceiling_daily: 100_000, lapses_at: future } as never,
+    ])).toBe(100_000);
   });
 });

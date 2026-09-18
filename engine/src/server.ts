@@ -56,6 +56,19 @@ if (relyingPartyId.trim() === "") {
 }
 
 /**
+ * §13.2. Where this process keeps what it holds. Unset is in memory, which is
+ * what the conformance suites run against and what the reference has always
+ * done; a deployment that wants a restart not to be a loss says where.
+ *
+ * A role-split pair keeps two databases, one each, which is the point: the
+ * person's side holds what is the person's.
+ */
+const store = process.env.VALENCE_DB ? openStore(process.env.VALENCE_DB) : inMemoryStore();
+// The ledger's reservations are kept in it too. They were not until
+// 2026-09-19: every reservation died with the process, so nothing presented
+// before a restart could settle at any amount. Found by a refutation pass.
+
+/**
  * The ledger. In memory unless Meter is configured, because the conformance
  * suites need a subject that runs anywhere and a real ledger needs a database.
  *
@@ -71,17 +84,7 @@ const ledger = process.env.METER_BASE_URL
       tool: process.env.METER_TOOL ?? "valence.offer",
       provider: process.env.METER_PROVIDER ?? "valence",
     })
-  : new InMemoryLedger();
-
-/**
- * §13.2. Where this process keeps what it holds. Unset is in memory, which is
- * what the conformance suites run against and what the reference has always
- * done; a deployment that wants a restart not to be a loss says where.
- *
- * A role-split pair keeps two databases, one each, which is the point: the
- * person's side holds what is the person's.
- */
-const store = process.env.VALENCE_DB ? openStore(process.env.VALENCE_DB) : inMemoryStore();
+  : new InMemoryLedger(store);
 
 // Clause 46. The registry is what "in the network" means, so it is built
 // before the engine and handed in: a person's ceiling on the rest is theirs,
