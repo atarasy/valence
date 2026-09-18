@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { type Mandate } from "./hub/mandates.js";
 import { challengeForGift } from "./shared/gift.js";
 import { tightestDailyCeiling } from "./engine/mandate-source.js";
@@ -1414,6 +1415,49 @@ async function route(
       // attested is enough to refuse, so that happened with nobody at fault.
       engine.checkImport(body_.offers ?? [], moving, body_.lineage ?? []);
       deliveries.checkRows(body_.deliveries ?? []);
+      // §14.2, question 59. An offer this host holds exactly as it arrives has
+      // been carried already, and so have its rows: each must match what this
+      // host holds, and one that differs, or one this host does not hold, is
+      // refused as the offer would be. Without this an import that repeats an
+      // offer could put a settlement on a withdrawn set, a note in the
+      // household's hand, or a confirmation token beside a held one, none of
+      // which the household made here. A delivery is the exception: its
+      // status moves as the parcel does, so only the carriage the household
+      // was shown and the code are compared, and the host keeps its own row.
+      const alreadyHere = new Set((body_.offers ?? []).filter((o) => engine.alreadyCarried(o)).map((o) => o.id));
+      if (alreadyHere.size) {
+        const heldCandidates = new Set((body_.offers ?? []).filter((o) => alreadyHere.has(o.id)).flatMap((o) => o.candidates.map((c) => c.id)));
+        const differs = (what: string, id: string) =>
+          conflict("bad_state", `${what} ${id} differs from what this host holds, and an import does not change it`);
+        for (const s_ of body_.settlements ?? []) {
+          if (alreadyHere.has(s_.offer) && !isDeepStrictEqual(engine.settlement(s_.offer), s_)) throw differs("settlement for", s_.offer);
+        }
+        for (const n of body_.notes ?? []) {
+          if (heldCandidates.has(n.candidate) && !engine.notesFor(n.candidate).some((h) => isDeepStrictEqual(h, n))) throw differs("note on", n.candidate);
+        }
+        for (const c of body_.collections ?? []) {
+          if (!alreadyHere.has(c.offer)) continue;
+          const held = engine.recoveries.for(c.offer);
+          const arriving = { ...c, missing: c.missing ?? [], missing_notes: c.missing_notes ?? {} };
+          if (!held || !isDeepStrictEqual(held, arriving)) throw differs("collection for", c.offer);
+        }
+        for (const d of body_.deliveries ?? []) {
+          if (!alreadyHere.has(d.offer)) continue;
+          const held = deliveries.find(d.offer);
+          if (!held || held.carriage !== d.carriage || held.code !== d.code) throw differs("delivery for", d.offer);
+        }
+        const heldTokens = engine.confirmationsFor([...alreadyHere]);
+        for (const id of alreadyHere) {
+          const tokens = body_.confirmations?.[id];
+          if (tokens && tokens.some((t) => !(heldTokens[id] ?? []).includes(t))) throw differs("confirmation for", id);
+        }
+        // Nothing of an offer already carried is written again.
+        body_.settlements = (body_.settlements ?? []).filter((r) => !alreadyHere.has(r.offer));
+        body_.collections = (body_.collections ?? []).filter((r) => !alreadyHere.has(r.offer));
+        body_.deliveries = (body_.deliveries ?? []).filter((r) => !alreadyHere.has(r.offer));
+        body_.notes = (body_.notes ?? []).filter((r) => !heldCandidates.has(r.candidate));
+        if (body_.confirmations) for (const id of alreadyHere) delete body_.confirmations[id];
+      }
       // §14.2, question 52. Every row names the household on the path or an
       // offer this body carries, and none replaces a row the host holds. Only
       // offers and edges were bound before, so an import posted under one

@@ -1,5 +1,6 @@
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { ValenceError, badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
@@ -1927,14 +1928,24 @@ export class ValenceEngine {
     // day: an assertion names the host it was made for, so a host cannot
     // verify a confirmation made at another, and a move is a claim by the
     // sending host rather than a proof (§14.2).
-    const existing = this.offers.get(offer.id);
-    if (existing) {
+    //
+    // Question 59, decided 2026-09-19. **An offer this host holds that is
+    // identical to the arriving one has already been carried**, which is what
+    // §14.2 does for an edge and a mandate. A move leaves behind what has not
+    // finished moving money (question 57), so the natural next step once it
+    // settles is to move again from the same host, and that body carries every
+    // offer the first move already brought. Refusing those refused the move,
+    // so the record of a box left behind never reached the host the household
+    // lives at. An offer that differs is still refused.
+    if (carrying?.offers.has(offer.id)) {
       throw conflict(
         "bad_state",
         `offer ${offer.id} is already here, and an import does not change what this host holds`
       );
     }
-    if (carrying?.offers.has(offer.id)) {
+    const existing = this.offers.get(offer.id);
+    if (existing) {
+      if (isDeepStrictEqual(existing, offer)) return;
       throw conflict(
         "bad_state",
         `offer ${offer.id} is already here, and an import does not change what this host holds`
@@ -1977,8 +1988,15 @@ export class ValenceEngine {
     this.assertCandidateIdentifiers(offer, carrying?.candidates);
   }
 
+  /** Question 59. This host holds this offer exactly as it arrives. */
+  alreadyCarried(offer: Offer): boolean {
+    const held = this.offers.get(offer.id);
+    return held !== undefined && isDeepStrictEqual(held, offer);
+  }
+
   importOffer(offer: Offer, household: string): void {
     this.checkImportedOffer(offer, household);
+    if (this.alreadyCarried(offer)) return;
     this.offers.set(offer.id, offer);
     for (const c of offer.candidates) this.candidateIndex.set(c.id, offer.id);
   }
