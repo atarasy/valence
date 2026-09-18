@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LocalMandates, RemoteMandates } from "../src/engine/mandate-source.js";
+import { LocalMandates, RemoteMandates, tightestDailyCeiling } from "../src/engine/mandate-source.js";
 import type { Mandate } from "../src/hub/mandates.js";
 
 const mandate: Mandate = {
@@ -66,6 +66,32 @@ describe("§13.1: where the engine reads a protection from", () => {
       expect([what, await answering(body, status).holdsAny("key:h").then(() => "answered", (e) => (e as { code: string }).code)])
         .toEqual([what, "hub_refused"]);
     }
+  });
+
+  test("the remote source reads a giver's tightest daily ceiling, and silence is not none (§12, §16.3, question 60)", async () => {
+    // A hub that predates question 60 answers `has` without `ceiling_daily`.
+    // Reading that as "no ceiling" would charge a giver past the ceiling it
+    // set, so it refuses instead, as `holdsAny` does for a missing `has`.
+    const answering = (body: string, status = 200) =>
+      new RemoteMandates("http://hub.example/", (async () => new Response(body, { status })) as never);
+    expect(await answering(JSON.stringify({ has: true, ceiling_daily: 500 })).dailyCeilingOf("key:g")).toBe(500);
+    expect(await answering(JSON.stringify({ has: false, ceiling_daily: null })).dailyCeilingOf("key:g")).toBeNull();
+    for (const [what, body] of [
+      ["a hub that predates the field", JSON.stringify({ has: true })],
+      ["a negative ceiling", JSON.stringify({ has: true, ceiling_daily: -1 })],
+      ["a string ceiling", JSON.stringify({ has: true, ceiling_daily: "500" })],
+      ["a fractional ceiling", JSON.stringify({ has: true, ceiling_daily: 1.5 })],
+    ] as const) {
+      expect([what, await answering(body).dailyCeilingOf("key:g").then(() => "answered", (e) => (e as { code: string }).code)])
+        .toEqual([what, "hub_refused"]);
+    }
+  });
+
+  test("the local source reads the tightest daily ceiling among a household's mandates (question 60)", () => {
+    const m = (ceiling_daily: number | null) => ({ ceiling_daily }) as never;
+    expect(tightestDailyCeiling([])).toBeNull();
+    expect(tightestDailyCeiling([m(null), m(null)])).toBeNull();
+    expect(tightestDailyCeiling([m(900), m(null), m(300), m(700)])).toBe(300);
   });
 
   test("a hub that answers a mandate in a shape this engine cannot read is not a mandate", async () => {

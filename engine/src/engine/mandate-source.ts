@@ -33,7 +33,28 @@ export type MandateSource = {
    * answer. What closes that read is question 41's authenticated one.
    */
   holdsAny(household: string): Promise<boolean>;
+  /**
+   * §12 and §16.3, question 60, decided 2026-09-19. **The tightest daily
+   * ceiling among this household's mandates, or null where none sets one.**
+   * A ceremonial offer names the recipient's mandate and charges the giver,
+   * and the ceiling was read from the recipient's: measured on 2026-09-19, a
+   * giver with a ceiling of 500 was charged 1200 and a recipient with a
+   * ceiling of 500 had the gift refused. A daily ceiling protects the person
+   * whose money moves, so the giver's is the one read. A gift names no mandate
+   * of the giver's, so the tightest of them governs.
+   */
+  dailyCeilingOf(household: string): Promise<number | null>;
 };
+
+/** §16.3. The tightest `ceiling_daily` among the rows, or null. */
+export function tightestDailyCeiling(rows: Mandate[]): number | null {
+  let tightest: number | null = null;
+  for (const m of rows) {
+    if (m.ceiling_daily == null) continue;
+    if (tightest === null || m.ceiling_daily < tightest) tightest = m.ceiling_daily;
+  }
+  return tightest;
+}
 
 /** The register in this process. What the reference runs when it presents both roles. */
 export class LocalMandates implements MandateSource {
@@ -48,6 +69,9 @@ export class LocalMandates implements MandateSource {
   }
   async holdsAny(household: string): Promise<boolean> {
     return this.rows.forHousehold(household).length > 0;
+  }
+  async dailyCeilingOf(household: string): Promise<number | null> {
+    return tightestDailyCeiling(this.rows.forHousehold(household));
   }
 }
 
@@ -116,6 +140,34 @@ export class RemoteMandates implements MandateSource {
    * engine cannot read, are neither of them a hub that says there are none.
    */
   async holdsAny(household: string): Promise<boolean> {
+    const has = (await this.household(household)).has;
+    if (typeof has !== "boolean") {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates without saying whether there are any`
+      );
+    }
+    return has;
+  }
+
+  /**
+   * §16.3, question 60. The same route carries the tightest daily ceiling. A
+   * hub that answers without it is one that predates the question, and
+   * reading its silence as "no ceiling" would charge a giver past the ceiling
+   * it set, so it refuses instead.
+   */
+  async dailyCeilingOf(household: string): Promise<number | null> {
+    const ceiling = (await this.household(household)).ceiling_daily;
+    if (ceiling !== null && !(typeof ceiling === "number" && Number.isSafeInteger(ceiling) && ceiling >= 0)) {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates without a daily ceiling it could read`
+      );
+    }
+    return ceiling as number | null;
+  }
+
+  private async household(household: string): Promise<{ has?: unknown; ceiling_daily?: unknown }> {
     let response: Response;
     try {
       response = await this.fetchImpl(
@@ -148,13 +200,12 @@ export class RemoteMandates implements MandateSource {
         `the hub answered ${household}'s mandates in a form this engine could not read`
       );
     }
-    const has = (body as { has?: unknown } | null)?.has;
-    if (typeof has !== "boolean") {
+    if (!body || typeof body !== "object") {
       throw unprocessable(
         "hub_refused",
         `the hub answered ${household}'s mandates without saying whether there are any`
       );
     }
-    return has;
+    return body as { has?: unknown; ceiling_daily?: unknown };
   }
 }

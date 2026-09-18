@@ -207,6 +207,10 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
         version: 1,
       } as never;
     },
+    async dailyCeilingOf() {
+      // Question 60. Read only for a gift's giver, which these stubs never are.
+      return null;
+    },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
       // whose it is, or an offer of that household naming another label is
@@ -394,6 +398,10 @@ describe("§6, §16.3: nothing is written on refusal, at the ledger as well", ()
         lapses_at: Date.now() + 86_400_000,
         version: 1,
       } as never;
+    },
+    async dailyCeilingOf() {
+      // Question 60. Read only for a gift's giver, which these stubs never are.
+      return null;
     },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
@@ -659,5 +667,69 @@ describe("§6.2, clause 10: a gift is never billed, whatever became of it", () =
       deliveries.record({ offer: "o-carriage", carriage: 800, code: "dc-1", status: "delivered" })
     ).toThrow(/carriage/);
     expect(deliveries.mustGet("o-carriage").carriage).toBe(500);
+  });
+});
+
+describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoever pays", () => {
+  /**
+   * A ceremonial offer names the recipient's mandate and charges the giver.
+   * Measured on 2026-09-19 by the fifth refutation pass over question 57: the
+   * recipient's ceiling was read and the recipient's day was counted, so a
+   * giver with a ceiling of 500 was charged 1200, and a recipient with a
+   * ceiling of 500 had a gift refused that it pays nothing for.
+   */
+  const GIVER = "giver-1";
+  const ceilings = (recipient: number | null, giver: number | null) => ({
+    async get(_id?: string) {
+      return {
+        id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: recipient,
+        cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
+      } as never;
+    },
+    async dailyCeilingOf(h: string) {
+      return h === GIVER ? giver : null;
+    },
+    async holdsAny(h: string) {
+      return h === HOUSEHOLD;
+    },
+  });
+  const gift = async (engine: ReturnType<typeof makeEngine>["engine"]) => {
+    const offer = engine.createOffer({
+      ...physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]),
+      binding: "digital" as const,
+      purpose: "ceremonial" as const,
+      price_band: { min: 0, max: 1_000_000 },
+      giver: GIVER,
+    });
+    await engine.present(offer.id);
+    await decideSigned(engine, offer.id, [
+      { candidate: offer.candidates[0]!.id, valence: "kept" as const, kept_as: "self" as const },
+      { candidate: offer.candidates[1]!.id, valence: "returned" as const },
+    ]);
+    return offer;
+  };
+
+  test("the giver's ceiling refuses the gift, and nothing is committed", async () => {
+    const { engine, ledger } = makeEngine();
+    engine.readMandatesFrom(ceilings(null, 1));
+    const offer = await gift(engine);
+    await expect(engine.settle(offer.id)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+    expect(ledger.get(offer.id)!.status).toBe("held");
+  });
+
+  test("the recipient's ceiling does not refuse a gift the recipient does not pay for, and the day counted is the giver's", async () => {
+    const { engine } = makeEngine();
+    engine.readMandatesFrom(ceilings(1, null));
+    const reported: { household: string; amount: number }[] = [];
+    engine.readTheDayFrom({
+      async totalSince() { return 0; },
+      async report(r: { household: string; amount: number }) { reported.push(r); },
+      async reportOffer() {},
+    } as never);
+    const offer = await gift(engine);
+    const settlement = await engine.settle(offer.id);
+    expect(settlement.payer).toBe(GIVER);
+    expect(settlement.charged).toBeGreaterThan(1);
+    expect(reported.map((r) => r.household)).toEqual([GIVER]);
   });
 });

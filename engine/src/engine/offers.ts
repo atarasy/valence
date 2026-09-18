@@ -1364,17 +1364,29 @@ export class ValenceEngine {
       throw conflict("no_reservation", `no reservation for ${offer.id} on this host; it settles where it was presented`);
     }
 
-    if (mandate?.ceiling_daily != null) {
+    // §12 and §16.3, question 60, decided 2026-09-19. **The ceiling is the
+    // payer's.** A ceremonial offer names the recipient's mandate and charges
+    // the giver, and until this question the recipient's ceiling was read and
+    // the recipient's day was counted: a giver with a ceiling of 500 was
+    // charged 1200, and a recipient with a ceiling of 500 had a gift it pays
+    // nothing for refused. A daily ceiling protects the person whose money
+    // moves. The recipient's mandate still governs what the recipient does:
+    // the cooling window above, and whether the offer names a mandate at all.
+    const payer = offer.giver ?? offer.household;
+    const ceilingDaily = offer.giver
+      ? await this.mandateSource.dailyCeilingOf(offer.giver)
+      : mandate?.ceiling_daily ?? null;
+    if (ceilingDaily != null) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
       // engine's settlements: an engine summing its own is a merchant
       // computing a household's union (clause 38), and two engines would give
       // one household two ceilings.
-      const already = await this.daySource.totalSince(offer.household, dayStart);
-      if (already + charged > mandate.ceiling_daily) {
+      const already = await this.daySource.totalSince(payer, dayStart);
+      if (already + charged > ceilingDaily) {
         throw unprocessable(
           "mandate_ceiling_daily",
-          `${already + charged} would settle for this household today, above the daily ceiling of ${mandate.ceiling_daily}`
+          `${already + charged} would settle for this payer today, above the daily ceiling of ${ceilingDaily}`
         );
       }
     }
@@ -1401,7 +1413,7 @@ export class ValenceEngine {
       // §6.5. The household's signature over the statement, where one was
       // needed. Null for the digital binding and for a box with nothing used.
       confirmation: signed,
-      payer: offer.giver ?? offer.household,
+      payer,
       // Clause 11. The presenter is not the seller; it signs for the
       // merchants named on the lines, as their disclosed agent.
       signed_by: offer.presenter,
@@ -1418,7 +1430,8 @@ export class ValenceEngine {
     // person's side rather than the person's own.
     await this.daySource.report({
       offer: offer.id,
-      household: offer.household,
+      // Question 60: counted to the day of whoever paid.
+      household: payer,
       amount: charged,
       settled_at: now,
     });

@@ -1,4 +1,5 @@
 import { type Mandate } from "./hub/mandates.js";
+import { tightestDailyCeiling } from "./engine/mandate-source.js";
 import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
@@ -1148,7 +1149,10 @@ async function route(
     // already hands every mandate a household has to whoever asks, and a
     // presenter can read this bit by presenting under a label of its own and
     // reading the answer. What closes that read is question 41.
-    return json({ has: engine.mandates.forHousehold(household).length > 0 });
+    // Question 60: and the tightest daily ceiling, which a gift's giver is
+    // held to at settlement (§12, §16.3).
+    const held = engine.mandates.forHousehold(household);
+    return json({ has: held.length > 0, ceiling_daily: tightestDailyCeiling(held) });
   }
 
   if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {
