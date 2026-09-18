@@ -103,6 +103,11 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // the household's to control, so the one being signed can be named.
   await unit.run(s=>memberRuntime(s,c).engine.mandates.importMandate({...toSign.mandate,id:toSign.mandate.household+'.squatted',ceiling_out_of_network:9_999_999}));
   expect((await send('/member/mandates/prepare',{},before)).status).toBe(404);
+  // A client that has been restored knows no identifier, and nothing else on
+  // this service lists one, so the ceremony lists them. Measured by a
+  // refutation pass 2026-09-18, which found it unreachable for such a client.
+  const listed=await (await send('/member/mandates/list',{},before)).json();
+  expect(listed.mandates.map((m:{id:string})=>m.id).sort()).toEqual([awaiting.mandate,toSign.mandate.household+'.squatted'].sort());
   const named=await (await send('/member/mandates/prepare',{mandate:awaiting.mandate},before)).json();
   expect(named.mandate.id).toBe(awaiting.mandate);
   expect((await send('/member/mandates/submit',{assertion:assertionFor(key,named.publicKey.challenge,c,3),mandate:awaiting.mandate},before)).status).toBe(200);

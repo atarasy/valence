@@ -143,8 +143,15 @@ export class MandateRegister {
   }
 
   /** The claim held for an identifier, which is not a mandate until it is signed. */
-  claimFor(id: string): Mandate | undefined {
-    return this.claims.get(id);
+  claimFor(id: string, now = Date.now()): Mandate | undefined {
+    const claim = this.claims.get(id);
+    // A claim that has lapsed can never be signed, because `record` refuses a
+    // lapsed mandate, so it is not one this host offers and not one that keeps
+    // the identifier. A refutation pass on 2026-09-18 measured the other way:
+    // the acceptance flow writes a claim with a week's lapse, and a household
+    // that did not sign within the week could never sign and no route removed
+    // the row. **No attacker was needed for that one, only a week.**
+    return claim && claim.lapses_at > now ? claim : undefined;
   }
 
   /**
@@ -167,8 +174,8 @@ export class MandateRegister {
    * protections do not apply until the person signs**, and the cost of the
    * other direction was that anybody could stop anybody from being sold to.
    */
-  claimsFor(household: string): Mandate[] {
-    return [...this.claims.values()].filter((m) => m.household === household);
+  claimsFor(household: string, now = Date.now()): Mandate[] {
+    return [...this.claims.values()].filter((m) => m.household === household && m.lapses_at > now);
   }
 
   /**
@@ -177,7 +184,7 @@ export class MandateRegister {
    * row that arrived second decided nothing about the one that arrived first.
    */
   importMandate(m: Mandate, now = Date.now()): void {
-    if (this.rows.has(m.id) || this.claims.has(m.id)) return;
+    if (this.rows.has(m.id) || this.claimFor(m.id, now)) return;
     // A claim that has already lapsed can never be signed, so keeping it as one
     // that might is a row nobody can act on. Named by a refutation pass on
     // 2026-09-18, which measured an import carrying `lapses_at: 0`.
@@ -265,7 +272,18 @@ export class MandateRegister {
     // version is inside the canonical bytes: a submission that is the claim
     // carries the claim's version by construction. It was a separate check
     // until the claim stopped being matched by version alone, on 2026-09-18.
-    if (!before && !claim && mandate.version !== 1) {
+    // §16.1. A version that cannot be incremented stops rising, and the version
+    // is what keeps an old signature off a new record: at 2^53 a household
+    // tightened a ceiling at the same number and its own earlier submission
+    // replayed the loose one back. Measured by a refutation pass on 2026-09-18.
+    if (!Number.isSafeInteger(mandate.version) || mandate.version < 1 || mandate.version >= Number.MAX_SAFE_INTEGER) {
+      throw unprocessable("stale_version", `version ${mandate.version} is not one a version can follow`);
+    }
+    // A claim is not a signed history, so when one is all this host holds the
+    // household says which version it is at. Requiring 1 made a stranger's
+    // claim cost the household its version line: it recovered only by starting
+    // again at 1. Measured by the same pass.
+    if (!before && !claim && !held && mandate.version !== 1) {
       throw unprocessable("stale_version", "a new mandate starts at version 1");
     }
     if (mandate.lapses_at <= now) {

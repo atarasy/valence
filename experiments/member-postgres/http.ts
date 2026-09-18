@@ -30,7 +30,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',mandate=/^\/member\/mandates\/(prepare|submit)$/.exec(url.pathname),member=prepare||!!match||!!mandate,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),member=prepare||!!match||!!mandate,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -69,10 +69,10 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
       // is shown what it is agreeing to, and the engine verifies the assertion.
       if(mandate){
        if(action==='mandate-submit'&&(!inputBody||typeof inputBody!=='object'||!['assertion','assertion,mandate'].includes(Object.keys(inputBody).sort().join(','))))throw new Error('Invalid assertion');
-       if(action==='mandate-prepare'&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||!['','mandate'].includes(Object.keys(inputBody).join(','))))throw new Error('Invalid request');
+       if(['mandate-prepare','mandate-list'].includes(action)&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||!['','mandate'].includes(Object.keys(inputBody).join(','))))throw new Error('Invalid request');
        const ceremony=openMandateCeremony(r,{rpID:c.rpID});
        const named=(inputBody as {mandate?:unknown}).mandate;if(named!==undefined&&typeof named!=='string')throw new Error('Invalid mandate');
-       const value=action==='mandate-prepare'?ceremony.prepare(token,named):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion,named);
+       const value=action==='mandate-list'?ceremony.list(token):action==='mandate-prepare'?ceremony.prepare(token,named):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion,named);
        return {status:200,body:JSON.stringify(value)};
       }
       const api=openStatementAuthorisations(r,{environment:c.environment,origin:c.origin,rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs,maxSessionLifetimeMs:c.maxSessionLifetimeMs,engine:r.engine.config,now});

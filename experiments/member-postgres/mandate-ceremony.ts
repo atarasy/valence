@@ -35,6 +35,18 @@ export function openMandateCeremony(r: ReturnType<typeof memberRuntime>, policy:
 
   return {
     /** What the device is being asked to sign, and the options to sign it with. */
+    /**
+     * The claims this household has, or the one it named. A client that has
+     * been restored or reinstalled knows no identifier, and nothing else on
+     * this service lists one: `GET /_node/mandates/{id}` answers 404 for a
+     * claim by design. Measured by a refutation pass on 2026-09-18, which
+     * found the ceremony unreachable for exactly that client.
+     */
+    list(token: string) {
+      const session = r.authority.sessionPrincipal(token);
+      if (!session) throw new Error('Mandate ceremony unavailable');
+      return { mandates: r.engine.mandates.claimsFor(session.household) };
+    },
     prepare(token: string, id?: string) {
       const { principal, claim } = held(token, id);
       return {

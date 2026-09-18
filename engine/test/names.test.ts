@@ -4,6 +4,7 @@ import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, h
 import { canonicalMandate } from "../src/hub/mandates.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
 import { createApp } from "../src/http.js";
+import { exportNode } from "../src/hub/node.js";
 import { ApprovalDesk } from "../src/hub/approval.js";
 import { DeliveryRegister } from "../src/hub/delivery.js";
 import { RecoveryRegister } from "../src/hub/node.js";
@@ -276,13 +277,69 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
     engine.mandates.importMandate(terms({ version: 3, co_signers: [co] }) as never);
     const keyOf = (k: string) => engine.publicKeyFor(k);
     // Anything but the claim is an ordinary record, judged against what this
-    // host holds, which is nothing: so it starts at version 1.
-    expect(() => engine.mandates.record({ ...signedBy(terms({ version: 3, co_signers: [] })), keyOf }))
-      .toThrow(expect.objectContaining({ code: "stale_version" }));
-    engine.mandates.record({ ...signedBy(terms({ version: 1, co_signers: [] })), keyOf });
-    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 1, co_signers: [] });
+    // host holds, which is a claim and not a signed history: so the household
+    // says which version it is at, and the co-signers the claim named do not
+    // bind it. Requiring version 1 here made a stranger's claim cost the
+    // household its version line, measured by a refutation pass 2026-09-18.
+    engine.mandates.record({ ...signedBy(terms({ version: 3, co_signers: [] })), keyOf });
+    expect(engine.mandates.get(MANDATE)).toMatchObject({ version: 3, co_signers: [] });
     // And the claim is gone, because the identifier now holds a mandate.
     expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+
+    // And with nothing held at all, a mandate still starts at version 1.
+    const fresh = makeEngine().engine;
+    expect(() => fresh.mandates.record({ ...signedBy(terms({ version: 3 })), keyOf: (k: string) => fresh.publicKeyFor(k) }))
+      .toThrow(expect.objectContaining({ code: "stale_version" }));
+  });
+
+  test("the export carries the claims beside the signed rows", () => {
+    // NOTE (mutation check, 2026-09-18): export_drops_claims. An offer that
+    // moved with its mandate names a mandate the next archive would not carry,
+    // which makes that archive invalid, and the record of what the household
+    // had would stop at the first host it left. The MUST had no test at all
+    // until a refutation pass measured that deleting the line changed nothing.
+    const { engine } = makeEngine();
+    engine.mandates.importMandate(terms() as never);
+    const exported = exportNode(engine, new RecoveryRegister(), new PermissionLedger(),
+      engine.mandates, new DeliveryRegister(), HOUSEHOLD);
+    expect(exported.mandates.map((m) => m.id)).toEqual([MANDATE]);
+  });
+
+  test("a claim that lapses after it arrives is not one this host offers", () => {
+    // NOTE (mutation check, 2026-09-18): claim_outlives_its_lapse. A claim can
+    // only be signed while it is live, because `record` refuses a lapsed
+    // mandate, and nothing removed one that died after it was written. The
+    // acceptance flow writes a claim with a week's fuse, and a household that
+    // approved late was locked out for good. **No attacker, only a week.**
+    const { engine } = makeEngine();
+    const soon = Date.now() + 50;
+    engine.mandates.importMandate(terms({ lapses_at: soon }) as never);
+    expect(engine.mandates.claimFor(MANDATE)).toBeDefined();
+    expect(engine.mandates.claimFor(MANDATE, soon + 1)).toBeUndefined();
+    expect(engine.mandates.claimsFor(HOUSEHOLD, soon + 1)).toEqual([]);
+    // And the identifier is free again, so a live claim can take its place.
+    engine.mandates.importMandate(terms({ ceiling_out_of_network: 7 }) as never, soon + 1);
+    expect(engine.mandates.claimFor(MANDATE, soon + 2)).toMatchObject({ ceiling_out_of_network: 7 });
+  });
+
+  test("a version with no room to follow it is refused", () => {
+    // NOTE (mutation check, 2026-09-18): version_ceiling_unchecked. At 2^53
+    // `before.version + 1 === before.version`, so the version stops rising and
+    // the property the canonical bytes rest on fails: a household tightened a
+    // ceiling at that number and its own earlier submission replayed the loose
+    // one back. Measured 2026-09-18.
+    const { engine } = makeEngine();
+    const keyOf = (k: string) => engine.publicKeyFor(k);
+    // A claim carries the version, so signing one is the route by which such a
+    // number would otherwise reach a record: the claim is what makes the case
+    // reachable at all.
+    for (const version of [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, 0, 1.5]) {
+      const fresh = makeEngine().engine;
+      fresh.mandates.importMandate(terms({ version }) as never);
+      expect(() => fresh.mandates.record({ ...signedBy(terms({ version })), keyOf: (k: string) => fresh.publicKeyFor(k) }))
+        .toThrow(expect.objectContaining({ code: "stale_version" }));
+    }
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
   });
 
   test("a claim signed by anything but the household's own key is refused", () => {
