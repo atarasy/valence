@@ -103,8 +103,8 @@ describe("§16.1: bringing a co-signed mandate's lapse forward is a loosening", 
   });
 });
 
-describe("§16.1, clause 58: a lapse is at most a year out", () => {
-  test("a household that has lost its co-signer is held for at most a year", async () => {
+describe("§16.1, clause 58: a lapse is at most 400 days out", () => {
+  test("a household that has lost its co-signer is held for at most 400 days", async () => {
     // NOTE (mutation check, 2026-09-19): lapse_unbounded. The first refusal
     // assertion read "accepted": a lapse in the year 9999 was recorded.
     //
@@ -129,7 +129,7 @@ describe("§16.1, clause 58: a lapse is at most a year out", () => {
     await expect(engine.present(early.id, T)).rejects.toMatchObject({ code: "mandate_ceiling_out_of_network" });
     expect(refusal(() => record(engine, { ...freeze, lapses_at: T + 1_000, version: 2 }, T))).toBe("unsigned");
 
-    // A year and a day on, it has lapsed and binds nothing.
+    // 400 days and a millisecond on, it has lapsed and binds nothing.
     const after = T + MAX_LAPSE_MS + 1;
     // `.1` names nobody, so the household renews it alone.
     record(engine, { ...loose, lapses_at: after + 300 * DAY, version: 2 }, after);
@@ -145,6 +145,35 @@ describe("§16.1, clause 58: a lapse is at most a year out", () => {
     const { engine } = makeEngine();
     const renewal = mandate("1", { lapses_at: T + 365 * 86_400_000 + 60_000 }, T);
     expect(record(engine, renewal, T).lapses_at).toBe(renewal.lapses_at);
+  });
+
+  test("a device a week fast still records every kind of change (§16.1)", () => {
+    // NOTE (mutation check, 2026-09-20): lapse_bound_is_a_year. Each
+    // assertion below read "lapse_too_far" at 366 days.
+    //
+    // The second refutation pass over question 68 measured the bound of 366
+    // days as one day of tolerance for a clock the hub does not own: the
+    // screen computes `Date.now() + 365` days on the member's device, and
+    // every button writes a whole version, so a phone two days fast could set
+    // no ceiling, no window and no co-signer. The bound is there to bound the
+    // freeze, so it is 400 days and the tolerance is 35.
+    const T = Date.now();
+    const { engine } = makeEngine();
+    const renewal = (daysFast: number, version: number, fields: Partial<Mandate> = {}) =>
+      record(
+        engine,
+        mandate("1", { ...fields, lapses_at: T + daysFast * DAY + 365 * DAY, version }, T),
+        T
+      );
+    // A day fast was already within the old bound; two days was not, and a
+    // week is an ordinary wrong date.
+    expect(renewal(2, 1).version).toBe(1);
+    expect(renewal(7, 2, { ceiling_daily: 500 }).ceiling_daily).toBe(500);
+    expect(renewal(7, 3, { cooling_seconds: 3_600 }).cooling_seconds).toBe(3_600);
+    // And the bound still bounds: 400 days from the host's clock records, a
+    // millisecond further does not.
+    expect(record(engine, mandate("2", { lapses_at: T + MAX_LAPSE_MS }, T), T).version).toBe(1);
+    expect(refusal(() => record(engine, mandate("3", { lapses_at: T + MAX_LAPSE_MS + 1 }, T), T))).toBe("lapse_too_far");
   });
 });
 

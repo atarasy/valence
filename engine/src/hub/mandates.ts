@@ -123,12 +123,19 @@ function shortens(before: number | null, after: number | null): boolean {
 
 /**
  * §16.1, clause 58, decided 2026-09-19 after the first refutation pass over
- * question 68. **The furthest a version's lapse may be from the moment it is
- * recorded: a year**, counted as the longest calendar year so that a hub
- * which renews "a year out" from a member's own clock, as the reference does,
- * is not refused over a few minutes between the two clocks.
+ * question 68, and widened on 2026-09-20 after the second. **The furthest a
+ * version's lapse may be from the moment it is recorded: 400 days.**
+ *
+ * It was 366, a year plus the minutes between two clocks. The second pass
+ * measured what that day of slack is spent on: the reference hub computes
+ * the lapse on the member's own device (`Date.now() + 365` days), so a phone
+ * two days fast had every button on its protections screen refused
+ * `lapse_too_far`, tightenings included, because each writes a whole version.
+ * This bound exists to bound the freeze a lost co-signer puts a household
+ * under, and 34 days more of a freeze that already runs a year costs nothing
+ * next to a member who can set no protection at all.
  */
-export const MAX_LAPSE_MS = 366 * 86_400_000;
+export const MAX_LAPSE_MS = 400 * 86_400_000;
 
 /** A claim above this cannot be one a household reached, and signing it would leave no room to follow. */
 const MAX_CLAIMED_VERSION = 2 ** 20;
@@ -332,18 +339,21 @@ export class MandateRegister {
     if (mandate.lapses_at <= now) {
       throw unprocessable("lapsed", "a mandate that has already lapsed cannot be recorded");
     }
-    // §16.1, clause 58. **A lapse at most a year out.** Question 68 made every
-    // mandate a household holds bind every offer it makes, and bringing a
-    // co-signed lapse forward now needs the co-signers, so a mandate naming a
-    // co-signer nobody holds (a typo, or a key the person lost) holds the
+    // §16.1, clause 58. **A lapse at most 400 days out.** Question 68 made
+    // every mandate a household holds bind every offer it makes, and bringing
+    // a co-signed lapse forward now needs the co-signers, so a mandate naming
+    // a co-signer nobody holds (a typo, or a key the person lost) holds the
     // household until it lapses. Nothing bounded that: the first refutation
-    // pass over question 68 recorded a lapse in the year 9999. A year is what
-    // the reference hub renews to, so a household that has lost a co-signer
-    // is held for at most a year.
+    // pass over question 68 recorded a lapse in the year 9999.
+    //
+    // **The message names this host's clock**, because the party whose date
+    // is wrong is usually the member's device: the reference hub computes the
+    // lapse there, and a member reading "400 days" against their own calendar
+    // has nothing to act on. Named after the second refutation pass.
     if (mandate.lapses_at > now + MAX_LAPSE_MS) {
       throw unprocessable(
         "lapse_too_far",
-        `a mandate lapses at most a year after it is recorded, and ${mandate.lapses_at} is further out`
+        `a mandate lapses at most 400 days after it is recorded, and ${mandate.lapses_at} is further out than that from ${now}, which is this host's clock`
       );
     }
 

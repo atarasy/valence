@@ -857,7 +857,7 @@ export class ValenceEngine {
     // 56's first attempt was refused. **A mandate naming a co-signer nobody
     // holds does now bind every label**, which the first refutation pass over
     // question 68 measured and this comment had denied: the household is held
-    // until that mandate lapses, which §16.1 bounds at a year.
+    // until that mandate lapses, which §16.1 bounds at 400 days.
     //
     // The named mandate is live here and is one of this household's, so the
     // minimum is the tightest of the two views even where the source's
