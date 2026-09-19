@@ -121,6 +121,15 @@ function shortens(before: number | null, after: number | null): boolean {
   return after < before;
 }
 
+/**
+ * §16.1, clause 58, decided 2026-09-19 after the first refutation pass over
+ * question 68. **The furthest a version's lapse may be from the moment it is
+ * recorded: a year**, counted as the longest calendar year so that a hub
+ * which renews "a year out" from a member's own clock, as the reference does,
+ * is not refused over a few minutes between the two clocks.
+ */
+export const MAX_LAPSE_MS = 366 * 86_400_000;
+
 /** A claim above this cannot be one a household reached, and signing it would leave no room to follow. */
 const MAX_CLAIMED_VERSION = 2 ** 20;
 
@@ -322,6 +331,20 @@ export class MandateRegister {
     }
     if (mandate.lapses_at <= now) {
       throw unprocessable("lapsed", "a mandate that has already lapsed cannot be recorded");
+    }
+    // §16.1, clause 58. **A lapse at most a year out.** Question 68 made every
+    // mandate a household holds bind every offer it makes, and bringing a
+    // co-signed lapse forward now needs the co-signers, so a mandate naming a
+    // co-signer nobody holds (a typo, or a key the person lost) holds the
+    // household until it lapses. Nothing bounded that: the first refutation
+    // pass over question 68 recorded a lapse in the year 9999. A year is what
+    // the reference hub renews to, so a household that has lost a co-signer
+    // is held for at most a year.
+    if (mandate.lapses_at > now + MAX_LAPSE_MS) {
+      throw unprocessable(
+        "lapse_too_far",
+        `a mandate lapses at most a year after it is recorded, and ${mandate.lapses_at} is further out`
+      );
     }
 
     const required = new Set<string>([mandate.household]);

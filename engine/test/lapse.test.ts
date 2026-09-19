@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { sign } from "node:crypto";
-import { canonicalMandate, type Mandate } from "../src/hub/mandates.js";
+import { MAX_LAPSE_MS, canonicalMandate, type Mandate } from "../src/hub/mandates.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
-import { CONFIG_VERSION, HOUSEHOLD, MANDATE_PAIR, houseFor, makeEngine } from "./helpers.js";
+import { CONFIG_VERSION, HOUSEHOLD, MANDATE_PAIR, houseFor, makeEngine, otherHousehold } from "./helpers.js";
 
 /**
  * §16.1, §16.3, §16.5. The lapse, as the first refutation pass over question
@@ -99,5 +99,49 @@ describe("§16.1: bringing a co-signed mandate's lapse forward is a loosening", 
     expect(refusal(() => record(engine, { ...named, lapses_at: named.lapses_at + DAY, version: 2 }, T))).toBe("unsigned");
     // A tightening that leaves the lapse where it was is still the household's alone.
     expect(record(engine, { ...named, cooling_seconds: 60, version: 2 }, T).version).toBe(2);
+  });
+});
+
+describe("§16.1, clause 58: a lapse is at most a year out", () => {
+  test("a household that has lost its co-signer is held for at most a year", async () => {
+    // NOTE (mutation check, 2026-09-19): lapse_unbounded.
+    //
+    // The refutation's freeze: the household, or whoever holds its key,
+    // records `.9` with a daily ceiling of 0, a ten-year window and a
+    // co-signer nobody holds. Question 68 makes it bind every label, and
+    // bringing its lapse forward needs that co-signer, so the lapse is the
+    // only way out; it was measured accepting the year 9999.
+    const T = Date.now();
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    const loose = mandate("1", { ceiling_out_of_network: 10_000_000 }, T);
+    record(engine, loose, T);
+    const lost = otherHousehold().household;
+    const freeze = mandate("9", { ceiling_out_of_network: 0, ceiling_daily: 0, cooling_seconds: 10 * 365 * 86_400, co_signers: [lost] }, T);
+
+    expect(refusal(() => record(engine, { ...freeze, lapses_at: Date.UTC(9999, 0, 1) }, T))).toBe("lapse_too_far");
+    expect(refusal(() => record(engine, { ...freeze, lapses_at: T + MAX_LAPSE_MS + 1 }, T))).toBe("lapse_too_far");
+    record(engine, { ...freeze, lapses_at: T + MAX_LAPSE_MS }, T);
+
+    // Frozen while it is live, and the household alone cannot end it early.
+    const early = offer(engine, loose.id, T);
+    await expect(engine.present(early.id, T)).rejects.toMatchObject({ code: "mandate_ceiling_out_of_network" });
+    expect(refusal(() => record(engine, { ...freeze, lapses_at: T + 1_000, version: 2 }, T))).toBe("unsigned");
+
+    // A year and a day on, it has lapsed and binds nothing.
+    const after = T + MAX_LAPSE_MS + 1;
+    // `.1` names nobody, so the household renews it alone.
+    record(engine, { ...loose, lapses_at: after + 300 * DAY, version: 2 }, after);
+    const later = offer(engine, loose.id, after, "tea-b");
+    expect((await engine.present(later.id, after)).state).toBe("presented");
+  });
+
+  test("the reference hub's renewal, a year from the member's clock, is within the bound", () => {
+    // `atarasy/src/client/app.ts` writes `Date.now() + 365 * 86_400_000` on the
+    // member's device and the version is recorded afterwards, on the host's
+    // clock; a day of slack covers a device clock that runs ahead.
+    const T = Date.now();
+    const { engine } = makeEngine();
+    const renewal = mandate("1", { lapses_at: T + 365 * 86_400_000 + 60_000 }, T);
+    expect(record(engine, renewal, T).lapses_at).toBe(renewal.lapses_at);
   });
 });
