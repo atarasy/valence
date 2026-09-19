@@ -266,6 +266,26 @@ export class ValenceEngine {
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
     this.carriedSettlements = store.map("carried_settlements");
+    // Question 66. A store written before the marker existed holds carried
+    // settlements with nothing to say so, and they then read as made here: a
+    // payment planted by a recipient's import came back into its giver's
+    // record on upgrade, and the first settle reported it to the giver's day.
+    // Measured by the second refutation pass over question 66. The old rule,
+    // a settlement with no reservation on this ledger, is applied once while
+    // a ledger that keeps its rows can still answer it; one that forgets them
+    // on restart cannot tell the two apart, so nothing is marked and the
+    // store is left for its operator to rebuild (§14.2).
+    const migrations = store.map<true>("migrations");
+    if (!migrations.has("carried_settlements")) {
+      const settled = [...this.settlements.keys()];
+      const remembers = ledger.durable === true || settled.length === 0 || settled.some((id) => ledger.get(id) !== undefined);
+      if (remembers) {
+        for (const id of settled) if (ledger.get(id) === undefined) this.carriedSettlements.set(id, true);
+        migrations.set("carried_settlements", true);
+      } else {
+        console.warn(`valence: ${settled.length} settlements predate the carried-settlement marker and this ledger cannot say which were carried; rebuild the store (§14.2, question 66)`);
+      }
+    }
     this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
     this.edges = store.map("edges");

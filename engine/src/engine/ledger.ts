@@ -42,6 +42,12 @@ export type Reservation = {
 };
 
 export interface Ledger {
+  /**
+   * Question 66. Whether this ledger's rows outlive the process, so that a
+   * reservation's absence after a restart means it never existed here. The
+   * Meter adapter's holds are memory only and it leaves this unset.
+   */
+  readonly durable?: boolean;
   reserve(input: {
     requestId: string;
     household: string;
@@ -60,9 +66,12 @@ export interface Ledger {
 export class InMemoryLedger implements Ledger {
 
   /** §13.2. Where this register keeps what it holds. Unset is in memory. */
-  constructor(store: Store = inMemoryStore()) {
-    this.rows = store.map("reservations");
+  constructor(store?: Store) {
+    this.rows = (store ?? inMemoryStore()).map("reservations");
+    this.durable = store !== undefined;
   }
+
+  readonly durable: boolean;
 
   private readonly rows: Map<string, Reservation>;
 

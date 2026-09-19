@@ -153,6 +153,9 @@ for (const [name, open] of [["in memory", () => inMemoryStore()], ["on disk", ()
         } }) as Map<string, V>;
       } } as Store;
       const { post, holds } = host(store);
+      // What opening a store writes (question 66's one-time marker pass) is
+      // not the import's, and is not what this test asks about.
+      written.length = 0;
       // Two carriages for one offer, which §7.5b refuses, and the deliveries
       // are the last rows the body carries.
       const r = await post(H, node({ deliveries: [
