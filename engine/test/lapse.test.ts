@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { sign } from "node:crypto";
 import { MAX_LAPSE_MS, canonicalMandate, type Mandate } from "../src/hub/mandates.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
-import { CONFIG_VERSION, HOUSEHOLD, MANDATE_PAIR, houseFor, makeEngine, otherHousehold } from "./helpers.js";
+import { LocalMandates } from "../src/engine/mandate-source.js";
+import { CONFIG_VERSION, HOUSEHOLD, MANDATE_PAIR, houseFor, makeEngine, otherHousehold, settleSigned } from "./helpers.js";
 
 /**
  * §16.1, §16.3, §16.5. The lapse, as the first refutation pass over question
@@ -144,5 +145,130 @@ describe("§16.1, clause 58: a lapse is at most a year out", () => {
     const { engine } = makeEngine();
     const renewal = mandate("1", { lapses_at: T + 365 * 86_400_000 + 60_000 }, T);
     expect(record(engine, renewal, T).lapses_at).toBe(renewal.lapses_at);
+  });
+});
+
+describe("§16.3, §16.5: a decided set keeps what it was decided under", () => {
+  /**
+   * The refutation's probes 2 and 2b, one mandate each. On main the named
+   * mandate was read whether or not it had lapsed; question 68 read only the
+   * live ones, so a lapse ended a running window and removed the daily
+   * ceiling of sets already decided. Measured with nobody acting at all.
+   */
+  const decidedUnder = async (over: Partial<Mandate>, lapsesIn: number) => {
+    const T = Date.now();
+    const made = makeEngine({ isInNetwork: () => false });
+    const one = mandate("1", { ceiling_out_of_network: 10_000_000, co_signers: [CO.household], lapses_at: T + lapsesIn, ...over }, T);
+    record(made.engine, one, T);
+    const big = offer(made.engine, one.id, T);
+    const small = offer(made.engine, one.id, T, "tea-b");
+    await made.engine.present(big.id, T);
+    await made.engine.present(small.id, T);
+    await keep(made.engine, big.id, T + 1);
+    await keep(made.engine, small.id, T + 1);
+    return { ...made, T, one, big, small };
+  };
+
+  test("a lapse does not end a running window, and the set can still be taken back", async () => {
+    // NOTE (mutation check, 2026-09-19): settle_window_not_fixed,
+    // withdraw_window_not_fixed and decision_fixes_nothing.
+    const { engine, T, big, small } = await decidedUnder({ ceiling_daily: 500, cooling_seconds: 86_400 }, 60_000);
+    const after = T + 61_000;
+    await expect(engine.settle(small.id, after)).rejects.toMatchObject({ code: "mandate_cooling" });
+    expect((await engine.withdrawDecisions(big.id, after)).state).toBe("presented");
+  });
+
+  test("nor when the co-signer agrees to bring the lapse forward", async () => {
+    const { engine, T, one, big, small } = await decidedUnder({ ceiling_daily: 500, cooling_seconds: 86_400 }, 300 * DAY);
+    record(engine, { ...one, lapses_at: T + 10_000, version: 2 }, T + 3, true);
+    const after = T + 11_000;
+    await expect(engine.settle(small.id, after)).rejects.toMatchObject({ code: "mandate_cooling" });
+    expect((await engine.withdrawDecisions(big.id, after)).state).toBe("presented");
+  });
+
+  test("a lapse does not remove the daily ceiling of a set decided under it", async () => {
+    // NOTE (mutation check, 2026-09-19): settle_daily_not_fixed and
+    // decision_fixes_nothing.
+    const { engine, T, small } = await decidedUnder({ ceiling_daily: 500 }, 60_000);
+    await expect(engine.settle(small.id, T + 61_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+  });
+
+  test("a set decided after the lapse is not held to the lapsed mandate", async () => {
+    // The founder's rule is the mandates live when the set was decided, and
+    // not every mandate the household ever held.
+    const T = Date.now();
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    const tight = mandate("1", { ceiling_out_of_network: 10_000_000, ceiling_daily: 500, lapses_at: T + 60_000 }, T);
+    const loose = mandate("2", { ceiling_out_of_network: 10_000_000 }, T);
+    record(engine, tight, T);
+    record(engine, loose, T);
+    const later = T + 61_000;
+    const set = offer(engine, loose.id, later, "tea-b");
+    await engine.present(set.id, later);
+    await keep(engine, set.id, later);
+    expect((await engine.settle(set.id, later + 1)).charged).toBe(900);
+  });
+
+  test("a collection that decides a box fixes what is live at its moment", async () => {
+    // NOTE (mutation check, 2026-09-19): collection_fixes_nothing. The box
+    // settled at 1,200 past a daily ceiling of 500 once the mandate that set
+    // it had lapsed.
+    const T = Date.now();
+    const made = makeEngine({ isInNetwork: () => false });
+    const { engine, deliveries } = made;
+    const one = mandate("1", { ceiling_out_of_network: 10_000_000, ceiling_daily: 500, co_signers: [CO.household], lapses_at: T + 60_000 }, T);
+    record(engine, one, T);
+    const box = engine.createOffer({
+      binding: "physical", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: T + 30 * DAY, mandate: one.id, price_band: null, giver: null,
+      candidates: [
+        { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null },
+        { product: "tea-b", quantity: 1, predicted_conversion: 0.5, is_exploration: false, given_by: null },
+      ],
+    } as never);
+    await engine.present(box.id, T);
+    deliveries.record({ offer: box.id, carriage: 0, code: `dc-${box.id.slice(0, 8)}`, status: "delivered" });
+    await engine.collectDeciding({ offer: box.id, returned: [box.candidates[1]!.id], consumed: [box.candidates[0]!.id], at: T + 1 });
+    expect(engine.mustGet(box.id, T + 1).state).toBe("decided");
+    await expect(settleSigned(engine, box.id, [], T + 61_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+  });
+});
+
+describe("§10.5: the read at a decision does not let two decisions through", () => {
+  test("two decisions in flight over one set: one is applied and the other refused", async () => {
+    // NOTE (mutation check, 2026-09-19): decision_recheck_dropped. Both
+    // decisions were applied, the second over the first, and two
+    // confirmations were recorded for one set.
+    //
+    // Fixing a set's protections at its decision made `decide` wait on the
+    // source before writing, which it had not done: every check ran and every
+    // line was written with no wait between them. A hub read takes a round
+    // trip, and another decision of the same lines can arrive during it.
+    const T = Date.now();
+    const { engine } = makeEngine();
+    const m = mandate("1", { ceiling_out_of_network: 10_000_000, cooling_seconds: 60 }, T);
+    record(engine, m, T);
+    const local = new LocalMandates(engine.mandates);
+    const wait = () => new Promise((r) => setTimeout(r, 5));
+    engine.readMandatesFrom({
+      get: (id) => local.get(id),
+      holdsAny: (h) => local.holdsAny(h),
+      outOfNetworkCeilingOf: (h, n) => local.outOfNetworkCeilingOf(h, n),
+      async dailyCeilingOf(h, n) { await wait(); return local.dailyCeilingOf(h, n); },
+      async coolingSecondsOf(h, n) { await wait(); return local.coolingSecondsOf(h, n); },
+    });
+    const o = offer(engine, m.id, T);
+    await engine.present(o.id, T);
+    const set = (valence: "kept" | "returned") => o.candidates.map((c) => valence === "kept"
+      ? { candidate: c.id, valence, kept_as: "self" as const }
+      : { candidate: c.id, valence });
+    const signed = (d: ReturnType<typeof set>) => sign(null, canonicalDecisions(o.id, d), MANDATE_PAIR.privateKey).toString("base64");
+    const results = await Promise.allSettled([
+      engine.decide(o.id, set("kept"), signed(set("kept")), T + 1),
+      engine.decide(o.id, set("returned"), signed(set("returned")), T + 1),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const refused = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect((refused.reason as { code?: string }).code).toBe("already_decided");
   });
 });

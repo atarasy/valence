@@ -774,7 +774,9 @@ async function route(
         }
         // §11.2. Every rule and its order are the engine's, so an in-process
         // caller meets the same refusals as this route.
-        const collected = engine.collect({
+        // §16.3, §16.5. Through the path that fixes a box's protections when
+        // the collection is what decides it.
+        const collected = await engine.collectDeciding({
           offer: id,
           returned: raw.returned as string[],
           consumed: raw.consumed as string[],

@@ -4,12 +4,14 @@ import pathlib
 # the mandate the offer names, and a second label removes the ceiling.
 # Re-anchored when question 68 was rebased onto questions 65 to 67 (the `now`
 # argument).
+# Re-anchored 2026-09-19 when the lapse rules fixed a decided set's window and
+# ceiling at its decision: the rule is now read in two places, the decision
+# and the settlement, and a break of one alone leaves the other enforcing it.
 p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
-old = """      : await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now);
-"""
+old = '          await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now),\n          fixed?.ceiling_daily ?? null'
 assert s.count(old) == 1, "anchor drifted"
-s = s.replace(old, """      : offer.giver
-        ? await this.mandateSource.dailyCeilingOf(offer.giver, now)
-        : (await this.mandateSource.get(offer.mandate))?.ceiling_daily ?? null;
-""", 1)
+s = s.replace(old, '          (offer.giver ? await this.mandateSource.dailyCeilingOf(offer.giver, now) : (await this.mandateSource.get(offer.mandate))?.ceiling_daily ?? null),\n          fixed?.ceiling_daily ?? null', 1)
+old = '    const ceiling_daily = await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now);'
+assert s.count(old) == 1, "anchor drifted"
+s = s.replace(old, '    const ceiling_daily = (offer.giver ? await this.mandateSource.dailyCeilingOf(offer.giver, now) : (await this.mandateSource.get(offer.mandate))?.ceiling_daily ?? null);', 1)
 p.write_text(s)

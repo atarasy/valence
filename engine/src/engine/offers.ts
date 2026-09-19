@@ -102,6 +102,29 @@ function utcMidnight(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
+/**
+ * §16.3, §16.5, decided 2026-09-19 after the first refutation pass over
+ * question 68. The cooling window and the daily ceiling a decided set was
+ * decided under, read from the mandates live at that moment. `ceiling_daily`
+ * is absent where the set could owe nothing when it was decided, so that a
+ * hub that predates question 60 still does not refuse a declined gift.
+ */
+type FixedProtections = { at: number; cooling_seconds: number | null; ceiling_daily?: number | null };
+
+/** The longer of two windows, where null is no window. */
+function longerWindow(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
+}
+
+/** The tighter of two ceilings, where null is no ceiling. */
+function tighterCeiling(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.min(a, b);
+}
+
 import { canonicalConfig } from "../shared/catalogue.js";
 export { canonicalConfig } from "../shared/catalogue.js";
 
@@ -133,6 +156,19 @@ export class ValenceEngine {
    * day 999,999 on a settlement a stranger had imported.
    */
   private readonly settledHere: Map<string, true>;
+  /**
+   * §16.3, §16.5, decided 2026-09-19. **What a decided set was decided under,
+   * recorded with the decision.** Question 68 read the tightest window and
+   * ceiling among the mandates live at settlement, so a lapse ended both for
+   * sets already decided: measured by the first refutation pass, a set decided
+   * inside a day's window was settled 11 seconds later, past a daily ceiling
+   * of 500, because the mandate that set both had lapsed meanwhile, whether by
+   * its own date or because the household brought the date forward. Recording
+   * rather than recomputing against the decision's moment, because a
+   * recomputation reads the rows as they stand at settlement, and a version
+   * recorded after the decision replaces the one the set was decided under.
+   */
+  private readonly decidedProtections: Map<string, FixedProtections>;
   private readonly memberStatementConfirmations: Map<string, string>;
   /** §16.3, question 66. The tail of each payer's settlements in flight. Memory only: it orders, it records nothing. */
   private readonly settling = new Map<string, Promise<void>>();
@@ -231,6 +267,18 @@ export class ValenceEngine {
     return mandate;
   }
 
+  /**
+   * §16.3, §16.5, decided 2026-09-19. The protections a set is decided under:
+   * the longest window among the household's live mandates, and, where the
+   * set may owe something, the tightest daily ceiling among its payer's.
+   */
+  private async protectionsAt(offer: Offer, now: number, mayOwe: boolean): Promise<FixedProtections> {
+    const cooling_seconds = await this.mandateSource.coolingSecondsOf(offer.household, now);
+    if (!mayOwe) return { at: now, cooling_seconds };
+    const ceiling_daily = await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now);
+    return { at: now, cooling_seconds, ceiling_daily };
+  }
+
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
     this.mandateSource = source;
@@ -276,6 +324,7 @@ export class ValenceEngine {
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
     this.settledHere = store.map("settled_here");
+    this.decidedProtections = store.map("decided_protections");
     // §14.2, question 66. **What a store says about itself is written when
     // it is opened, not inferred later.** A store that predates the record of
     // where a settlement was made cannot say which of its settlements a move
@@ -809,11 +858,16 @@ export class ValenceEngine {
     //
     // The named mandate is live here and is one of this household's, so the
     // minimum is the tightest of the two views even where the source's
-    // reading of "live" differs from this one by a moment. The source reads
-    // its rows against this engine's `now`, as it does for a giver (question
-    // 66's fifth refutation pass), so the two views differ only where the
-    // source is a hub with a clock of its own. A household with no mandate
-    // here is left alone, as before both questions.
+    // reading of "live" differs from this one. **Which mandates are live is
+    // read against two different clocks depending on the deployment.** The
+    // local source reads its rows against this engine's `now`, as it does for
+    // a giver (question 66's fifth refutation pass). The remote source does
+    // not send `now`: each of its reads is a separate request answered at the
+    // hub's own clock, so on a split deployment the hub decides when a lapse
+    // takes effect, and two reads within one settlement can be answered at two
+    // different moments. The first refutation pass over question 68 found
+    // this comment claiming otherwise. A household with no mandate here is
+    // left alone, as before both questions.
     const ceiling = offer.giver
       ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
       : mandate
@@ -1028,6 +1082,29 @@ export class ValenceEngine {
         );
       }
     }
+    // §16.3, §16.5, decided 2026-09-19. **A set that this decision completes
+    // keeps the window and the ceiling live at this moment**, whatever lapses
+    // afterwards. Read before anything is written, so that a hub that cannot
+    // answer refuses the decision rather than leaving one half-applied, and
+    // then checked again, because the read is the one wait in this method and
+    // another decision could have reached the same lines during it.
+    const planned = new Map(plan.map(({ candidate, d }) => [candidate.id, d.valence]));
+    const completes = offer.candidates.every((c) => c.valence !== "offered" || planned.has(c.id));
+    // A physical box can owe what its collection finds, whatever the household
+    // said of its lines, so its ceiling is always read.
+    const mayOwe = offer.binding === "physical" || offer.candidates.some((c) => {
+      const v = planned.get(c.id) ?? c.valence;
+      return (v === "kept" || v === "defaulted") && !c.given_by;
+    });
+    const fixed = completes ? await this.protectionsAt(offer, now, mayOwe) : undefined;
+    const current = this.offers.get(offerId);
+    if (
+      !current || current.state !== "presented" ||
+      current.candidates.some((c) => planned.has(c.id) && c.valence !== "offered") ||
+      (this.confirmations.get(offerId) ?? []).includes(confirmation)
+    ) {
+      throw conflict("already_decided", "another decision reached this set while it was being checked");
+    }
     for (const { candidate, d } of plan) {
       if (d.valence === "kept") {
         candidate.kept_as = d.kept_as!;
@@ -1041,6 +1118,7 @@ export class ValenceEngine {
       // §16.5. The cooling window starts when the set is signed, not when the
       // offer was presented.
       offer.decided_at = now;
+      this.decidedProtections.set(offer.id, fixed!);
       // Clause 8. The person's own copy of what they were shown and what they
       // said to each of it. Reported here rather than at settlement, because a
       // copy that arrived only when something was bought would hold the
@@ -1187,7 +1265,15 @@ export class ValenceEngine {
     // is refused here as it is at presentation. Its result is not read: the
     // window below comes from every mandate and not from that one.
     await this.mandateFor(offer);
-    const cooling = await this.mandateSource.coolingSecondsOf(offer.household, now);
+    // §16.5, decided 2026-09-19. **And never shorter than the window the set
+    // was decided under.** A lapse since the decision does not end it: the
+    // first refutation pass over question 68 measured a take-back 11 seconds
+    // into a day's window refused `no_cooling`, because the one mandate that
+    // set the window had lapsed.
+    const cooling = longerWindow(
+      await this.mandateSource.coolingSecondsOf(offer.household, now),
+      this.decidedProtections.get(offer.id)?.cooling_seconds ?? null
+    );
     if (cooling === null) {
       throw unprocessable(
         "no_cooling",
@@ -1509,7 +1595,14 @@ export class ValenceEngine {
     // which is the longest, across every mandate this household holds.** A
     // household that had set one on the label its offers named settled at
     // once under a second label it recorded alone.
-    const coolingSeconds = await this.mandateSource.coolingSecondsOf(offer.household, now);
+    //
+    // §16.5, decided 2026-09-19. **Never shorter than the window the set was
+    // decided under**, which a lapse since the decision does not end.
+    const fixed = this.decidedProtections.get(offer.id);
+    const coolingSeconds = longerWindow(
+      await this.mandateSource.coolingSecondsOf(offer.household, now),
+      fixed?.cooling_seconds ?? null
+    );
     if (!needsStatement(offer, missing) && coolingSeconds != null && offer.decided_at !== null) {
       const opens = offer.decided_at + coolingSeconds * 1000;
       if (now < opens) {
@@ -1623,9 +1716,17 @@ export class ValenceEngine {
     // what the giver's branch already does, and for the same reason: a
     // household that had tightened one label settled freely under a second it
     // recorded alone. The payer of an offer with no giver is the household.
+    //
+    // §16.3, decided 2026-09-19. **And never looser than the ceiling the set
+    // was decided under.** Measured by the first refutation pass over question
+    // 68: a set decided under a daily ceiling of 500 was charged 900 once the
+    // mandate that set it had lapsed, with nobody acting at all.
     const ceilingDaily = charged === 0
       ? null
-      : await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now);
+      : tighterCeiling(
+          await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now),
+          fixed?.ceiling_daily ?? null
+        );
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
@@ -1793,6 +1894,30 @@ export class ValenceEngine {
     }
     const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
     this.applyRecoveryTo(input.offer, at);
+    return row;
+  }
+
+  /**
+   * §11.2 and §16.3, §16.5, decided 2026-09-19. **A collection that decides a
+   * box fixes the protections live at its own moment**, as a household's
+   * signature does. A collection resolves every line, so a box still
+   * `presented` is decided by it. The read comes first, so that a hub which
+   * cannot answer leaves the collection unrecorded rather than recorded with
+   * nothing fixed, and the result is kept only where this collection is the
+   * one that decided the box.
+   *
+   * `collect` stays synchronous, and records nothing fixed, because every
+   * rule of the collection itself is checked there; the route calls this.
+   */
+  async collectDeciding(input: Parameters<ValenceEngine["collect"]>[0]): Promise<Recovery> {
+    const at = input.at ?? Date.now();
+    const offer = this.mustGet(input.offer, at);
+    const mayOwe = input.consumed.length > 0 ||
+      offer.candidates.some((c) => (c.valence === "kept" || c.valence === "defaulted") && !c.given_by);
+    const fixed = offer.state === "presented" ? await this.protectionsAt(offer, at, mayOwe) : undefined;
+    const row = this.collect({ ...input, at });
+    const after = this.mustGet(input.offer, at);
+    if (fixed && after.state === "decided" && after.decided_at === at) this.decidedProtections.set(after.id, fixed);
     return row;
   }
 
