@@ -116,6 +116,7 @@ export function makeEngine(overrides: Partial<{
   explorationRate: number;
   reminderLimit: 0 | 1;
   relyingPartyId: string;
+  isInNetwork: (merchant: string) => boolean;
 }> = {}) {
   const ledger = new InMemoryLedger();
   // §7.5b, §13.1. The register is the hub's and the screens are answered under

@@ -44,6 +44,16 @@ export type MandateSource = {
    * of the giver's, so the tightest of them governs.
    */
   dailyCeilingOf(household: string): Promise<number | null>;
+  /**
+   * Clause 46, §12, question 65, decided 2026-09-19. **The tightest
+   * out-of-network ceiling among this household's mandates, or null where it
+   * holds none.** The mirror of question 60 at presentation: a gift charges
+   * its giver and the ceiling was read from the recipient's mandate, so a
+   * recipient with a ceiling of 0 had a gift it pays nothing for refused, and
+   * a giver with a ceiling of 0 was charged 1,200 outside the network.
+   * Measured by the third refutation pass over question 64.
+   */
+  outOfNetworkCeilingOf(household: string): Promise<number | null>;
 };
 
 /** §16.3. The tightest `ceiling_daily` among the rows, or null. */
@@ -55,6 +65,16 @@ export function tightestDailyCeiling(rows: Mandate[], now = Date.now()): number 
     if (m.lapses_at <= now) continue;
     if (m.ceiling_daily == null) continue;
     if (tightest === null || m.ceiling_daily < tightest) tightest = m.ceiling_daily;
+  }
+  return tightest;
+}
+
+/** Clause 46. The tightest `ceiling_out_of_network` among the live rows, or null. */
+export function tightestOutOfNetworkCeiling(rows: Mandate[], now = Date.now()): number | null {
+  let tightest: number | null = null;
+  for (const m of rows) {
+    if (m.lapses_at <= now) continue;
+    if (tightest === null || m.ceiling_out_of_network < tightest) tightest = m.ceiling_out_of_network;
   }
   return tightest;
 }
@@ -75,6 +95,9 @@ export class LocalMandates implements MandateSource {
   }
   async dailyCeilingOf(household: string): Promise<number | null> {
     return tightestDailyCeiling(this.rows.forHousehold(household));
+  }
+  async outOfNetworkCeilingOf(household: string): Promise<number | null> {
+    return tightestOutOfNetworkCeiling(this.rows.forHousehold(household));
   }
 }
 
@@ -170,7 +193,23 @@ export class RemoteMandates implements MandateSource {
     return ceiling as number | null;
   }
 
-  private async household(household: string): Promise<{ has?: unknown; ceiling_daily?: unknown }> {
+  /**
+   * Question 65. The same route carries the tightest out-of-network ceiling,
+   * and a hub that answers without it predates the question, so its silence
+   * is refused rather than read as no ceiling.
+   */
+  async outOfNetworkCeilingOf(household: string): Promise<number | null> {
+    const ceiling = (await this.household(household)).ceiling_out_of_network;
+    if (ceiling !== null && !(typeof ceiling === "number" && Number.isSafeInteger(ceiling) && ceiling >= 0)) {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates without an out-of-network ceiling it could read`
+      );
+    }
+    return ceiling as number | null;
+  }
+
+  private async household(household: string): Promise<{ has?: unknown; ceiling_daily?: unknown; ceiling_out_of_network?: unknown }> {
     let response: Response;
     try {
       response = await this.fetchImpl(

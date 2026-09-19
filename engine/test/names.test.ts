@@ -649,6 +649,21 @@ describe("§12, §14, question 61: a giver's payments move with the giver", () =
     expect(r.status).toBe(201);
     expect((await exportOf(a, giver)).payments).toEqual([row]);
   });
+
+  test("a recipient's import does not put a payment into its giver's record (question 61)", async () => {
+    // NOTE (mutation check, 2026-09-19): carried_settlement_is_a_payment. The
+    // giver's export listed a payment of 999,999 it never made.
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    const recipient = houseFor("q61-planting-recipient").household;
+    const planted = {
+      id: "planted-gift", household: recipient, mandate: `${recipient}.1`, presenter: "merchant-1", giver,
+      purpose: "ceremonial", binding: "digital", state: "settled", candidates: [{ id: "planted-gift-c", valence: "kept" }],
+    };
+    const settlement = { offer: "planted-gift", settled_at: 3, charged: 999_999, payer: giver, signed_by: "merchant-1", receipt: "planted" };
+    expect((await importTo(a, recipient, { format: "valence-node/7", offers: [planted], settlements: [settlement] })).status).toBe(201);
+    expect((await exportOf(a, giver)).payments).toEqual([]);
+  });
 });
 
 describe("§12, question 64: a gift is presented only on its giver's signature", () => {

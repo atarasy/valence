@@ -23,6 +23,7 @@ describe("§16, question 54: the mandate an offer reads is its own household's",
         ceiling_daily: null, cooling_seconds: null, co_signers: [], lapses_at: 1, version: 1,
       } as never;
     },
+    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() {
       // Question 60. Read only for a gift's giver, which these stubs never are.
       return null;

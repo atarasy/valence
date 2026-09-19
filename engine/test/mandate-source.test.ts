@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LocalMandates, RemoteMandates, tightestDailyCeiling } from "../src/engine/mandate-source.js";
+import { LocalMandates, RemoteMandates, tightestDailyCeiling, tightestOutOfNetworkCeiling } from "../src/engine/mandate-source.js";
 import type { Mandate } from "../src/hub/mandates.js";
 
 const mandate: Mandate = {
@@ -85,6 +85,28 @@ describe("§13.1: where the engine reads a protection from", () => {
       expect([what, await answering(body).dailyCeilingOf("key:g").then(() => "answered", (e) => (e as { code: string }).code)])
         .toEqual([what, "hub_refused"]);
     }
+  });
+
+  test("the remote source reads a giver's tightest out-of-network ceiling, and silence is not none (clause 46, question 65)", async () => {
+    const answering = (body: string, status = 200) =>
+      new RemoteMandates("http://hub.example/", (async () => new Response(body, { status })) as never);
+    expect(await answering(JSON.stringify({ has: true, ceiling_daily: null, ceiling_out_of_network: 0 })).outOfNetworkCeilingOf("key:g")).toBe(0);
+    expect(await answering(JSON.stringify({ has: false, ceiling_daily: null, ceiling_out_of_network: null })).outOfNetworkCeilingOf("key:g")).toBeNull();
+    for (const [what, body] of [
+      ["a hub that predates the field", JSON.stringify({ has: true, ceiling_daily: null })],
+      ["a negative ceiling", JSON.stringify({ has: true, ceiling_out_of_network: -1 })],
+      ["a string ceiling", JSON.stringify({ has: true, ceiling_out_of_network: "500" })],
+    ] as const) {
+      expect([what, await answering(body).outOfNetworkCeilingOf("key:g").then(() => "answered", (e) => (e as { code: string }).code)])
+        .toEqual([what, "hub_refused"]);
+    }
+  });
+
+  test("the local source reads the tightest live out-of-network ceiling (question 65)", () => {
+    const m = (ceiling_out_of_network: number, lapses_at = 9e15) => ({ ceiling_out_of_network, lapses_at }) as never;
+    expect(tightestOutOfNetworkCeiling([])).toBeNull();
+    expect(tightestOutOfNetworkCeiling([m(900), m(300), m(700)])).toBe(300);
+    expect(tightestOutOfNetworkCeiling([m(900), m(0, 1)])).toBe(900);
   });
 
   test("the local source reads the tightest daily ceiling among a household's mandates (question 60)", () => {
