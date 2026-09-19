@@ -116,7 +116,26 @@ export class ValenceEngine {
   private readonly offers: Map<string, Offer>;
   private readonly notes: Map<string, Note[]>;
   private readonly settlements: Map<string, Settlement>;
+  /**
+   * §14.2, question 66. The settlements a move carried here, which this host
+   * did not make. A reservation on the ledger said the same thing until the
+   * first refutation pass over question 66 measured the Meter adapter, whose
+   * holds are memory only: after a restart every settlement read as carried.
+   */
+  /**
+   * §14.2, question 66. The settlements this host made, written as it makes
+   * them. **The record is positive**, because the absence of one is the only
+   * thing a store can be sure of: a settlement that carries no record of
+   * where it was made is one this host will not report and will not list as a
+   * giver's payment. The fifth refutation pass measured the other way round:
+   * a store written before any of this named nothing, every settlement in it
+   * read as made here, and an unauthenticated settle then told the payer's
+   * day 999,999 on a settlement a stranger had imported.
+   */
+  private readonly settledHere: Map<string, true>;
   private readonly memberStatementConfirmations: Map<string, string>;
+  /** §16.3, question 66. The tail of each payer's settlements in flight. Memory only: it orders, it records nothing. */
+  private readonly settling = new Map<string, Promise<void>>();
   private readonly configs: Map<string, StoredPresenterConfig>;
   private readonly edges: Map<string, LineageEdge>;
   private readonly identities: Map<string, string>;
@@ -256,6 +275,23 @@ export class ValenceEngine {
     }
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
+    this.settledHere = store.map("settled_here");
+    // §14.2, question 66. **What a store says about itself is written when
+    // it is opened, not inferred later.** A store that predates the record of
+    // where a settlement was made cannot say which of its settlements a move
+    // carried, and is one to rebuild; one opened empty after this says so
+    // instead. The fifth refutation pass measured the inference: a new store
+    // is empty at its first open, so nothing was written, and the open after
+    // its first settlement labelled it as predating the record.
+    const provenance = store.map<string>("provenance");
+    if (!provenance.has("settled_here")) {
+      let settledBefore = 0;
+      for (const _ of this.settlements.keys()) settledBefore += 1;
+      provenance.set("settled_here", settledBefore > 0 ? "unrecorded: this store predates the record" : "recorded from the first settlement");
+      if (settledBefore > 0) {
+        console.warn(`valence: ${settledBefore} settlements predate the record of where a settlement was made; this store cannot say which of them a move carried, and is one to rebuild (§14.2, question 66)`);
+      }
+    }
     this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
     this.edges = store.map("edges");
@@ -751,14 +787,26 @@ export class ValenceEngine {
     // this engine, and refusing every offer would be a gate rather than a
     // protection.
     const mandate = await this.mandateFor(offer);
-    if (mandate) {
-      if (mandate.lapses_at <= now) {
-        throw unprocessable("mandate_lapsed", `mandate ${offer.mandate} lapsed and was not renewed`);
-      }
+    if (mandate && mandate.lapses_at <= now) {
+      throw unprocessable("mandate_lapsed", `mandate ${offer.mandate} lapsed and was not renewed`);
+    }
+    // Clause 46, question 65, decided 2026-09-19. **The ceiling is the payer's.**
+    // A gift charges its giver, so the giver's tightest out-of-network ceiling
+    // is read and the recipient's is not, as question 60 did for the daily
+    // ceiling; the recipient's lapse above is still its own mandate's. A giver
+    // that holds no mandate here sets no ceiling, as an unknown mandate does.
+    const ceiling = offer.giver
+      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
+      : mandate?.ceiling_out_of_network ?? null;
+    if (ceiling !== null) {
+      // What a maker or merchant gave is never charged (clause 10), so it is
+      // nothing the payer could spend outside the network either, as it is
+      // nothing in §6.4's upper bound. Named by the first refutation pass
+      // over question 65.
       const outside = offer.candidates
-        .filter((c) => !(this.config.isInNetwork ?? (() => true))(c.merchant))
+        .filter((c) => !c.given_by && !(this.config.isInNetwork ?? (() => true))(c.merchant))
         .reduce((sum, c) => sum + c.unit_price * c.quantity, 0);
-      if (outside > mandate.ceiling_out_of_network) {
+      if (outside > ceiling) {
         throw unprocessable(
           // §16.6 names this refusal `mandate_ceiling_out_of_network`, and the
           // engine answered to `over_ceiling` from the day the section was
@@ -770,7 +818,7 @@ export class ValenceEngine {
           // because no mutation can find a refusal that answers to the wrong
           // word: stopping a refusal breaks a probe, renaming it breaks none.
           "mandate_ceiling_out_of_network",
-          `this offer could cost ${outside} at merchants outside the network, above the ceiling of ${mandate.ceiling_out_of_network}`
+          `this offer could cost ${outside} at merchants outside the network, above the ceiling of ${ceiling}`
         );
       }
     }
@@ -1238,7 +1286,39 @@ export class ValenceEngine {
     return this.settleInternal(offerId, now, confirmation);
   }
 
+  /**
+   * §16.3, question 66, decided 2026-09-19. **One payer's settlements run one
+   * at a time.** The daily ceiling is read, the ledger is told and the day is
+   * told, with awaits between them, so wherever one of those waits on I/O (a
+   * ledger whose commit is a round trip, a day read over HTTP) two settles of
+   * one payer both read the day before either wrote it. Measured by the third
+   * refutation pass over question 64: 2,700 charged against a ceiling of
+   * 2,000. This closes it inside one process; two processes settling for one
+   * payer are §16.3's standing caveat.
+   */
   private async settleInternal(
+    offerId: string,
+    now = Date.now(),
+    confirmation: { signed?: PersonalSignature; disputed?: string[] } = {},
+    memberEnvelope?: MemberStatementEnvelope
+  ): Promise<Settlement> {
+    const offer = this.mustGet(offerId, now);
+    const payer = offer.giver ?? offer.household;
+    const prior = this.settling.get(payer) ?? Promise.resolve();
+    const run = prior.then(
+      () => this.settleUnserialised(offerId, now, confirmation, memberEnvelope),
+      () => this.settleUnserialised(offerId, now, confirmation, memberEnvelope)
+    );
+    const tail = run.then(() => undefined, () => undefined);
+    this.settling.set(payer, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.settling.get(payer) === tail) this.settling.delete(payer);
+    }
+  }
+
+  private async settleUnserialised(
     offerId: string,
     now = Date.now(),
     // §6.5. The household's signature over the statement, and the consumed
@@ -1272,7 +1352,7 @@ export class ValenceEngine {
     if (existing) {
       const recorded = this.memberStatementConfirmations.get(offer.id);
       if (memberIdentity !== undefined || (recorded !== undefined && confirmation.signed)) {
-        if (memberIdentity !== undefined && recorded === memberIdentity) return existing;
+        if (memberIdentity !== undefined && recorded === memberIdentity) return this.reportDay(existing);
         throw conflict("already_settled", "A different operation settled this offer.");
       }
       // §6.5. Settling is idempotent for the party that only asks for it: a
@@ -1295,14 +1375,14 @@ export class ValenceEngine {
         const sent = confirmation.signed;
         const offered = "signature" in sent ? sent.signature : sent.assertion.signature;
         if (existing.confirmation !== null && existing.confirmation === offered) {
-          return existing;
+          return this.reportDay(existing);
         }
         throw conflict(
           "already_settled",
           "this box has already settled, and this signature was not what settled it"
         );
       }
-      return existing;
+      return this.reportDay(existing);
     }
     if (offer.state !== "decided" && offer.state !== "expired") {
       throw conflict("bad_state", `cannot settle an offer in ${offer.state}`);
@@ -1500,7 +1580,7 @@ export class ValenceEngine {
     const ceilingDaily = charged === 0
       ? null
       : offer.giver
-        ? await this.mandateSource.dailyCeilingOf(offer.giver)
+        ? await this.mandateSource.dailyCeilingOf(offer.giver, now)
         : mandate?.ceiling_daily ?? null;
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
@@ -1548,6 +1628,13 @@ export class ValenceEngine {
         .update(`${offer.id}:${now}:${kept}:${consumed}:${offer.presenter}`)
         .digest("hex"),
     };
+    // §14.2, question 66. Made here, said so here, **and said first**: the two
+    // writes are separate autocommits on the reference store, and a failure
+    // between them left a settlement this host made with no mark, so its day
+    // was never told and its giver lost the payment, in silence. A mark with
+    // no settlement beside it is read by nothing. Measured by the sixth
+    // refutation pass.
+    this.settledHere.set(offer.id, true);
     this.settlements.set(offer.id, settlement);
     if (memberIdentity !== undefined) this.memberStatementConfirmations.set(offer.id, memberIdentity);
     // §16.3. The person's own copy, written as the settlement is made. It
@@ -1563,12 +1650,29 @@ export class ValenceEngine {
     // says is not atomic across processes.
     offer.state = "settled";
     this.commit(offer);
+    return this.reportDay(settlement);
+  }
+
+  /**
+   * §16.3. Tell the payer's day what was settled, and answer with the
+   * settlement. Question 60: counted to the day of whoever paid.
+   *
+   * **A retry reports again**, and the day's `record` keeps one row an offer.
+   * A settlement whose report failed was otherwise short on the day for the
+   * life of the host, because the retry answered with the settlement and told
+   * nobody; the third refutation pass over question 64 then settled 1,500 on
+   * a ceiling of 2,000 over 1,200 the day had never heard of.
+   */
+  private async reportDay(settlement: Settlement): Promise<Settlement> {
+    // Only a settlement this host made. Counting one a move carried to the
+    // day here is what question 63 declined, and a settlement whose
+    // provenance this store does not record is one to leave alone.
+    if (!this.settledHere.has(settlement.offer)) return settlement;
     await this.daySource.report({
-      offer: offer.id,
-      // Question 60: counted to the day of whoever paid.
-      household: payer,
-      amount: charged,
-      settled_at: now,
+      offer: settlement.offer,
+      household: settlement.payer,
+      amount: settlement.charged,
+      settled_at: settlement.settled_at,
     });
     return settlement;
   }
@@ -2119,8 +2223,13 @@ export class ValenceEngine {
    * The lines stay out (clause 24).
    */
   paymentsBy(household: string): Payment[] {
+    // Only settlements made here, not those a move carried. A
+    // recipient's import carries its settled gifts with their settlements, and
+    // listing those planted a payment of any amount into a giver that posted
+    // nothing (question 61's record, measured by the third refutation pass
+    // over question 64). The giver's own record of it travels with the giver.
     const here = [...this.offers.values()]
-      .filter((o) => o.giver === household)
+      .filter((o) => o.giver === household && this.settledHere.has(o.id))
       .map((o) => this.settlements.get(o.id))
       .filter((st): st is Settlement => st !== undefined)
       .map((st) => ({ offer: st.offer, presenter: st.signed_by, settled_at: st.settled_at, charged: st.charged, receipt: st.receipt }));

@@ -7,9 +7,9 @@ import pathlib
 
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 a = """    await this.daySource.report({
-      offer: offer.id,"""
+      offer: settlement.offer,"""
 assert a in s, "offers.ts report anchor has drifted"
 s = s.replace(a, """    await Promise.resolve();
     void ({
-      offer: offer.id,""", 1)
+      offer: settlement.offer,""", 1)
 p.write_text(s)

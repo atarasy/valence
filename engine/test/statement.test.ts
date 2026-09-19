@@ -208,6 +208,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
         version: 1,
       } as never;
     },
+    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() {
       // Question 60. Read only for a gift's giver, which these stubs never are.
       return null;
@@ -400,6 +401,7 @@ describe("§6, §16.3: nothing is written on refusal, at the ledger as well", ()
         version: 1,
       } as never;
     },
+    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() {
       // Question 60. Read only for a gift's giver, which these stubs never are.
       return null;
@@ -687,6 +689,7 @@ describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoe
         cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
       } as never;
     },
+    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf(h: string) {
       return h === GIVER ? giver : null;
     },
@@ -749,6 +752,7 @@ describe("§6.4, question 62: a set that owes nothing settles at nothing, at onc
         cooling_seconds: seconds, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
       } as never;
     },
+    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() { return null; },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   });
@@ -810,6 +814,7 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
         cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
       } as never;
     },
+    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() { return null; },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   };
@@ -859,6 +864,7 @@ describe("questions 60 and 62: what a second refutation pass found", () => {
       } as never;
     },
     dailyCeilingOf: over.daily ?? (async () => null),
+    async outOfNetworkCeilingOf() { return null; },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   });
 

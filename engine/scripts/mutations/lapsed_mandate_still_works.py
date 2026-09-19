@@ -8,10 +8,10 @@ import pathlib
 # INERT the same day. `scripts/anchors.py` found it on its first run, which is
 # the argument for that script.
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-old = """      if (mandate.lapses_at <= now) {
-        throw unprocessable("mandate_lapsed", `mandate ${offer.mandate} lapsed and was not renewed`);
-      }
+old = """    if (mandate && mandate.lapses_at <= now) {
+      throw unprocessable("mandate_lapsed", `mandate ${offer.mandate} lapsed and was not renewed`);
+    }
 """
 assert old in s, "offers.ts lapse anchor has drifted"
-s = s.replace(old, "      void now;\n", 1)
+s = s.replace(old, "    void now;\n", 1)
 p.write_text(s)

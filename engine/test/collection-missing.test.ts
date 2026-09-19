@@ -247,6 +247,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
           version: 1,
         } as never;
       },
+      async outOfNetworkCeilingOf() { return null; },
       async dailyCeilingOf() {
         // Question 60. Read only for a gift's giver, which these stubs never are.
         return null;
@@ -297,6 +298,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
             version: 1,
           } as never;
         },
+        async outOfNetworkCeilingOf() { return null; },
         async dailyCeilingOf() {
           // Question 60. Read only for a gift's giver, which these stubs never are.
           return null;

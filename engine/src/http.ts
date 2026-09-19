@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { type Mandate } from "./hub/mandates.js";
 import { challengeForGift } from "./shared/gift.js";
-import { tightestDailyCeiling } from "./engine/mandate-source.js";
+import { tightestDailyCeiling, tightestOutOfNetworkCeiling } from "./engine/mandate-source.js";
 import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
@@ -1175,8 +1175,10 @@ async function route(
     // reading the answer. What closes that read is question 41.
     // Question 60: and the tightest daily ceiling, which a gift's giver is
     // held to at settlement (§12, §16.3).
+    // Question 65: and the tightest out-of-network ceiling, which a gift's
+    // giver is held to at presentation (clause 46, §12).
     const held = engine.mandates.forHousehold(household);
-    return json({ has: held.length > 0, ceiling_daily: tightestDailyCeiling(held) });
+    return json({ has: held.length > 0, ceiling_daily: tightestDailyCeiling(held), ceiling_out_of_network: tightestOutOfNetworkCeiling(held) });
   }
 
   if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {

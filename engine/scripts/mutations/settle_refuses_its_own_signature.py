@@ -11,7 +11,7 @@ p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 a = """        const sent = confirmation.signed;
         const offered = "signature" in sent ? sent.signature : sent.assertion.signature;
         if (existing.confirmation !== null && existing.confirmation === offered) {
-          return existing;
+          return this.reportDay(existing);
         }
 """
 assert a in s, "offers.ts already-settled comparison anchor has drifted"

@@ -1,5 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { ValenceEngine, canonicalConfig } from "../src/engine/offers.js";
+import type { Store } from "../src/common/store.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
@@ -116,8 +117,11 @@ export function makeEngine(overrides: Partial<{
   explorationRate: number;
   reminderLimit: 0 | 1;
   relyingPartyId: string;
-}> = {}) {
-  const ledger = new InMemoryLedger();
+  isInNetwork: (merchant: string) => boolean;
+}> = {}, store?: Store) {
+  // A store may be passed so that a test can reopen what an engine wrote, or
+  // make one of its writes fail (question 66's write order).
+  const ledger = new InMemoryLedger(store);
   // §7.5b, §13.1. The register is the hub's and the screens are answered under
   // an offer's path, so the engine is pointed at it exactly as `server.ts`
   // points a deployment at its own.
@@ -128,7 +132,7 @@ export function makeEngine(overrides: Partial<{
     recoveryGraceDays: 3,
     relyingPartyId: "unit.example",
     ...overrides,
-  });
+  }, store);
   // §5.4. A catalogue is signed by the presenter it names.
   const presenterPair = PRESENTER_PAIR;
   engine.registerIdentity(
