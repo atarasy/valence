@@ -36,9 +36,23 @@ export type Mandate = {
  * What is signed. A version is inside the bytes, so an old signature cannot
  * be replayed onto a new record.
  */
-export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number }): Buffer {
+/**
+ * §16.1, question 58, decided 2026-09-19. The first line names the form and
+ * the second the host the version is recorded at, which is the relying party
+ * a passkey there asserts for. A raw signature carried nothing that tied it
+ * to a host, so every version a household ever signed recorded at any host
+ * that held none of its history, through three routes a version rule could
+ * not close (a claim planted with an old version's terms, a restart at 1, and
+ * the reference hub writing 1 after every move). Measured by a fourth
+ * refutation pass over question 56.
+ */
+export const MANDATE_DOMAIN = "valence.mandate.2";
+
+export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number }, host: string): Buffer {
   return Buffer.from(
     [
+      MANDATE_DOMAIN,
+      host,
       m.id,
       m.household,
       String(m.ceiling_out_of_network),
@@ -263,7 +277,7 @@ export class MandateRegister {
     // co-signer nobody holds freeze that identifier for ever, which is the
     // defect question 56's first attempt was refused for.
     const held = before ? undefined : this.claimFor(mandate.id, now);
-    const claim = held && canonicalMandate(held).equals(canonicalMandate(mandate)) ? held : undefined;
+    const claim = held && canonicalMandate(held, relyingPartyId).equals(canonicalMandate(mandate, relyingPartyId)) ? held : undefined;
     // Whose row this is comes before which version it is: a row held for
     // another household is not a version of this household's mandate at all.
     if ((before ?? claim) && (before ?? claim)!.household !== mandate.household) {
@@ -307,7 +321,7 @@ export class MandateRegister {
       // co-signer alone, and no layer, which holds no key at all.
       for (const k of before.co_signers) required.add(k);
     }
-    const bytes = canonicalMandate(mandate);
+    const bytes = canonicalMandate(mandate, relyingPartyId);
     for (const key of required) {
       const pem = keyOf(key);
       const signature = signatures[key];

@@ -41,7 +41,7 @@ async function setup(){
  await unit.run(store=>{const e=memberRuntime(store,config).engine;
   e.registerIdentity(HOUSE,HOUSEHOLD_PAIR.publicKey.export({type:'spki',format:'pem'}).toString());
   const mandate={id:MANDATE,household:HOUSE,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:Date.now()+86_400_000*7,version:1};
-  e.mandates.record({mandate,signatures:{[HOUSE]:sign(null,canonicalMandate(mandate),HOUSEHOLD_PAIR.privateKey).toString('base64')},assertions:{},keyOf:(k:string)=>e.publicKeyFor(k),relyingPartyId:config.rpID});});
+  e.mandates.record({mandate,signatures:{[HOUSE]:sign(null,canonicalMandate(mandate,config.rpID),HOUSEHOLD_PAIR.privateKey).toString('base64')},assertions:{},keyOf:(k:string)=>e.publicKeyFor(k),relyingPartyId:config.rpID});});
  // One registration per unit, as the operator command does: a unit opens each record namespace once.
  const register=(s:ReturnType<typeof shop>)=>unit.run(store=>registerPresenter(memberRuntime(store,config),{presenter:s.presenter.id,presenterKey:pem(s.presenter.pair),merchant:s.merchant.id,merchantKey:pem(s.merchant.pair),at:Date.now()}).token);
  const tokenA=await register(a),tokenB=await register(b);
