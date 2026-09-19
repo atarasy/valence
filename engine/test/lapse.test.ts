@@ -104,7 +104,8 @@ describe("§16.1: bringing a co-signed mandate's lapse forward is a loosening", 
 
 describe("§16.1, clause 58: a lapse is at most a year out", () => {
   test("a household that has lost its co-signer is held for at most a year", async () => {
-    // NOTE (mutation check, 2026-09-19): lapse_unbounded.
+    // NOTE (mutation check, 2026-09-19): lapse_unbounded. The first refusal
+    // assertion read "accepted": a lapse in the year 9999 was recorded.
     //
     // The refutation's freeze: the household, or whoever holds its key,
     // records `.9` with a daily ceiling of 0, a ten-year window and a
