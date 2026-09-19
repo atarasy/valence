@@ -42,8 +42,34 @@ export type MandateSource = {
    * ceiling of 500 had the gift refused. A daily ceiling protects the person
    * whose money moves, so the giver's is the one read. A gift names no mandate
    * of the giver's, so the tightest of them governs.
+   *
+   * Question 68, decided 2026-09-19, reads it for a household's own offers
+   * too: a household holds several mandates and its own offers named one.
    */
   dailyCeilingOf(household: string): Promise<number | null>;
+  /**
+   * Clause 46 and §16.2, question 68, decided 2026-09-19. **The tightest
+   * out-of-network ceiling among this household's live mandates, or null
+   * where it holds none.**
+   *
+   * Clause 47 is what this closes. `MandateRegister.record` asks for the
+   * co-signers of the version it is replacing, so a household holding
+   * `<household>.1` with a ceiling of 0 and a co-signer recorded
+   * `<household>.2` at version 1, alone, with any ceiling it liked, and
+   * presented under the second: measured 2026-09-19, loosening `.1` was
+   * refused `unsigned` and an offer of 1,200 entirely out of network
+   * presented under `.2`. A protection a household can walk around by writing
+   * a second label is not one, so every mandate it holds binds every offer it
+   * makes.
+   */
+  outOfNetworkCeilingOf(household: string): Promise<number | null>;
+  /**
+   * §16.5, question 68, decided 2026-09-19. **The tightest cooling window
+   * among this household's live mandates, which is the longest, or null where
+   * none sets one.** The same escape: a household with a window on one label
+   * settled at once under a second.
+   */
+  coolingSecondsOf(household: string): Promise<number | null>;
 };
 
 /** §16.3. The tightest `ceiling_daily` among the rows, or null. */
@@ -57,6 +83,52 @@ export function tightestDailyCeiling(rows: Mandate[], now = Date.now()): number 
     if (tightest === null || m.ceiling_daily < tightest) tightest = m.ceiling_daily;
   }
   return tightest;
+}
+
+/**
+ * Clause 46, §16.2. The tightest `ceiling_out_of_network` among the rows, or
+ * null where there are no live ones. A lapsed mandate governs nothing, for
+ * the reason above: its ceiling would otherwise refuse under a live one.
+ *
+ * `ceiling_out_of_network` is not nullable, so every live row has one and the
+ * null here means "this household holds no live mandate", which is the state
+ * §16.2 leaves alone.
+ */
+export function tightestOutOfNetworkCeiling(rows: Mandate[], now = Date.now()): number | null {
+  let tightest: number | null = null;
+  for (const m of rows) {
+    if (m.lapses_at <= now) continue;
+    if (tightest === null || m.ceiling_out_of_network < tightest) tightest = m.ceiling_out_of_network;
+  }
+  return tightest;
+}
+
+/**
+ * §16.5. The tightest cooling window among the rows, **which is the longest**:
+ * a window is time in which a signed set can be taken back, so more of it is
+ * more protection, and this is the one place in §16 where the tightest value
+ * is the larger one. Null is no window and is skipped rather than treated as
+ * zero, exactly as `tightestDailyCeiling` skips a null ceiling.
+ */
+export function longestCooling(rows: Mandate[], now = Date.now()): number | null {
+  let longest: number | null = null;
+  for (const m of rows) {
+    if (m.lapses_at <= now) continue;
+    if (m.cooling_seconds == null) continue;
+    if (longest === null || m.cooling_seconds > longest) longest = m.cooling_seconds;
+  }
+  return longest;
+}
+
+/**
+ * §13.1, question 68. What a hub may answer for one of the household route's
+ * protections: null, meaning it sets none, or a whole number of currency
+ * units or seconds. **Absent is neither**, and the callers below refuse it
+ * rather than read it as null, because a hub that predates a protection would
+ * otherwise turn that protection off for every household it holds.
+ */
+function readableNonNegative(value: unknown): boolean {
+  return value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
 }
 
 /** The register in this process. What the reference runs when it presents both roles. */
@@ -75,6 +147,12 @@ export class LocalMandates implements MandateSource {
   }
   async dailyCeilingOf(household: string): Promise<number | null> {
     return tightestDailyCeiling(this.rows.forHousehold(household));
+  }
+  async outOfNetworkCeilingOf(household: string): Promise<number | null> {
+    return tightestOutOfNetworkCeiling(this.rows.forHousehold(household));
+  }
+  async coolingSecondsOf(household: string): Promise<number | null> {
+    return longestCooling(this.rows.forHousehold(household));
   }
 }
 
@@ -170,7 +248,47 @@ export class RemoteMandates implements MandateSource {
     return ceiling as number | null;
   }
 
-  private async household(household: string): Promise<{ has?: unknown; ceiling_daily?: unknown }> {
+  /**
+   * Clause 46, §16.2, question 68. The same route carries the tightest
+   * out-of-network ceiling. A hub that answers without it is one that predates
+   * the question, and reading its silence as "no ceiling" would present an
+   * offer past the ceiling the household set on another of its labels, which
+   * is the escape the question closes. So it refuses instead, as
+   * `dailyCeilingOf` does.
+   */
+  async outOfNetworkCeilingOf(household: string): Promise<number | null> {
+    const ceiling = (await this.household(household)).ceiling_out_of_network;
+    if (!readableNonNegative(ceiling)) {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates without an out-of-network ceiling it could read`
+      );
+    }
+    return ceiling as number | null;
+  }
+
+  /**
+   * §16.5, question 68. And the tightest, which is the longest, cooling
+   * window. Silence is refused rather than read as no window, for the reason
+   * above: a household that set one on another label would settle at once.
+   */
+  async coolingSecondsOf(household: string): Promise<number | null> {
+    const cooling = (await this.household(household)).cooling_seconds;
+    if (!readableNonNegative(cooling)) {
+      throw unprocessable(
+        "hub_refused",
+        `the hub answered ${household}'s mandates without a cooling window it could read`
+      );
+    }
+    return cooling as number | null;
+  }
+
+  private async household(household: string): Promise<{
+    has?: unknown;
+    ceiling_daily?: unknown;
+    ceiling_out_of_network?: unknown;
+    cooling_seconds?: unknown;
+  }> {
     let response: Response;
     try {
       response = await this.fetchImpl(
@@ -209,6 +327,11 @@ export class RemoteMandates implements MandateSource {
         `the hub answered ${household}'s mandates without saying whether there are any`
       );
     }
-    return body as { has?: unknown; ceiling_daily?: unknown };
+    return body as {
+      has?: unknown;
+      ceiling_daily?: unknown;
+      ceiling_out_of_network?: unknown;
+      cooling_seconds?: unknown;
+    };
   }
 }
