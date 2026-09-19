@@ -66,9 +66,9 @@ const keep = async (engine: Engine, id: string, now: number) => {
 describe("§16.1: bringing a co-signed mandate's lapse forward is a loosening", () => {
   test("the household alone cannot bring it forward, and so cannot let a loose label govern", async () => {
     // NOTE (mutation check, 2026-09-19): lapse_forward_is_the_households_alone.
-    // The household's lone signature was accepted and, a second later, an
-    // offer of 1,200 presented and settled at once under the loose label,
-    // past a daily ceiling of 0 and a day's window.
+    // The refusal assertion read "accepted": the household's lone signature
+    // brought the lapse forward, which is the first step of the escape the
+    // refutation measured to a settlement of 1,200 under the loose label.
     const T = Date.now();
     const { engine } = makeEngine({ isInNetwork: () => false });
     const one = mandate("1", { ceiling_daily: 0, cooling_seconds: 86_400, co_signers: [CO.household] }, T);
