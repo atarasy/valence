@@ -40,58 +40,33 @@ async function writeAsBeforeTheMarker(path: string) {
 }
 
 describe("question 66: a store from before the marker", () => {
-  test("is marked once on first open where the ledger keeps its rows", async () => {
-    // NOTE (mutation check, 2026-09-19): carried_marker_not_migrated.
+  test("says once that it cannot tell which settlements a move carried, and marks nothing", async () => {
+    // NOTE (mutation check, 2026-09-19): store_predating_the_marker_is_silent.
+    // Two passes were written to mark them and both were refuted: a
+    // reservation's absence is not evidence a move carried a settlement, on a
+    // ledger the reference kept in memory until 2026-09-19, on a host that
+    // only imports, or after a sweep. The store says so once instead.
     const dir = mkdtempSync(join(tmpdir(), "valence-migration-"));
     try {
       const path = join(dir, "store.sqlite");
       await writeAsBeforeTheMarker(path);
       const store = openStore(path);
       const engine = new ValenceEngine(new InMemoryLedger(store), options, store);
-      expect(engine.paymentsBy(giver).map((p) => p.offer)).toEqual(["own"]);
-      store.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("is left unmarked where the ledger kept no reservation for any settlement", async () => {
-    // NOTE (mutation check, 2026-09-19): migration_trusts_an_empty_ledger.
-    // The reference ledger was kept in memory until 2026-09-19 even where the
-    // store was on disk, so a store from before that has settlements and no
-    // reservations; the pass marked every settlement the host had made.
-    const dir = mkdtempSync(join(tmpdir(), "valence-migration-"));
-    try {
-      const path = join(dir, "store.sqlite");
-      await writeAsBeforeTheMarker(path);
-      const db = new Database(path);
-      db.run(`drop table "reservations"`);
-      db.close();
-      const store = openStore(path);
-      const engine = new ValenceEngine(new InMemoryLedger(store), options, store);
+      // Nothing is guessed, in either direction: the carried one still reads
+      // as the giver's payment and the one made here still does.
       expect(engine.paymentsBy(giver).map((p) => p.offer).sort()).toEqual(["own", "planted"]);
       store.close();
+      const db = new Database(path);
+      expect(db.query(`select count(*) as n from "migrations"`).get()).toEqual({ n: 1 });
+      expect(db.query(`select count(*) as n from "carried_settlements"`).get()).toEqual({ n: 0 });
+      db.close();
+      // And it says it once: a second open writes no second row.
+      const again = openStore(path);
+      new ValenceEngine(new InMemoryLedger(again), options, again);
+      again.close();
       const check = new Database(path);
-      expect(check.query(`select count(*) as n from "migrations"`).get()).toEqual({ n: 0 });
+      expect(check.query(`select count(*) as n from "migrations"`).get()).toEqual({ n: 1 });
       check.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test("is left unmarked, and says so, where the ledger forgets its rows", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "valence-migration-"));
-    try {
-      const path = join(dir, "store.sqlite");
-      await writeAsBeforeTheMarker(path);
-      const store = openStore(path);
-      const engine = new ValenceEngine(new InMemoryLedger(), options, store);
-      // Unmarked: the ledger cannot say, so nothing is guessed.
-      expect(engine.paymentsBy(giver).map((p) => p.offer).sort()).toEqual(["own", "planted"]);
-      store.close();
-      const db = new Database(path);
-      expect(db.query(`select count(*) as n from "migrations"`).get()).toEqual({ n: 0 });
-      db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

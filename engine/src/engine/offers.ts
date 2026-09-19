@@ -266,32 +266,29 @@ export class ValenceEngine {
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
     this.carriedSettlements = store.map("carried_settlements");
-    // Question 66. A store written before the marker existed holds carried
-    // settlements with nothing to say so, and they then read as made here: a
-    // payment planted by a recipient's import came back into its giver's
-    // record on upgrade, and the first settle reported it to the giver's day.
-    // Measured by the second refutation pass over question 66. The old rule,
-    // a settlement with no reservation on this ledger, is applied once while
-    // a ledger that keeps its rows can still answer it; one that forgets them
-    // on restart cannot tell the two apart, so nothing is marked and the
-    // store is left for its operator to rebuild (§14.2).
-    const migrations = store.map<true>("migrations");
-    if (!migrations.has("carried_settlements")) {
-      const settled = [...this.settlements.keys()];
-      // Both halves are needed. A ledger that keeps its rows can still have
-      // none for this store's settlements: the reference ledger was kept in
-      // memory until 2026-09-19 even where the store was on disk, so such a
-      // store has settlements and no reservations, and reading that as
-      // "carried" marked every settlement the host made. And a ledger that
-      // forgets on restart but has seen a few since would mark whatever it
-      // forgot. Measured by the third refutation pass over question 66.
-      const remembers = settled.length === 0 || (ledger.durable === true && settled.some((id) => ledger.get(id) !== undefined));
-      if (remembers) {
-        for (const id of settled) if (ledger.get(id) === undefined) this.carriedSettlements.set(id, true);
-        migrations.set("carried_settlements", true);
-      } else {
-        console.warn(`valence: ${settled.length} settlements predate the carried-settlement marker and this ledger cannot say which were carried; rebuild the store (§14.2, question 66)`);
-      }
+    // §14.2, question 66. **A store written before the marker cannot be
+    // repaired by guessing.** Such a store holds carried settlements with
+    // nothing to say so, and they then read as made here: a payment planted by
+    // a recipient's import came back into its giver's record on upgrade
+    // (second refutation pass). Two passes were written to mark them from the
+    // one record that looked like evidence, a settlement with no reservation
+    // on this ledger, and the third and fourth refutation passes refuted both:
+    // the reference kept its ledger in memory until 2026-09-19 even where the
+    // store was on disk, one reservation from after that made the pass mark
+    // every older settlement the host had made, a host that has only imported
+    // has no reservation to go on at all, and a swept or pruned reservation
+    // turns a settlement the host made into a carried one. **So nothing is
+    // guessed**: the store says once that it predates the marker, and such a
+    // store is rebuilt rather than mended (§14.2).
+    const migrations = store.map<string>("migrations");
+    // Counted by walking the keys rather than by reading `size`, because a
+    // store may hand out a proxy over its map and `size` is a getter that
+    // refuses one (measured by `import-atomic.test.ts`, which wraps its maps).
+    let settledHere = 0;
+    for (const _ of this.settlements.keys()) settledHere += 1;
+    if (!migrations.has("carried_settlements") && settledHere > 0) {
+      migrations.set("carried_settlements", "unmarked: this store predates the marker");
+      console.warn(`valence: ${settledHere} settlements predate the carried-settlement marker; this store cannot say which of them a move carried, and is one to rebuild (§14.2, question 66)`);
     }
     this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
