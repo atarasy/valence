@@ -208,9 +208,23 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
         version: 1,
       } as never;
     },
-    async dailyCeilingOf() {
-      // Question 60. Read only for a gift's giver, which these stubs never are.
-      return null;
+    async dailyCeilingOf(h: string) {
+      // Question 60 read this for a gift's giver alone, which these stubs
+      // never are. Question 68 reads it for a household's own offers too, so
+      // the stub answers from the one mandate it holds.
+      const m = (await this.get("")) as { household?: string; ceiling_daily?: number | null } | undefined;
+      return m?.household === h ? m.ceiling_daily ?? null : null;
+    },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
     },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
@@ -400,9 +414,23 @@ describe("§6, §16.3: nothing is written on refusal, at the ledger as well", ()
         version: 1,
       } as never;
     },
-    async dailyCeilingOf() {
-      // Question 60. Read only for a gift's giver, which these stubs never are.
-      return null;
+    async dailyCeilingOf(h: string) {
+      // Question 60 read this for a gift's giver alone, which these stubs
+      // never are. Question 68 reads it for a household's own offers too, so
+      // the stub answers from the one mandate it holds.
+      const m = (await this.get("")) as { household?: string; ceiling_daily?: number | null } | undefined;
+      return m?.household === h ? m.ceiling_daily ?? null : null;
+    },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
     },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
@@ -688,7 +716,20 @@ describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoe
       } as never;
     },
     async dailyCeilingOf(h: string) {
-      return h === GIVER ? giver : null;
+      // Question 68: the recipient's own offers read the recipient's tightest,
+      // which here is the one mandate this stub holds.
+      return h === GIVER ? giver : h === HOUSEHOLD ? recipient : null;
+    },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
     },
     async holdsAny(h: string) {
       return h === HOUSEHOLD;
@@ -750,6 +791,17 @@ describe("§6.4, question 62: a set that owes nothing settles at nothing, at onc
       } as never;
     },
     async dailyCeilingOf() { return null; },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
+    },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   });
   const returnedSet = async (engine: ReturnType<typeof makeEngine>["engine"], valence: "returned" | "kept" = "returned") => {
@@ -811,6 +863,17 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
       } as never;
     },
     async dailyCeilingOf() { return null; },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
+    },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   };
 
@@ -859,6 +922,17 @@ describe("questions 60 and 62: what a second refutation pass found", () => {
       } as never;
     },
     dailyCeilingOf: over.daily ?? (async () => null),
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
+    },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   });
 
