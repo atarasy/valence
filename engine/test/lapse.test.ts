@@ -240,10 +240,18 @@ describe("§16.3, §16.5: a decided set keeps what it was decided under", () => 
     expect((await engine.settle(set.id, later + 1)).charged).toBe(900);
   });
 
-  test("a collection that decides a box fixes what is live at its moment", async () => {
+  test("a collection that decides a box fixes what is live at its moment, in process", async () => {
     // NOTE (mutation check, 2026-09-19): collection_fixes_nothing. The box
     // settled at 1,200 past a daily ceiling of 500 once the mandate that set
     // it had lapsed.
+    //
+    // **This calls `engine.collect` and not a route**, which is the point.
+    // The rule lived on a `collectDeciding` only the route called until
+    // 2026-09-20, and `collect` decided a box and recorded nothing; two
+    // callers outside the tests take that path, one of them the service
+    // behind api-dev.vox.delivery. Named by the second refutation pass over
+    // question 68, and §11.2 is the section that says every rule of a
+    // collection is the engine's.
     const T = Date.now();
     const made = makeEngine({ isInNetwork: () => false });
     const { engine, deliveries } = made;
@@ -259,7 +267,7 @@ describe("§16.3, §16.5: a decided set keeps what it was decided under", () => 
     } as never);
     await engine.present(box.id, T);
     deliveries.record({ offer: box.id, carriage: 0, code: `dc-${box.id.slice(0, 8)}`, status: "delivered" });
-    await engine.collectDeciding({ offer: box.id, returned: [box.candidates[1]!.id], consumed: [box.candidates[0]!.id], at: T + 1 });
+    await engine.collect({ offer: box.id, returned: [box.candidates[1]!.id], consumed: [box.candidates[0]!.id], at: T + 1 });
     expect(engine.mustGet(box.id, T + 1).state).toBe("decided");
     await expect(settleSigned(engine, box.id, [], T + 61_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
   });

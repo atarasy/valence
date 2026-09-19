@@ -62,12 +62,15 @@ export async function seedAtomicFixture(path: string, count = 1, ceiling: number
       const offer = engine.createOffer({ binding: 'physical', household: houseOf(mandatePair), purpose: 'replenish', config_version: config.version, expires_at: fixtureTime + 3600000, mandate: mandateOf(mandatePair), price_band: null, giver: null, candidates: [{ product: 'tea-' + i, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }] });
       await engine.present(offer.id, fixtureTime); offers.push(offer);
     }
-    return offers.map(offer => {
+    // §16.3, §16.5. `collect` is async since 2026-09-20: it reads the
+    // protections a box its collection decides is held to, which is the
+    // engine's rule and not the route's.
+    return await Promise.all(offers.map(async offer => {
       deliveries.record({ offer: offer.id, carriage: 550, code: 'fixture-delivery', status: 'delivered', now: fixtureTime });
-      engine.collect({ offer: offer.id, consumed: offer.candidates.map(c => c.id), returned: [], at: fixtureTime }); engine.applyRecoveryTo(offer.id, fixtureTime);
+      await engine.collect({ offer: offer.id, consumed: offer.candidates.map(c => c.id), returned: [], at: fixtureTime }); engine.applyRecoveryTo(offer.id, fixtureTime);
       const bytes = canonicalStatement(offer.id, 550, statementLines(offer, []));
       return { offer: offer.id, signature: sign(mandatePair.privateKey.asymmetricKeyType === 'ed25519' ? null : 'sha256', bytes, mandatePair.privateKey).toString('base64'), disputed: [] };
-    });
+    }));
   }); } finally { unit.close(); }
 }
 export async function settleFixture(store: Store, statement: FixtureStatement) {

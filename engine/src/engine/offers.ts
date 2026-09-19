@@ -1916,15 +1916,30 @@ export class ValenceEngine {
    * at `at`, and folds it in. The offer is read at that time first, so a
    * deadline already passed has made its `lost` before the rules are read
    * rather than depending on whether some earlier read passed a time.
+   *
+   * §16.3, §16.5, decided 2026-09-19 and moved here on 2026-09-20. **A
+   * collection that decides a box fixes the protections live at its own
+   * moment**, as a household's signature does. A collection resolves every
+   * line, so a box still `presented` is decided by it, and the result is kept
+   * only where this collection is the one that decided the box.
+   *
+   * **It lived on a `collectDeciding` the route called, and that was wrong.**
+   * The second refutation pass over question 68 measured it: `collect` decided
+   * a box and recorded nothing, and two callers outside the tests call
+   * `collect`, one of them the service behind `api-dev.vox.delivery`
+   * (`experiments/member-postgres/device-acceptance.ts`). §11.2 exists because
+   * every rule of a collection is the engine's, so a rule reachable only
+   * through the route is not one. Making this `async` is what it cost, and
+   * every caller now awaits it.
    */
-  collect(input: {
+  async collect(input: {
     offer: string;
     returned: string[];
     consumed: string[];
     missing?: string[];
     missing_notes?: Record<string, string>;
     at?: number;
-  }): Recovery {
+  }): Promise<Recovery> {
     const at = input.at ?? Date.now();
     const offer = this.mustGet(input.offer, at);
     // §11.2, question 46. A collection resolves open lines, so it belongs to a
@@ -1937,31 +1952,17 @@ export class ValenceEngine {
     if (offer.state !== "presented" && !(offer.state === "decided" && !this.settlements.has(offer.id))) {
       throw conflict("bad_state", `cannot record a collection for an offer in ${offer.state}`);
     }
-    const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
-    this.applyRecoveryTo(input.offer, at);
-    return row;
-  }
-
-  /**
-   * §11.2 and §16.3, §16.5, decided 2026-09-19. **A collection that decides a
-   * box fixes the protections live at its own moment**, as a household's
-   * signature does. A collection resolves every line, so a box still
-   * `presented` is decided by it. The read comes first, so that a hub which
-   * cannot answer leaves the collection unrecorded rather than recorded with
-   * nothing fixed, and the result is kept only where this collection is the
-   * one that decided the box.
-   *
-   * `collect` stays synchronous, and records nothing fixed, because every
-   * rule of the collection itself is checked there; the route calls this.
-   */
-  async collectDeciding(input: Parameters<ValenceEngine["collect"]>[0]): Promise<Recovery> {
-    const at = input.at ?? Date.now();
-    const offer = this.mustGet(input.offer, at);
+    // The read comes before anything is written, and refuses nothing
+    // (`protectionsAt`), so a hub that cannot answer leaves the collection
+    // recorded with nothing fixed rather than unrecorded: a courier's
+    // collection is not a place to fail closed, since a line the deadline
+    // resolves is `lost` and §3.2 never bills a household for `lost`, so the
+    // loss would fall on the merchant for goods the household did use.
     const mayOwe = input.consumed.length > 0 ||
       offer.candidates.some((c) => (c.valence === "kept" || c.valence === "defaulted") && !c.given_by);
     const fixed = offer.state === "presented" ? await this.protectionsAt(offer, at, mayOwe) : undefined;
-    const row = this.collect({ ...input, at });
-    const after = this.mustGet(input.offer, at);
+    const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
+    const after = this.applyRecoveryTo(input.offer, at);
     if (fixed && after.state === "decided" && after.decided_at === at) this.decidedProtections.set(after.id, fixed);
     return row;
   }

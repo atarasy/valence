@@ -773,10 +773,14 @@ async function route(
           throw badRequest("malformed", "missing_notes must map candidate ids to notes");
         }
         // §11.2. Every rule and its order are the engine's, so an in-process
-        // caller meets the same refusals as this route.
-        // §16.3, §16.5. Through the path that fixes a box's protections when
-        // the collection is what decides it.
-        const collected = await engine.collectDeciding({
+        // caller meets the same refusals as this route, and fixes a box's
+        // protections where the collection is what decides it (§16.3, §16.5).
+        // **That sentence was false for a day**: the fixing lived on a
+        // `collectDeciding` only this route called, and `collect`, which the
+        // service behind api-dev.vox.delivery calls, decided a box and
+        // recorded nothing. Measured by the second refutation pass over
+        // question 68 and moved into the engine on 2026-09-20.
+        const collected = await engine.collect({
           offer: id,
           returned: raw.returned as string[],
           consumed: raw.consumed as string[],

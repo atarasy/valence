@@ -52,7 +52,7 @@ async function collected(
   // price includes carriage records 0; `null` is an implementation that never
   // recorded what it did, and `settle` refuses it.
   deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
-  engine.collect({
+  await engine.collect({
     offer: offer.id,
     returned: [offer.candidates[2]!.id],
     consumed: [offer.candidates[0]!.id, offer.candidates[1]!.id],
@@ -123,7 +123,7 @@ describe("§6.5: a physical box with goods used settles on the household's signa
     const { engine } = makeEngine();
     const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
     await engine.present(offer.id);
-    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    await engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
     engine.applyRecoveryTo(offer.id);
     const settlement = await engine.settle(offer.id);
     expect(settlement.charged).toBe(0);
@@ -290,7 +290,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
     const [used, returned, kept] = offer.candidates;
     await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
-    engine.collect({ offer: offer.id, consumed: [used!.id], returned: [returned!.id], at: Date.now() });
+    await engine.collect({ offer: offer.id, consumed: [used!.id], returned: [returned!.id], at: Date.now() });
     await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     // The box stays decided and settleable, so the consumed line is charged.
     expect(engine.mustGet(offer.id).state).toBe("decided");
@@ -889,7 +889,7 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
     expect(ledger.get(offer.id)!.status).toBe("held");
     expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
     deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
-    engine.collect({ offer: offer.id, returned: [offer.candidates[1]!.id], consumed: [offer.candidates[0]!.id], at: Date.now() });
+    await engine.collect({ offer: offer.id, returned: [offer.candidates[1]!.id], consumed: [offer.candidates[0]!.id], at: Date.now() });
     expect(engine.mustGet(offer.id).candidates[0]!.valence).toBe("consumed");
   });
 
@@ -904,7 +904,7 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
     engine.readTheDayFrom({ async totalSince() { return 1; }, async report() {}, async reportOffer() {} } as never);
     const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
     await engine.present(offer.id);
-    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    await engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
     engine.applyRecoveryTo(offer.id);
     expect(engine.mustGet(offer.id).state).toBe("decided");
     expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(1);
