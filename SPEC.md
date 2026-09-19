@@ -490,7 +490,7 @@ POST   /_identities                 a public key: a presenter's, a household's o
 POST   /households/{id}/offers      the person's copy of a decided offer, sent by the engine (§13.2)
 POST   /households/{id}/settled     the person's copy of what settled, an amount and a date (§13.2, §16.3)
 GET    /households/{id}/settled?since=  what has settled for this household since a moment, as a total
-GET    /_node/mandates?household=  whether this household has any mandate here, as `has` (§16.2, question 56), and its tightest `ceiling_daily` and `ceiling_out_of_network` (§16.3, questions 60 and 65)
+GET    /_node/mandates?household=  whether this household has any mandate here, as `has` (§16.2, question 56), its tightest `ceiling_daily` and `ceiling_out_of_network` (§16.3, questions 60 and 65) and its longest `cooling_seconds` (§16.5, question 68)
 ```
 
 The same operations SHOULD be exposed as MCP tools, so that a merchant's agent and a household's agent call the same surface.
