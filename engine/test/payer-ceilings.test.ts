@@ -17,7 +17,12 @@ describe("clause 46, question 65: a gift is held to the giver's out-of-network c
           cooling_seconds: null, co_signers: [], lapses_at: Date.now() + HOUR, version: 1 } as never;
       },
       async dailyCeilingOf() { return null; },
-      async outOfNetworkCeilingOf(h: string) { return h === GIFT_GIVER.household ? giver : null; },
+      async outOfNetworkCeilingOf(h: string) {
+        // Question 68: the recipient's own offers read the recipient's
+        // tightest, which here is the one mandate this stub holds.
+        return h === GIFT_GIVER.household ? giver : h === HOUSEHOLD ? recipient : null;
+      },
+      async coolingSecondsOf() { return null; },
       async holdsAny(h: string) { return h === HOUSEHOLD; },
     });
     return { engine, ledger };
@@ -62,8 +67,13 @@ describe("§16.3, question 66: the day is told once for each settlement, and one
         return { id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: ceiling,
           cooling_seconds: null, co_signers: [], lapses_at: Date.now() + HOUR, version: 1 } as never;
       },
-      async dailyCeilingOf() { return null; },
+      async dailyCeilingOf(h: string) {
+        // Question 68: a household's own settlement reads its tightest daily
+        // ceiling, which here is the one mandate this stub holds.
+        return h === HOUSEHOLD ? ceiling : null;
+      },
       async outOfNetworkCeilingOf() { return null; },
+      async coolingSecondsOf() { return null; },
       async holdsAny(h: string) { return h === HOUSEHOLD; },
     });
     const rows = new Map<string, number>();
@@ -126,6 +136,7 @@ describe("questions 65 and 66: what the first refutation pass over them found", 
       },
       async dailyCeilingOf() { return null; },
       async outOfNetworkCeilingOf() { return null; },
+      async coolingSecondsOf() { return null; },
       async holdsAny(h: string) { return h === HOUSEHOLD; },
     });
     const offer = engine.createOffer({

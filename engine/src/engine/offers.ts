@@ -795,9 +795,33 @@ export class ValenceEngine {
     // is read and the recipient's is not, as question 60 did for the daily
     // ceiling; the recipient's lapse above is still its own mandate's. A giver
     // that holds no mandate here sets no ceiling, as an unknown mandate does.
+    //
+    // Clause 47 and §16.2, question 68, decided the same day. **A household's
+    // own offers are held to the tightest ceiling across every mandate it
+    // holds, and not to the one the offer names.** `MandateRegister.record`
+    // asks for co-signers only where the identifier already has a row, so a
+    // household holding `.1` with a ceiling of 0 and a co-signer recorded
+    // `.2` at version 1, alone, with any ceiling it liked: measured
+    // 2026-09-19, loosening `.1` was refused `unsigned` and an offer of
+    // 1,200 entirely out of network presented under `.2`. The signing rules
+    // are unchanged, so nobody is frozen out by a co-signer whose key
+    // nobody holds, which is why question 56's first attempt was refused.
+    //
+    // The named mandate is live here and is one of this household's, so the
+    // minimum is the tightest of the two views even where the source's
+    // reading of "live" differs from this one by a moment. The source reads
+    // its rows against this engine's `now`, as it does for a giver (question
+    // 66's fifth refutation pass), so the two views differ only where the
+    // source is a hub with a clock of its own. A household with no mandate
+    // here is left alone, as before both questions.
     const ceiling = offer.giver
       ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
-      : mandate?.ceiling_out_of_network ?? null;
+      : mandate
+        ? Math.min(
+            mandate.ceiling_out_of_network,
+            (await this.mandateSource.outOfNetworkCeilingOf(offer.household, now)) ?? Infinity
+          )
+        : null;
     if (ceiling !== null) {
       // What a maker or merchant gave is never charged (clause 10), so it is
       // nothing the payer could spend outside the network either, as it is
@@ -1155,8 +1179,15 @@ export class ValenceEngine {
         "this box is past its expiry, so the signed set stands; what was kept is settled as kept"
       );
     }
-    const mandate = await this.mandateFor(offer);
-    const cooling = mandate?.cooling_seconds ?? null;
+    // §16.5, question 68, decided 2026-09-19. **The window is the tightest,
+    // which is the longest, across every mandate this household holds**, and
+    // not the one the offer's mandate names. `mandateFor` is still called, and
+    // called first, because §16.2's `mandate_unknown` belongs wherever the
+    // mandate is read: an offer naming a label this household never recorded
+    // is refused here as it is at presentation. Its result is not read: the
+    // window below comes from every mandate and not from that one.
+    await this.mandateFor(offer);
+    const cooling = await this.mandateSource.coolingSecondsOf(offer.household, now);
     if (cooling === null) {
       throw unprocessable(
         "no_cooling",
@@ -1454,7 +1485,11 @@ export class ValenceEngine {
     // §16.5 and §16.3. Both refusals name themselves: four refusals in this
     // section share a status code, and a `422` that says only "unprocessable"
     // is one a person cannot act on and a probe cannot tell from another.
-    const mandate = await this.mandateFor(offer);
+    //
+    // Question 68: the call stands for §16.2's `mandate_unknown`, which
+    // belongs wherever the mandate is read, and its result is not read; both
+    // protections below come from every mandate this household holds.
+    await this.mandateFor(offer);
     // §16.5, question 42, decided 2026-09-13. **A cooling window belongs to a
     // set the household signed and to nothing else.** §11 moves a box out of
     // `presented` when a collection resolves its last line, stamping
@@ -1469,8 +1504,14 @@ export class ValenceEngine {
     // **The message no longer promises a settle.** It read "this set settles
     // at N", and nothing in this engine settles on a timer: `sweep` applies
     // expiry and the only settle is the route.
-    if (!needsStatement(offer, missing) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
-      const opens = offer.decided_at + mandate.cooling_seconds * 1000;
+    //
+    // §16.5, question 68, decided 2026-09-19. **The window is the tightest,
+    // which is the longest, across every mandate this household holds.** A
+    // household that had set one on the label its offers named settled at
+    // once under a second label it recorded alone.
+    const coolingSeconds = await this.mandateSource.coolingSecondsOf(offer.household, now);
+    if (!needsStatement(offer, missing) && coolingSeconds != null && offer.decided_at !== null) {
+      const opens = offer.decided_at + coolingSeconds * 1000;
       if (now < opens) {
         throw unprocessable(
           "mandate_cooling",
@@ -1577,11 +1618,14 @@ export class ValenceEngine {
     // zero-settle for a household that had tightened its ceiling, and the set
     // stayed behind its reserve. Nor is the giver's ceiling asked for, so a
     // hub that predates question 60 cannot refuse a declined gift.
+    // §16.3, question 68, decided 2026-09-19. **A household's own settlement
+    // reads the tightest ceiling across every mandate it holds**, which is
+    // what the giver's branch already does, and for the same reason: a
+    // household that had tightened one label settled freely under a second it
+    // recorded alone. The payer of an offer with no giver is the household.
     const ceilingDaily = charged === 0
       ? null
-      : offer.giver
-        ? await this.mandateSource.dailyCeilingOf(offer.giver, now)
-        : mandate?.ceiling_daily ?? null;
+      : await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now);
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
