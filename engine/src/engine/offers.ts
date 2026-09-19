@@ -122,7 +122,17 @@ export class ValenceEngine {
    * first refutation pass over question 66 measured the Meter adapter, whose
    * holds are memory only: after a restart every settlement read as carried.
    */
-  private readonly carriedSettlements: Map<string, true>;
+  /**
+   * §14.2, question 66. The settlements this host made, written as it makes
+   * them. **The record is positive**, because the absence of one is the only
+   * thing a store can be sure of: a settlement that carries no record of
+   * where it was made is one this host will not report and will not list as a
+   * giver's payment. The fifth refutation pass measured the other way round:
+   * a store written before any of this named nothing, every settlement in it
+   * read as made here, and an unauthenticated settle then told the payer's
+   * day 999,999 on a settlement a stranger had imported.
+   */
+  private readonly settledHere: Map<string, true>;
   private readonly memberStatementConfirmations: Map<string, string>;
   /** §16.3, question 66. The tail of each payer's settlements in flight. Memory only: it orders, it records nothing. */
   private readonly settling = new Map<string, Promise<void>>();
@@ -265,30 +275,22 @@ export class ValenceEngine {
     }
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
-    this.carriedSettlements = store.map("carried_settlements");
-    // §14.2, question 66. **A store written before the marker cannot be
-    // repaired by guessing.** Such a store holds carried settlements with
-    // nothing to say so, and they then read as made here: a payment planted by
-    // a recipient's import came back into its giver's record on upgrade
-    // (second refutation pass). Two passes were written to mark them from the
-    // one record that looked like evidence, a settlement with no reservation
-    // on this ledger, and the third and fourth refutation passes refuted both:
-    // the reference kept its ledger in memory until 2026-09-19 even where the
-    // store was on disk, one reservation from after that made the pass mark
-    // every older settlement the host had made, a host that has only imported
-    // has no reservation to go on at all, and a swept or pruned reservation
-    // turns a settlement the host made into a carried one. **So nothing is
-    // guessed**: the store says once that it predates the marker, and such a
-    // store is rebuilt rather than mended (§14.2).
-    const migrations = store.map<string>("migrations");
-    // Counted by walking the keys rather than by reading `size`, because a
-    // store may hand out a proxy over its map and `size` is a getter that
-    // refuses one (measured by `import-atomic.test.ts`, which wraps its maps).
-    let settledHere = 0;
-    for (const _ of this.settlements.keys()) settledHere += 1;
-    if (!migrations.has("carried_settlements") && settledHere > 0) {
-      migrations.set("carried_settlements", "unmarked: this store predates the marker");
-      console.warn(`valence: ${settledHere} settlements predate the carried-settlement marker; this store cannot say which of them a move carried, and is one to rebuild (§14.2, question 66)`);
+    this.settledHere = store.map("settled_here");
+    // §14.2, question 66. **What a store says about itself is written when
+    // it is opened, not inferred later.** A store that predates the record of
+    // where a settlement was made cannot say which of its settlements a move
+    // carried, and is one to rebuild; one opened empty after this says so
+    // instead. The fifth refutation pass measured the inference: a new store
+    // is empty at its first open, so nothing was written, and the open after
+    // its first settlement labelled it as predating the record.
+    const provenance = store.map<string>("provenance");
+    if (!provenance.has("settled_here")) {
+      let settledBefore = 0;
+      for (const _ of this.settlements.keys()) settledBefore += 1;
+      provenance.set("settled_here", settledBefore > 0 ? "unrecorded: this store predates the record" : "recorded from the first settlement");
+      if (settledBefore > 0) {
+        console.warn(`valence: ${settledBefore} settlements predate the record of where a settlement was made; this store cannot say which of them a move carried, and is one to rebuild (§14.2, question 66)`);
+      }
     }
     this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
@@ -794,7 +796,7 @@ export class ValenceEngine {
     // ceiling; the recipient's lapse above is still its own mandate's. A giver
     // that holds no mandate here sets no ceiling, as an unknown mandate does.
     const ceiling = offer.giver
-      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver)
+      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
       : mandate?.ceiling_out_of_network ?? null;
     if (ceiling !== null) {
       // What a maker or merchant gave is never charged (clause 10), so it is
@@ -1578,7 +1580,7 @@ export class ValenceEngine {
     const ceilingDaily = charged === 0
       ? null
       : offer.giver
-        ? await this.mandateSource.dailyCeilingOf(offer.giver)
+        ? await this.mandateSource.dailyCeilingOf(offer.giver, now)
         : mandate?.ceiling_daily ?? null;
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
@@ -1627,6 +1629,8 @@ export class ValenceEngine {
         .digest("hex"),
     };
     this.settlements.set(offer.id, settlement);
+    // §14.2, question 66. Made here, said so here.
+    this.settledHere.set(offer.id, true);
     if (memberIdentity !== undefined) this.memberStatementConfirmations.set(offer.id, memberIdentity);
     // §16.3. The person's own copy, written as the settlement is made. It
     // carries an amount and a date and nothing about what was in the offer: a
@@ -1655,9 +1659,10 @@ export class ValenceEngine {
    * a ceiling of 2,000 over 1,200 the day had never heard of.
    */
   private async reportDay(settlement: Settlement): Promise<Settlement> {
-    // Only a settlement made here. Counting one a move carried to the day here
-    // is what question 63 declined.
-    if (this.carriedSettlements.has(settlement.offer)) return settlement;
+    // Only a settlement this host made. Counting one a move carried to the
+    // day here is what question 63 declined, and a settlement whose
+    // provenance this store does not record is one to leave alone.
+    if (!this.settledHere.has(settlement.offer)) return settlement;
     await this.daySource.report({
       offer: settlement.offer,
       household: settlement.payer,
@@ -2117,7 +2122,6 @@ export class ValenceEngine {
 
   importSettlement(settlement: Settlement): void {
     this.settlements.set(settlement.offer, settlement);
-    this.carriedSettlements.set(settlement.offer, true);
   }
 
   importNote(note: Note): void {
@@ -2220,7 +2224,7 @@ export class ValenceEngine {
     // nothing (question 61's record, measured by the third refutation pass
     // over question 64). The giver's own record of it travels with the giver.
     const here = [...this.offers.values()]
-      .filter((o) => o.giver === household && !this.carriedSettlements.has(o.id))
+      .filter((o) => o.giver === household && this.settledHere.has(o.id))
       .map((o) => this.settlements.get(o.id))
       .filter((st): st is Settlement => st !== undefined)
       .map((st) => ({ offer: st.offer, presenter: st.signed_by, settled_at: st.settled_at, charged: st.charged, receipt: st.receipt }));

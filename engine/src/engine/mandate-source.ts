@@ -43,7 +43,7 @@ export type MandateSource = {
    * whose money moves, so the giver's is the one read. A gift names no mandate
    * of the giver's, so the tightest of them governs.
    */
-  dailyCeilingOf(household: string): Promise<number | null>;
+  dailyCeilingOf(household: string, now?: number): Promise<number | null>;
   /**
    * Clause 46, §12, question 65, decided 2026-09-19. **The tightest
    * out-of-network ceiling among this household's mandates, or null where it
@@ -53,7 +53,7 @@ export type MandateSource = {
    * a giver with a ceiling of 0 was charged 1,200 outside the network.
    * Measured by the third refutation pass over question 64.
    */
-  outOfNetworkCeilingOf(household: string): Promise<number | null>;
+  outOfNetworkCeilingOf(household: string, now?: number): Promise<number | null>;
 };
 
 /** §16.3. The tightest `ceiling_daily` among the rows, or null. */
@@ -93,11 +93,13 @@ export class LocalMandates implements MandateSource {
   async holdsAny(household: string): Promise<boolean> {
     return this.rows.forHousehold(household).length > 0;
   }
-  async dailyCeilingOf(household: string): Promise<number | null> {
-    return tightestDailyCeiling(this.rows.forHousehold(household));
+  // The engine's own clock, so that a giver's lapse is read against the same
+  // moment as the recipient's (the fifth refutation pass over question 66).
+  async dailyCeilingOf(household: string, now = Date.now()): Promise<number | null> {
+    return tightestDailyCeiling(this.rows.forHousehold(household), now);
   }
-  async outOfNetworkCeilingOf(household: string): Promise<number | null> {
-    return tightestOutOfNetworkCeiling(this.rows.forHousehold(household));
+  async outOfNetworkCeilingOf(household: string, now = Date.now()): Promise<number | null> {
+    return tightestOutOfNetworkCeiling(this.rows.forHousehold(household), now);
   }
 }
 

@@ -1,9 +1,9 @@
 import pathlib
-# §14.2, question 66. Say nothing about a store that predates the carried
-# settlement marker, so an operator upgrading one is told nothing about the
-# settlements it cannot tell apart.
+# §14.2, question 66. Write nothing about where a store stands, so a store
+# that predates the record says nothing and one opened after it is never
+# recorded as having the record from the start.
 p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
-old = '      migrations.set("carried_settlements", "unmarked: this store predates the marker");\n'
+old = '      provenance.set("settled_here", settledBefore > 0 ? "unrecorded: this store predates the record" : "recorded from the first settlement");\n'
 assert s.count(old) == 1, "anchor drifted"
 s = s.replace(old, '', 1)
 p.write_text(s)
