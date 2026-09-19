@@ -1163,7 +1163,6 @@ export class ValenceEngine {
       // §16.5. The cooling window starts when the set is signed, not when the
       // offer was presented.
       offer.decided_at = now;
-      this.decidedProtections.set(offer.id, fixed!);
       // Clause 8. The person's own copy of what they were shown and what they
       // said to each of it. Reported here rather than at settlement, because a
       // copy that arrived only when something was bought would hold the
@@ -1178,6 +1177,13 @@ export class ValenceEngine {
       });
     }
     this.confirmations.set(offerId, [...used, ...spent]);
+    // §10.5: nothing is written on refusal. **The record went in before the
+    // day was told**, which is the last thing here that can fail, so a day
+    // source that threw left `decided_protections` on the disk of a set the
+    // disk still held as `presented`. Measured by the second refutation pass
+    // over question 68. It is written beside the commit instead, past every
+    // wait, so the two land together or neither does.
+    if (offer.state === "decided") this.decidedProtections.set(offer.id, fixed!);
     this.commit(offer);
     if (offer.state === "decided") await this.settleIfNothingOwed(offer, now);
     return offer;

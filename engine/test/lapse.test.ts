@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { sign } from "node:crypto";
+import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openStore } from "../src/common/store.js";
 import { MAX_COOLING_SECONDS, MAX_LAPSE_MS, canonicalMandate, type Mandate } from "../src/hub/mandates.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import { LocalMandates } from "../src/engine/mandate-source.js";
-import { CONFIG_VERSION, HOUSEHOLD, MANDATE_PAIR, houseFor, makeEngine, otherHousehold, settleSigned } from "./helpers.js";
+import { CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, otherHousehold, settleSigned } from "./helpers.js";
 
 /**
  * §16.1, §16.3, §16.5. The lapse, as the first refutation pass over question
@@ -343,5 +348,43 @@ describe("§10.5: the read at a decision does not let two decisions through", ()
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const refused = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
     expect((refused.reason as { code?: string }).code).toBe("already_decided");
+  });
+});
+
+describe("§10.5: a decision that fails writes nothing, on the disk too", () => {
+  test("a day source that throws leaves no record behind", async () => {
+    // NOTE (mutation check, 2026-09-20): decide_writes_before_the_day. The
+    // last assertion read one row: `decided_protections` on the disk of a set
+    // the disk still held as `presented`.
+    //
+    // The second refutation pass over question 68, probe 9(b). The record
+    // went in before the day was told, and the day is the last thing in
+    // `decide` that can fail, so a hub that was down left a durable row for a
+    // decision that never happened. Nothing wrapped the three writes.
+    // §10.5's "nothing is written on refusal" had been true of the disk on
+    // this path until the record existed.
+    const T = Date.now();
+    const dir = mkdtempSync(join(tmpdir(), "q68-decide-"));
+    const path = join(dir, "engine.sqlite");
+    const store = openStore(path);
+    const { engine } = makeEngine({ isInNetwork: () => false }, store);
+    record(engine, mandate("1", { ceiling_out_of_network: 10_000_000, ceiling_daily: 500, cooling_seconds: 86_400 }, T), T);
+    const o = offer(engine, MANDATE, T);
+    await engine.present(o.id, T);
+    engine.readTheDayFrom({
+      async reportOffer() { throw new Error("the hub is down"); },
+      async report() {}, async totalSince() { return 0; },
+    } as never);
+    await expect(keep(engine, o.id, T)).rejects.toThrow("the hub is down");
+    store.close();
+
+    const db = new Database(path, { readonly: true });
+    const offers = (db.query(`select v from "offers"`).all() as { v: string }[])
+      .map((r) => (JSON.parse(r.v) as { state: string }).state);
+    const rows = db.query(`select k from "decided_protections"`).all();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+    expect(offers).toEqual(["presented"]);
+    expect(rows).toEqual([]);
   });
 });
