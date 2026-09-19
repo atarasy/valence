@@ -39,7 +39,11 @@ SERVER_PID=$!
 # a file was produced.
 SECOND_PORT=$((PORT + 100))
 SECOND="http://localhost:${SECOND_PORT}"
-PORT="$SECOND_PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+# §16.1, question 58. The second host asserts for a relying party of its own,
+# so a mandate version signed for the first does not verify there, which is
+# what a move makes a household do again.
+SECOND_RP_ID="second.conformance.example"
+PORT="$SECOND_PORT" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID="$SECOND_RP_ID" VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 SECOND_PID=$!
 
@@ -123,7 +127,7 @@ SEED_MANDATE="$(printf '%s\n' "$SEED_OUT" | sed -n 11p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
-SEED_KEYS="$SEED_KEYS" BASE="$SECOND" bun scripts/seed.ts > /dev/null
+SEED_KEYS="$SEED_KEYS" VALENCE_RP_ID="$SECOND_RP_ID" BASE="$SECOND" bun scripts/seed.ts > /dev/null
 # §13.1. The role-split pair is seeded as one implementation across two
 # parties: the presenter's writes go to the engine, the person's to the hub.
 # Without this the roles suite can only ask who answers, never whether the
@@ -152,6 +156,7 @@ VALENCE_BINDINGS="digital,physical" \
 VALENCE_RECOVERY_GRACE_DAYS="0" \
 VALENCE_RP_ID="conformance.example" \
 VALENCE_SECOND_HOST_URL="$SECOND" \
+VALENCE_SECOND_RP_ID="$SECOND_RP_ID" \
 VALENCE_ENGINE_ONLY_URL="$ENGINE_ONLY" \
 VALENCE_HUB_ONLY_URL="$HUB_ONLY" \
 VALENCE_CONFIG_VERSION_LATER="cfg-conformance-v2" \

@@ -39,7 +39,7 @@ export function recordFixtureMandate(
   terms: Omit<Parameters<typeof engine.mandates.record>[0]['mandate'], 'id' | 'household'>,
 ) {
   const mandate = { ...terms, id: mandateOf(pair), household: houseOf(pair) } as Parameters<typeof engine.mandates.record>[0]['mandate'];
-  const bytes = canonicalMandate(mandate);
+  const bytes = canonicalMandate(mandate, 'unit.example');
   const signatures: Record<string, string> = {
     [houseOf(pair)]: sign(pair.privateKey.asymmetricKeyType === 'ed25519' ? null : 'sha256', bytes, pair.privateKey).toString('base64'),
   };

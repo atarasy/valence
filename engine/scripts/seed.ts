@@ -424,7 +424,9 @@ const baseMandate = {
 await post("/_node/mandates", {
   ...baseMandate,
   signatures: {
-    [HOUSEHOLD]: sign(null, canonicalMandate(baseMandate), mandatePair.privateKey).toString("base64"),
+    // §16.1, question 58. The version is signed for the host it is recorded
+    // at, which is the relying party that host asserts for.
+    [HOUSEHOLD]: sign(null, canonicalMandate(baseMandate, process.env.VALENCE_RP_ID ?? "conformance.example"), mandatePair.privateKey).toString("base64"),
   },
 });
 

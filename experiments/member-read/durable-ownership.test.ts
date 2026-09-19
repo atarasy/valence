@@ -36,7 +36,7 @@ function setup() {
   const create = (household: string) => engine.createOffer({ binding: 'digital', household, purpose: 'replenish', config_version: config.version, expires_at: Date.now() + 3600000, mandate: `${household}.1`, price_band: null, giver: null, candidates: [{ product: 'tea', quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }] });
   const own = create(OWN), foreign = create(FOREIGN);
   const mandate = { id: OWN_MANDATE, household: OWN, ceiling_out_of_network: 1000, ceiling_daily: null, cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 3600000, version: 1 };
-  engine.mandates.record({ mandate, signatures: { [OWN]: sign(null, canonicalMandate(mandate), pair.privateKey).toString('base64') }, assertions: {}, keyOf: () => pem, relyingPartyId: 'unit.example' });
+  engine.mandates.record({ mandate, signatures: { [OWN]: sign(null, canonicalMandate(mandate, 'unit.example'), pair.privateKey).toString('base64') }, assertions: {}, keyOf: () => pem, relyingPartyId: 'unit.example' });
   const authority = openMemberAuthority(join(dir, 'authority.sqlite'), { environment: 'test', audience: 'https://unit.example', maxSessionLifetimeMs: 5000, now: () => 1000 }); cleanups.push(() => authority.close());
   authority.provisionPrincipal('member', OWN, ['presenter']); authority.registerCredential('credential', 'member');
   const session = authority.createSessionAfterVerification('credential', 5000);

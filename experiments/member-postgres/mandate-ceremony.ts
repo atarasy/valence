@@ -52,7 +52,7 @@ export function openMandateCeremony(r: ReturnType<typeof memberRuntime>, policy:
       return {
         mandate: claim,
         publicKey: {
-          challenge: challengeForBytes(canonicalMandate(claim)),
+          challenge: challengeForBytes(canonicalMandate(claim, policy.rpID)),
           rpId: policy.rpID,
           userVerification: 'required' as const,
           allowCredentials: r.authority.activeCredentialIDs(principal).map((id) => ({ type: 'public-key' as const, id })),

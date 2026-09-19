@@ -310,7 +310,7 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
   });
   const signedBy = (m: ReturnType<typeof terms>) => ({
     mandate: m as never,
-    signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+    signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never, "unit.example"), MANDATE_PAIR.privateKey).toString("base64") },
     assertions: {}, keyOf: (k: string) => undefined as string | undefined, relyingPartyId: "unit.example",
   });
 
@@ -461,7 +461,7 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
     const m = terms();
     expect(() => engine.mandates.record({
       mandate: m as never,
-      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), stranger.privateKey).toString("base64") },
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never, "unit.example"), stranger.privateKey).toString("base64") },
       assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
     })).toThrow(expect.objectContaining({ code: "bad_signature" }));
     expect(engine.mandates.get(MANDATE)).toBeUndefined();
@@ -488,7 +488,7 @@ describe("§16.2, question 56: an offer names a mandate this household has", () 
     };
     engine.mandates.record({
       mandate: m as never,
-      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never, "unit.example"), MANDATE_PAIR.privateKey).toString("base64") },
       assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
     });
     const offerFor = (mandate: string, product: string) => ({
@@ -532,7 +532,7 @@ describe("§16.2, question 56: an offer names a mandate this household has", () 
     };
     engine.mandates.record({
       mandate: m as never,
-      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never), MANDATE_PAIR.privateKey).toString("base64") },
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never, "unit.example"), MANDATE_PAIR.privateKey).toString("base64") },
       assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
     });
     const c = engine.mustGet(offer.id).candidates[0]!;
