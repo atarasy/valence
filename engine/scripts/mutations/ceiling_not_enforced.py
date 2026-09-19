@@ -1,6 +1,7 @@
 import pathlib
 # Clause 46: an offer is refused when what it could cost outside the network
 # exceeds the ceiling the person signed. Stop checking.
+# Re-anchored 2026-09-19 for question 68.
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
 old = "      if (outside > ceiling) {"
 assert old in s
