@@ -73,6 +73,13 @@ function split(fields: Partial<Mandate> = {}) {
   };
   return {
     T, engine, ledger, deliveries, era,
+    /** A later version of the household's own mandate, signed by it alone. */
+    loosen(over: Partial<Mandate>) {
+      return record(
+        { ...base, ...fields, ...over, id: MANDATE, household: HOUSEHOLD }, HOUSEHOLD,
+        (b) => sign(null, b, MANDATE_PAIR.privateKey).toString("base64")
+      );
+    },
     async setUp() {
       await record(
         { ...base, ...fields, id: MANDATE, household: HOUSEHOLD }, HOUSEHOLD,
@@ -193,14 +200,19 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     //
     // The hub answers `ceiling_daily` (question 60) and not `cooling_seconds`
     // (question 68), so each read stands on its own and the ceiling is
-    // recorded. The mandate then lapses, the hub is brought up to date, and
-    // the recorded 500 is what refuses.
-    const s = split({ ceiling_daily: 500, lapses_at: Date.now() + 60_000 });
+    // recorded. The household then raises its ceiling, which it may do alone
+    // having named nobody, and the recorded 500 is what refuses: §16.3's
+    // whole point is that a loosening after the decision does not reach the
+    // set. The hub answers at its own clock, so this is written as a
+    // loosening rather than as a lapse, which a virtual clock cannot reach
+    // across a split deployment.
+    const s = split({ ceiling_daily: 500 });
     await s.setUp();
     const own = s.own("tea-b");
     await s.engine.present(own.id, s.T);
     await s.decideAll(own.id, "kept");
+    await s.loosen({ ceiling_daily: 10_000_000, version: 2 });
     s.era.old = false;
-    await expect(s.engine.settle(own.id, s.T + 61_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+    await expect(s.engine.settle(own.id, s.T + 1_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
   });
 });
