@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { sign } from "node:crypto";
-import { MAX_LAPSE_MS, canonicalMandate, type Mandate } from "../src/hub/mandates.js";
+import { MAX_COOLING_SECONDS, MAX_LAPSE_MS, canonicalMandate, type Mandate } from "../src/hub/mandates.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import { LocalMandates } from "../src/engine/mandate-source.js";
 import { CONFIG_VERSION, HOUSEHOLD, MANDATE_PAIR, houseFor, makeEngine, otherHousehold, settleSigned } from "./helpers.js";
@@ -109,16 +109,18 @@ describe("§16.1, clause 58: a lapse is at most 400 days out", () => {
     // assertion read "accepted": a lapse in the year 9999 was recorded.
     //
     // The refutation's freeze: the household, or whoever holds its key,
-    // records `.9` with a daily ceiling of 0, a ten-year window and a
-    // co-signer nobody holds. Question 68 makes it bind every label, and
-    // bringing its lapse forward needs that co-signer, so the lapse is the
-    // only way out; it was measured accepting the year 9999.
+    // records `.9` with a daily ceiling of 0, the longest window §16.5 now
+    // allows and a co-signer nobody holds. Question 68 makes it bind every
+    // label, and bringing its lapse forward needs that co-signer, so the
+    // lapse is the only way out; it was measured accepting the year 9999.
+    // The refutation's own window was ten years, which §16.5 has refused at
+    // the record since 2026-09-20.
     const T = Date.now();
     const { engine } = makeEngine({ isInNetwork: () => false });
     const loose = mandate("1", { ceiling_out_of_network: 10_000_000 }, T);
     record(engine, loose, T);
     const lost = otherHousehold().household;
-    const freeze = mandate("9", { ceiling_out_of_network: 0, ceiling_daily: 0, cooling_seconds: 10 * 365 * 86_400, co_signers: [lost] }, T);
+    const freeze = mandate("9", { ceiling_out_of_network: 0, ceiling_daily: 0, cooling_seconds: MAX_COOLING_SECONDS, co_signers: [lost] }, T);
 
     expect(refusal(() => record(engine, { ...freeze, lapses_at: Date.UTC(9999, 0, 1) }, T))).toBe("lapse_too_far");
     expect(refusal(() => record(engine, { ...freeze, lapses_at: T + MAX_LAPSE_MS + 1 }, T))).toBe("lapse_too_far");
@@ -260,6 +262,40 @@ describe("§16.3, §16.5: a decided set keeps what it was decided under", () => 
     await engine.collectDeciding({ offer: box.id, returned: [box.candidates[1]!.id], consumed: [box.candidates[0]!.id], at: T + 1 });
     expect(engine.mustGet(box.id, T + 1).state).toBe("decided");
     await expect(settleSigned(engine, box.id, [], T + 61_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+  });
+});
+
+describe("§16.5: a recorded cooling window is at most 30 days", () => {
+  test("the thirty-year trap is refused at the record", async () => {
+    // NOTE (mutation check, 2026-09-20): cooling_unbounded. The refusal
+    // assertions read "accepted", the settlement a month on was refused
+    // `mandate_cooling`, and the one thirty years on was refused too.
+    //
+    // The second refutation pass over question 68, probe 11. A window is
+    // recorded at the decision and outlives the mandate that set it, and
+    // nothing bounded the window: thirty years recorded, a set decided under
+    // it, the window dropped a second later and alone (lengthening is a
+    // tightening, so shortening it back needs nobody here), and that set
+    // could never settle, under a mandate showing no window at all.
+    const T = Date.now();
+    const THIRTY_YEARS = 30 * 365 * 86_400;
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    const base = { ceiling_out_of_network: 10_000_000 };
+    expect(refusal(() => record(engine, mandate("1", { ...base, cooling_seconds: THIRTY_YEARS }, T), T)))
+      .toBe("cooling_too_long");
+    expect(refusal(() => record(engine, mandate("1", { ...base, cooling_seconds: MAX_COOLING_SECONDS + 1 }, T), T)))
+      .toBe("cooling_too_long");
+
+    // The bound itself records, and the hold it buys is bounded with it: the
+    // same trap now releases 30 days after the decision rather than in 2056.
+    const one = record(engine, mandate("1", { ...base, cooling_seconds: MAX_COOLING_SECONDS }, T), T);
+    const o = offer(engine, one.id, T);
+    await engine.present(o.id, T);
+    await keep(engine, o.id, T);
+    record(engine, mandate("1", { ...base, cooling_seconds: null, version: 2 }, T), T + 1_000);
+    const window = MAX_COOLING_SECONDS * 1_000;
+    await expect(engine.settle(o.id, T + window - 1)).rejects.toMatchObject({ code: "mandate_cooling" });
+    expect((await engine.settle(o.id, T + window + 1)).charged).toBe(1_200);
   });
 });
 

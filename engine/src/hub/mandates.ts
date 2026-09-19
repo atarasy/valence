@@ -137,6 +137,24 @@ function shortens(before: number | null, after: number | null): boolean {
  */
 export const MAX_LAPSE_MS = 400 * 86_400_000;
 
+/**
+ * §16.5, decided 2026-09-20 after the second refutation pass over question
+ * 68. **The longest cooling window a version may record: 30 days.**
+ *
+ * `cooling_seconds` was bounded below and not above, and a decided set keeps
+ * the window it was decided under (§16.5), so the pass measured a household
+ * recording a window of thirty years, deciding a set, dropping the window a
+ * second later, alone, and leaving that set unsettleable until 2056 while its
+ * own mandate showed no window at all. The presenter sees no cause, and the
+ * reserve expires under it. Nothing here is theft, since the money held up is
+ * the household's own, but a hold nothing bounds is not a protection either.
+ *
+ * **What it costs** is the household that wanted a longer window than a
+ * month; a window is time to change one's mind about a set just signed, and a
+ * month is already far past that.
+ */
+export const MAX_COOLING_SECONDS = 30 * 86_400;
+
 /** A claim above this cannot be one a household reached, and signing it would leave no room to follow. */
 const MAX_CLAIMED_VERSION = 2 ** 20;
 
@@ -354,6 +372,19 @@ export class MandateRegister {
       throw unprocessable(
         "lapse_too_far",
         `a mandate lapses at most 400 days after it is recorded, and ${mandate.lapses_at} is further out than that from ${now}, which is this host's clock`
+      );
+    }
+    // §16.5. **A cooling window of at most 30 days.** The window a set was
+    // decided under outlives the mandate that set it, by design, and nothing
+    // bounded it: the second refutation pass over question 68 recorded thirty
+    // years, decided a set, dropped the window a second later alone, and left
+    // that set unable to settle until 2056 under a mandate showing no window.
+    // A tightening is the household's alone (§16.1), so this needs no
+    // co-signer to reach and no attacker at all.
+    if (mandate.cooling_seconds != null && mandate.cooling_seconds > MAX_COOLING_SECONDS) {
+      throw unprocessable(
+        "cooling_too_long",
+        `a cooling window is at most ${MAX_COOLING_SECONDS} seconds, which is 30 days, and ${mandate.cooling_seconds} is longer`
       );
     }
 
