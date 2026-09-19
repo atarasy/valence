@@ -116,6 +116,13 @@ export class ValenceEngine {
   private readonly offers: Map<string, Offer>;
   private readonly notes: Map<string, Note[]>;
   private readonly settlements: Map<string, Settlement>;
+  /**
+   * §14.2, question 66. The settlements a move carried here, which this host
+   * did not make. A reservation on the ledger said the same thing until the
+   * first refutation pass over question 66 measured the Meter adapter, whose
+   * holds are memory only: after a restart every settlement read as carried.
+   */
+  private readonly carriedSettlements: Map<string, true>;
   private readonly memberStatementConfirmations: Map<string, string>;
   /** §16.3, question 66. The tail of each payer's settlements in flight. Memory only: it orders, it records nothing. */
   private readonly settling = new Map<string, Promise<void>>();
@@ -258,6 +265,7 @@ export class ValenceEngine {
     }
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
+    this.carriedSettlements = store.map("carried_settlements");
     this.memberStatementConfirmations = store.map("member_statement_confirmations");
     this.configs = store.map("configs");
     this.edges = store.map("edges");
@@ -765,8 +773,12 @@ export class ValenceEngine {
       ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver)
       : mandate?.ceiling_out_of_network ?? null;
     if (ceiling !== null) {
+      // What a maker or merchant gave is never charged (clause 10), so it is
+      // nothing the payer could spend outside the network either, as it is
+      // nothing in §6.4's upper bound. Named by the first refutation pass
+      // over question 65.
       const outside = offer.candidates
-        .filter((c) => !(this.config.isInNetwork ?? (() => true))(c.merchant))
+        .filter((c) => !c.given_by && !(this.config.isInNetwork ?? (() => true))(c.merchant))
         .reduce((sum, c) => sum + c.unit_price * c.quantity, 0);
       if (outside > ceiling) {
         throw unprocessable(
@@ -1619,9 +1631,9 @@ export class ValenceEngine {
    * a ceiling of 2,000 over 1,200 the day had never heard of.
    */
   private async reportDay(settlement: Settlement): Promise<Settlement> {
-    // Only a settlement made here. One a move carried has no reserve on this
-    // ledger, and counting it to the day here is what question 63 declined.
-    if (this.ledger.get(settlement.offer) === undefined) return settlement;
+    // Only a settlement made here. Counting one a move carried to the day here
+    // is what question 63 declined.
+    if (this.carriedSettlements.has(settlement.offer)) return settlement;
     await this.daySource.report({
       offer: settlement.offer,
       household: settlement.payer,
@@ -2081,6 +2093,7 @@ export class ValenceEngine {
 
   importSettlement(settlement: Settlement): void {
     this.settlements.set(settlement.offer, settlement);
+    this.carriedSettlements.set(settlement.offer, true);
   }
 
   importNote(note: Note): void {
@@ -2177,13 +2190,13 @@ export class ValenceEngine {
    * The lines stay out (clause 24).
    */
   paymentsBy(household: string): Payment[] {
-    // Only settlements made here, which hold a reserve on this ledger. A
+    // Only settlements made here, not those a move carried. A
     // recipient's import carries its settled gifts with their settlements, and
     // listing those planted a payment of any amount into a giver that posted
     // nothing (question 61's record, measured by the third refutation pass
     // over question 64). The giver's own record of it travels with the giver.
     const here = [...this.offers.values()]
-      .filter((o) => o.giver === household && this.ledger.get(o.id) !== undefined)
+      .filter((o) => o.giver === household && !this.carriedSettlements.has(o.id))
       .map((o) => this.settlements.get(o.id))
       .filter((st): st is Settlement => st !== undefined)
       .map((st) => ({ offer: st.offer, presenter: st.signed_by, settled_at: st.settled_at, charged: st.charged, receipt: st.receipt }));

@@ -114,3 +114,49 @@ describe("§16.3, question 66: the day is told once for each settlement, and one
     expect([...rows.values()].reduce((x, y) => x + y, 0)).toBeLessThanOrEqual(2_000);
   });
 });
+
+describe("questions 65 and 66: what the first refutation pass over them found", () => {
+  test("a line a maker gave counts nothing towards the out-of-network ceiling (clause 10, clause 46)", async () => {
+    // NOTE (mutation check, 2026-09-19): given_line_counts_out_of_network.
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    engine.readMandatesFrom({
+      async get() {
+        return { id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_200, ceiling_daily: null,
+          cooling_seconds: null, co_signers: [], lapses_at: Date.now() + HOUR, version: 1 } as never;
+      },
+      async dailyCeilingOf() { return null; },
+      async outOfNetworkCeilingOf() { return null; },
+      async holdsAny(h: string) { return h === HOUSEHOLD; },
+    });
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: null, giver: null,
+      candidates: [
+        { product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null },
+        { product: "coffee-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: "maker-a" },
+      ],
+    } as never);
+    expect((await engine.present(offer.id)).state).toBe("presented");
+  });
+
+  test("a settlement made here stays the giver's payment and is re-reported when the ledger forgets its hold", async () => {
+    // NOTE (mutation check, 2026-09-19): made_here_read_from_the_ledger. The
+    // Meter adapter keeps its holds in memory, so after a restart the giver's
+    // payments read empty and a failed report could never be repaired.
+    const { engine, ledger } = makeEngine();
+    const reported: string[] = [];
+    engine.readTheDayFrom({ async totalSince() { return 0; }, async report(r: { offer: string }) { reported.push(r.offer); }, async reportOffer() {} } as never);
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 }, giver: GIFT_GIVER.household,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await presentGift(engine, offer.id);
+    await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    await engine.settle(offer.id);
+    (ledger as unknown as { get: () => undefined }).get = () => undefined;
+    expect(engine.paymentsBy(GIFT_GIVER.household).map((p) => p.offer)).toEqual([offer.id]);
+    await engine.settle(offer.id);
+    expect(reported).toEqual([offer.id, offer.id]);
+  });
+});

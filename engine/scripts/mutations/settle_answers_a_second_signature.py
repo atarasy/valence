@@ -26,14 +26,14 @@ a = """      if (confirmation.signed) {
         const sent = confirmation.signed;
         const offered = "signature" in sent ? sent.signature : sent.assertion.signature;
         if (existing.confirmation !== null && existing.confirmation === offered) {
-          return existing;
+          return this.reportDay(existing);
         }
         throw conflict(
           "already_settled",
           "this box has already settled, and this signature was not what settled it"
         );
       }
-      return existing;"""
+      return this.reportDay(existing);"""
 assert a in s, "offers.ts already-settled anchor has drifted"
-s = s.replace(a, "      return existing;", 1)
+s = s.replace(a, "      return this.reportDay(existing);", 1)
 p.write_text(s)
