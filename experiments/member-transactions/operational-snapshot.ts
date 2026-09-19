@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import schema from './operational-schema-v1.json';
 import enrollmentSchema from './operational-schema-v2.json';
-export const operationalNamespaces = 'offers bare_receipts notes settlements carried_settlements migrations carried_payments member_statement_confirmations configs edges identities disclosures confirmations root_endorsed reservations mandates recoveries household_settled household_offers delivery permissions permission_actions permission_queries recoverers recovery_channels recovery_log deliberations registry_entries registry_keys writer_activation member_runtime'.split(' ');
+export const operationalNamespaces = 'offers bare_receipts notes settlements settled_here provenance carried_payments member_statement_confirmations configs edges identities disclosures confirmations root_endorsed reservations mandates recoveries household_settled household_offers delivery permissions permission_actions permission_queries recoverers recovery_channels recovery_log deliberations registry_entries registry_keys writer_activation member_runtime'.split(' ');
 const baseTables = 'atomic_meta atomic_rows authority_meta principals credentials sessions ownership login_meta passkeys challenges binding_meta bindings operation_meta operations statement_review_meta statement_reviews'.split(' ');
 type Scope = { environment: string; origin: string; rpID: string };
 type Snapshot = Record<string, Record<string, any>[]>;

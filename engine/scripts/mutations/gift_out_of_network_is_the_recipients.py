@@ -3,7 +3,7 @@ import pathlib
 # gift the giver pays, as question 64's build did.
 p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
 old = '''    const ceiling = offer.giver
-      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver)
+      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
       : mandate?.ceiling_out_of_network ?? null;
 '''
 assert s.count(old) == 1, "anchor drifted"
