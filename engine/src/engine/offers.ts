@@ -278,7 +278,14 @@ export class ValenceEngine {
     const migrations = store.map<true>("migrations");
     if (!migrations.has("carried_settlements")) {
       const settled = [...this.settlements.keys()];
-      const remembers = ledger.durable === true || settled.length === 0 || settled.some((id) => ledger.get(id) !== undefined);
+      // Both halves are needed. A ledger that keeps its rows can still have
+      // none for this store's settlements: the reference ledger was kept in
+      // memory until 2026-09-19 even where the store was on disk, so such a
+      // store has settlements and no reservations, and reading that as
+      // "carried" marked every settlement the host made. And a ledger that
+      // forgets on restart but has seen a few since would mark whatever it
+      // forgot. Measured by the third refutation pass over question 66.
+      const remembers = settled.length === 0 || (ledger.durable === true && settled.some((id) => ledger.get(id) !== undefined));
       if (remembers) {
         for (const id of settled) if (ledger.get(id) === undefined) this.carriedSettlements.set(id, true);
         migrations.set("carried_settlements", true);
