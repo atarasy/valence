@@ -852,9 +852,12 @@ export class ValenceEngine {
     // household holding `.1` with a ceiling of 0 and a co-signer recorded
     // `.2` at version 1, alone, with any ceiling it liked: measured
     // 2026-09-19, loosening `.1` was refused `unsigned` and an offer of
-    // 1,200 entirely out of network presented under `.2`. The signing rules
-    // are unchanged, so nobody is frozen out by a co-signer whose key
-    // nobody holds, which is why question 56's first attempt was refused.
+    // 1,200 entirely out of network presented under `.2`. Recording a
+    // second label is still the household's alone, which is why question
+    // 56's first attempt was refused. **A mandate naming a co-signer nobody
+    // holds does now bind every label**, which the first refutation pass over
+    // question 68 measured and this comment had denied: the household is held
+    // until that mandate lapses, which §16.1 bounds at a year.
     //
     // The named mandate is live here and is one of this household's, so the
     // minimum is the tightest of the two views even where the source's
