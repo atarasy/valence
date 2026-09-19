@@ -1628,9 +1628,14 @@ export class ValenceEngine {
         .update(`${offer.id}:${now}:${kept}:${consumed}:${offer.presenter}`)
         .digest("hex"),
     };
-    this.settlements.set(offer.id, settlement);
-    // §14.2, question 66. Made here, said so here.
+    // §14.2, question 66. Made here, said so here, **and said first**: the two
+    // writes are separate autocommits on the reference store, and a failure
+    // between them left a settlement this host made with no mark, so its day
+    // was never told and its giver lost the payment, in silence. A mark with
+    // no settlement beside it is read by nothing. Measured by the sixth
+    // refutation pass.
     this.settledHere.set(offer.id, true);
+    this.settlements.set(offer.id, settlement);
     if (memberIdentity !== undefined) this.memberStatementConfirmations.set(offer.id, memberIdentity);
     // §16.3. The person's own copy, written as the settlement is made. It
     // carries an amount and a date and nothing about what was in the offer: a

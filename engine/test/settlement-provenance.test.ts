@@ -69,7 +69,15 @@ describe("question 66: where a settlement was made", () => {
       importPlanted(path);
       // What a store written before the record looks like on disk.
       const db = new Database(path); db.run(`drop table "provenance"`); db.run(`drop table "settled_here"`); db.close();
-      const { store, engine } = open(path);
+      const warned: string[] = [];
+      const warn = console.warn;
+      console.warn = (m: string) => { warned.push(m); };
+      let opened: ReturnType<typeof open>;
+      try { opened = open(path); } finally { console.warn = warn; }
+      // The operator's one signal, asserted (the sixth refutation pass found
+      // it removable with the suite green).
+      expect(warned.join("\n")).toContain("predate the record");
+      const { store, engine } = opened!;
       // Nothing is guessed in either direction: the settlement is not the
       // giver's payment, because this store cannot say it was made here.
       expect(engine.paymentsBy(giver)).toEqual([]);
@@ -78,6 +86,49 @@ describe("question 66: where a settlement was made", () => {
       expect((check.query(`select v from "provenance"`).get() as { v: string }).v).toContain("predates the record");
       check.close();
       expect(rows(path, "settled_here")).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("question 66: the mark is written before the settlement", () => {
+  test("a failure between the two writes leaves nothing a retry cannot finish", async () => {
+    // NOTE (mutation check, 2026-09-19): settled_mark_written_after. With the
+    // settlement written first, the retry after a restart found it settled,
+    // unmarked, and told nobody's day. Measured by the sixth refutation pass.
+    const { makeEngine, HOUR, HOUSEHOLD, MANDATE, CONFIG_VERSION, decideSigned } = await import("./helpers.js");
+    const dir = mkdtempSync(join(tmpdir(), "valence-order-"));
+    try {
+      const path = join(dir, "store.sqlite");
+      const reported: string[] = [];
+      const day = { async totalSince() { return 0; }, async report(r: { offer: string }) { reported.push(r.offer); }, async reportOffer() {} };
+      let store = openStore(path);
+      let { engine } = makeEngine({}, store);
+      engine.readTheDayFrom(day as never);
+      const offer = engine.createOffer({
+        binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+        expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: null, giver: null,
+        candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+      } as never);
+      await engine.present(offer.id);
+      await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+      // The second of the two writes fails, whichever it is.
+      const db = new Database(path);
+      db.run(`create trigger fail_second before insert on "settled_here" begin select raise(abort, 'disk full'); end`);
+      db.run(`create trigger fail_second_s before insert on "settlements" when exists (select 1 from "settled_here" where k = new.k) begin select raise(abort, 'disk full'); end`);
+      await expect(engine.settle(offer.id)).rejects.toThrow();
+      db.run(`drop trigger fail_second`); db.run(`drop trigger fail_second_s`); db.close();
+      store.close();
+      // A restart, so that memory is what the disk says.
+      // The catalogue and the keys are on disk already, so the engine is built
+      // bare rather than through the fixture, which would register them again.
+      store = openStore(path);
+      engine = new ValenceEngine(new InMemoryLedger(store), options, store);
+      engine.readTheDayFrom(day as never);
+      await engine.settle(offer.id);
+      expect(reported).toEqual([offer.id]);
+      store.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
