@@ -604,6 +604,15 @@ export class ValenceEngine {
       if (!input.giver) {
         throw badRequest("malformed", "a ceremonial offer names its giver, who pays");
       }
+      // §13.2, question 58. The giver is the name its signature is checked
+      // against (question 64), so it is a key, as the recipient is. A name
+      // that is not one was first-come at `/_identities`, and the third
+      // refutation pass over question 64 measured a presenter registering its
+      // own key under `grandmother-tanaka`, signing, presenting and settling
+      // 2,100 against that name.
+      if (!isHouseholdName(input.giver)) {
+        throw unprocessable("name_is_not_the_key", `giver ${input.giver} is not a household identifier`);
+      }
       for (const c of candidates) {
         // The band bounds what a recipient's choice costs the giver: the line,
         // not the unit. Five units inside the band is five times the band.
@@ -675,6 +684,7 @@ export class ValenceEngine {
     const offer = this.mustGet(offerId);
     if (!offer.giver || !offer.price_band) throw conflict("not_a_gift", `offer ${offerId} names no giver`);
     return {
+      host: this.config.relyingPartyId,
       offer: offer.id, giver: offer.giver, recipient: offer.household, presenter: offer.presenter,
       price_band: { min: offer.price_band.min, max: offer.price_band.max },
       upper_bound: this.upperBound(offer), expires_at: offer.expires_at,

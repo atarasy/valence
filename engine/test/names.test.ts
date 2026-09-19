@@ -710,3 +710,73 @@ describe("§12, question 64: a gift is presented only on its giver's signature",
     expect(typeof body.challenge).toBe("string");
   });
 });
+
+describe("§16.1 and §12, question 58: what a household signs names the host", () => {
+  /**
+   * Decided 2026-09-19. A raw signature carried nothing that tied it to a
+   * host, so a mandate version signed for one host recorded at any other
+   * holding none of the household's history, and a gift's signature was held
+   * to one host only because that host minted the offer id.
+   */
+  const terms = () => ({
+    id: MANDATE, household: HOUSEHOLD, ceiling_out_of_network: 1_000_000, ceiling_daily: null,
+    cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 10 * HOUR, version: 1,
+  });
+  const recordAt = (engine: ReturnType<typeof makeEngine>["engine"], signedFor: string) => {
+    const m = terms();
+    return engine.mandates.record({
+      mandate: m as never,
+      signatures: { [HOUSEHOLD]: sign(null, canonicalMandate(m as never, signedFor), MANDATE_PAIR.privateKey).toString("base64") },
+      assertions: {}, keyOf: (k: string) => engine.publicKeyFor(k), relyingPartyId: "unit.example",
+    });
+  };
+
+  test("a mandate version signed for another host is refused here, and the one signed for this host records", () => {
+    // NOTE (mutation check, 2026-09-19): mandate_names_no_host. The version
+    // signed for `elsewhere.example` recorded here.
+    const { engine } = makeEngine();
+    expect(() => recordAt(engine, "elsewhere.example")).toThrow(expect.objectContaining({ code: "bad_signature" }));
+    expect(engine.mandates.get(MANDATE)).toBeUndefined();
+    expect(recordAt(engine, "unit.example").version).toBe(1);
+  });
+
+  test("a gift signed for another host is refused here", async () => {
+    // NOTE (mutation check, 2026-09-19): gift_names_no_host. The gift signed
+    // for `elsewhere.example` presented here.
+    const giver = houseFor("q58-giver");
+    const { engine, ledger } = makeEngine();
+    engine.registerIdentity(giver.household, giver.pem);
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 }, giver: giver.household,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    const here = engine.giftTerms(offer.id);
+    expect(here.host).toBe("unit.example");
+    await expect(engine.present(offer.id, Date.now(), { signature: giver.sign(canonicalGift({ ...here, host: "elsewhere.example" })) }))
+      .rejects.toMatchObject({ code: "bad_signature" });
+    expect(ledger.get(offer.id)).toBeUndefined();
+    expect((await engine.present(offer.id, Date.now(), { signature: giver.sign(canonicalGift(here)) })).state).toBe("presented");
+  });
+
+  test("a giver that is not a key is refused when the gift is made", () => {
+    // NOTE (mutation check, 2026-09-19): gift_giver_any_name. A presenter
+    // made a gift from `grandmother-tanaka`, registered its own key under
+    // that name, signed and presented it.
+    const { engine } = makeEngine();
+    expect(() => engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+      expires_at: Date.now() + HOUR, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 }, giver: "grandmother-tanaka",
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never)).toThrow(expect.objectContaining({ code: "name_is_not_the_key" }));
+  });
+
+  test("a name holding the separator does not make two sets of terms one", () => {
+    // NOTE (mutation check, 2026-09-19): gift_names_unescaped.
+    const base = { host: "unit.example", offer: "o", giver: "key:g", recipient: "key:r", presenter: "p", price_band: { min: 0, max: 1 }, upper_bound: 1, expires_at: 1 };
+    // Joined unescaped, these two are the same bytes.
+    const one = canonicalGift({ ...base, giver: "key:g\nkey:r", recipient: "p" });
+    const two = canonicalGift({ ...base, giver: "key:g", recipient: "key:r\np" });
+    expect(one.equals(two)).toBe(false);
+  });
+});

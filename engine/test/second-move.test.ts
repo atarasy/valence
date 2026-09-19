@@ -39,7 +39,7 @@ function host() {
 
 const offer = { id: "o1", household: HOME, mandate: `${HOME}.1`, binding: "physical", state: "settled", candidates: [{ id: "o1-c", valence: "returned" }] };
 const collection = { offer: "o1", due_at: 1, grace_days: 3, collected_at: 2, returned: ["o1-c"], consumed: [], missing: [], missing_notes: {} };
-const delivery = { offer: "o1", carriage: 550, code: "private-code", status: "delivered", updated_at: 1 };
+const delivery = { offer: "o1", carriage: 550, code: "private-code", status: "delivered" as const, updated_at: 1 };
 const first = { offers: [offer], collections: [collection], deliveries: [delivery], confirmations: { o1: ["t1"] } };
 
 describe("§14.2, question 59: a second move writes nothing the first carried", () => {
@@ -65,7 +65,7 @@ describe("§14.2, question 59: a second move writes nothing the first carried", 
     // import with another code answered 201.
     const h = host();
     expect((await h.post(first)).status).toBe(201);
-    expect((await h.post({ ...first, deliveries: [{ ...delivery, status: "returned", updated_at: 9 }] })).status).toBe(201);
+    expect((await h.post({ ...first, deliveries: [{ ...delivery, status: "returned" as const, updated_at: 9 }] })).status).toBe(201);
     expect(h.deliveries.find("o1")).toEqual(delivery);
     expect((await h.post({ ...first, deliveries: [{ ...delivery, code: "someone-else" }] })).status).toBe(409);
   });
