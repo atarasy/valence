@@ -106,10 +106,36 @@ function utcMidnight(now: number): number {
  * §16.3, §16.5, decided 2026-09-19 after the first refutation pass over
  * question 68. The cooling window and the daily ceiling a decided set was
  * decided under, read from the mandates live at that moment. `ceiling_daily`
- * is absent where the set could owe nothing when it was decided, so that a
- * hub that predates question 60 still does not refuse a declined gift.
+ * is absent where the set could owe nothing when it was decided, because a
+ * value that can never refuse is not worth a round trip.
+ *
+ * **`"unknown"` is what could not be read**, decided 2026-09-20 after the
+ * second pass. A decision is never refused because the source could not
+ * answer, so a hub that is unreachable, or that predates the field, leaves
+ * the record saying so and the set falls back to the live values, which is
+ * where it stood before this rule.
  */
-type FixedProtections = { at: number; cooling_seconds: number | null; ceiling_daily?: number | null };
+type Fixed = number | null | "unknown";
+type FixedProtections = { at: number; cooling_seconds: Fixed; ceiling_daily?: Fixed };
+
+/** What a record holds of a value, or null where it holds nothing usable. */
+function known(value: Fixed | undefined): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+/**
+ * One read for a record, or `"unknown"` where it could not be made. Every
+ * refusal is swallowed and not only the hub's, because the record exists to
+ * hold what was read and a decision proceeds whatever the answer; a source
+ * that throws for its own reasons is still a source that did not answer.
+ */
+async function readOrUnknown(read: () => Promise<number | null>): Promise<Fixed> {
+  try {
+    return await read();
+  } catch {
+    return "unknown";
+  }
+}
 
 /** The longer of two windows, where null is no window. */
 function longerWindow(a: number | null, b: number | null): number | null {
@@ -271,11 +297,26 @@ export class ValenceEngine {
    * §16.3, §16.5, decided 2026-09-19. The protections a set is decided under:
    * the longest window among the household's live mandates, and, where the
    * set may owe something, the tightest daily ceiling among its payer's.
+   *
+   * **A decision is never refused because this could not be read**, decided
+   * 2026-09-20 after the second refutation pass over question 68 measured
+   * what refusing cost. Against a hub built one day earlier, which answers
+   * the household route without `cooling_seconds`, a household's refusal of
+   * a gift was refused `hub_refused`; the offer then reached its expiry with
+   * every line still `offered`, §12 defaulted them, and the giver was charged
+   * 700 for goods the recipient had said no to. **A refusal must never become
+   * a purchase**, and a decision is the one place in this engine where the
+   * message is often "no". What could not be read is recorded as `"unknown"`
+   * and the set falls back to the live values at settlement and at
+   * withdrawal, which is where it stood before the record existed. The
+   * settlement's own reads still refuse (§16.5), so nothing settles under a
+   * protection that was not applied; what changes is that nothing is bought
+   * because the hub was down either.
    */
   private async protectionsAt(offer: Offer, now: number, mayOwe: boolean): Promise<FixedProtections> {
-    const cooling_seconds = await this.mandateSource.coolingSecondsOf(offer.household, now);
+    const cooling_seconds = await readOrUnknown(() => this.mandateSource.coolingSecondsOf(offer.household, now));
     if (!mayOwe) return { at: now, cooling_seconds };
-    const ceiling_daily = await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now);
+    const ceiling_daily = await readOrUnknown(() => this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now));
     return { at: now, cooling_seconds, ceiling_daily };
   }
 
@@ -1087,10 +1128,11 @@ export class ValenceEngine {
     }
     // §16.3, §16.5, decided 2026-09-19. **A set that this decision completes
     // keeps the window and the ceiling live at this moment**, whatever lapses
-    // afterwards. Read before anything is written, so that a hub that cannot
-    // answer refuses the decision rather than leaving one half-applied, and
-    // then checked again, because the read is the one wait in this method and
-    // another decision could have reached the same lines during it.
+    // afterwards. Read before anything is written, so that a decision is
+    // never half-applied, and then checked again, because the read is the one
+    // wait in this method and another decision could have reached the same
+    // lines during it. A read that fails records `"unknown"` and refuses
+    // nothing (`protectionsAt`, decided 2026-09-20).
     const planned = new Map(plan.map(({ candidate, d }) => [candidate.id, d.valence]));
     const completes = offer.candidates.every((c) => c.valence !== "offered" || planned.has(c.id));
     // A physical box can owe what its collection finds, whatever the household
@@ -1275,7 +1317,7 @@ export class ValenceEngine {
     // set the window had lapsed.
     const cooling = longerWindow(
       await this.mandateSource.coolingSecondsOf(offer.household, now),
-      this.decidedProtections.get(offer.id)?.cooling_seconds ?? null
+      known(this.decidedProtections.get(offer.id)?.cooling_seconds)
     );
     if (cooling === null) {
       throw unprocessable(
@@ -1604,7 +1646,7 @@ export class ValenceEngine {
     const fixed = this.decidedProtections.get(offer.id);
     const coolingSeconds = longerWindow(
       await this.mandateSource.coolingSecondsOf(offer.household, now),
-      fixed?.cooling_seconds ?? null
+      known(fixed?.cooling_seconds)
     );
     if (!needsStatement(offer, missing) && coolingSeconds != null && offer.decided_at !== null) {
       const opens = offer.decided_at + coolingSeconds * 1000;
@@ -1728,7 +1770,7 @@ export class ValenceEngine {
       ? null
       : tighterCeiling(
           await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now),
-          fixed?.ceiling_daily ?? null
+          known(fixed?.ceiling_daily)
         );
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
