@@ -89,6 +89,15 @@ export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number
 export function loosens(before: Mandate, after: Mandate): boolean {
   if (after.ceiling_out_of_network > before.ceiling_out_of_network) return true;
   if (after.lapses_at > before.lapses_at) return true;
+  // §16.1, decided 2026-09-19 after the first refutation pass over question
+  // 68. **Bringing the lapse forward loosens a mandate that names co-signers**,
+  // because it takes their protection away sooner. It counted as a tightening,
+  // so the household did it alone: measured, a household holding `.1` with a
+  // ceiling of 0, a daily ceiling of 0, a day's window and a co-signer moved
+  // `.1`'s lapse to a second away, and once it had lapsed an offer of 1,200
+  // presented and settled at once under a loose `.2` it had recorded alone.
+  // A mandate that names nobody is the household's alone either way.
+  if (before.co_signers.length > 0 && after.lapses_at < before.lapses_at) return true;
   if (before.co_signers.some((k) => !after.co_signers.includes(k))) return true;
   // §16.1. Widening a ceiling and shortening cooling loosen for the same
   // reason raising the out-of-network ceiling does: each takes away a
