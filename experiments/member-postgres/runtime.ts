@@ -24,6 +24,6 @@ export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const bindings=openMandateBindings(path,authority,login,engine),journal=openOperationJournal(path,authority,bindings,{maximumLifetimeMs:c.maximumLifetimeMs,now});
  const reviews=records<any>(path,'member_reviews');
  // Journal owns the operation map. Expose only its own scoped read method to avoid a duplicate map.
- const operations={find:journal.findBlocking};
+ const operations={find:journal.findBlocking,findCurrent:journal.findCurrent};
  return {path,engine,deliveries,quotes,approvalCarriage,now,authority,login,enrollment,bindings,journal,reviews,operations};
 }

@@ -319,3 +319,56 @@ test.skipIf(!process.env.VOX_TEST_SOURCE)('Vox service quotation reaches member 
   expect(await(await quote()).json()).toEqual(first);
  }finally{bridge.stop(true);rmSync(dir,{recursive:true,force:true});}
 });
+
+// Journal-only probes deliberately use trusted synthetic proof digests. They
+// establish storage/transition guarantees, not a verified withdrawal ceremony.
+test('digital journal preserves committed history while advancing exactly one incarnation',async()=>{
+ const s=await digitalSetup(),p=await(await s.prepare()).json(),path='/member/operations/'+p.operationID;
+ const original=await(await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)})).json();
+ // Legacy committed rows predate the optional incarnation field.
+ await s.unit.run(store=>{const rows=store.map<any>('member_operations'),old=rows.get(p.operationID);delete old.incarnation;rows.set(p.operationID,old);});
+ const prepareWithdrawal=()=>s.unit.run(async store=>{const r=memberRuntime(store,s.c,now),d=await r.journal.read(s.grant.token,p.operationID);return r.journal.prepare(s.grant.token,{offer:d.offer,mandate:d.mandate,presenter:d.presenter,canonical:'valence.member-withdrawal.1\n'+d.offer+'\nfixture',reviewedRevision:'a'.repeat(64),expiresAt:now()+60000},'digital_withdrawal');});
+ const raced=await Promise.all([prepareWithdrawal(),prepareWithdrawal()]);expect(raced[0]!.id).toBe(raced[1]!.id);
+ const made=await s.unit.run(async store=>{
+  const r=memberRuntime(store,s.c,now),d=await r.journal.read(s.grant.token,p.operationID);
+  const terms={offer:d.offer,mandate:d.mandate,presenter:d.presenter,canonical:'valence.member-withdrawal.1\n'+d.offer+'\nfixture',reviewedRevision:'a'.repeat(64),expiresAt:now()+60000};
+  const w=await r.journal.prepare(s.grant.token,terms,'digital_withdrawal');
+  expect(()=>r.journal.advanceAfterWithdrawal(s.grant.token,d.id,w.id)).toThrow('transition');
+  await r.journal.claimVerified(s.grant.token,w.id,{requestDigest:w.requestDigest,reviewedRevision:w.reviewedRevision,assertionFingerprint:'b'.repeat(64)});
+  r.journal.recordCommitted(w.id,'b'.repeat(64),'c'.repeat(64));
+  expect(r.journal.advanceAfterWithdrawal(s.grant.token,d.id,w.id)).toBe(1);
+  expect(r.journal.advanceAfterWithdrawal(s.grant.token,d.id,w.id)).toBe(1);
+  const next=await r.journal.prepare(s.grant.token,{offer:d.offer,mandate:d.mandate,presenter:d.presenter,canonical:d.canonical,reviewedRevision:'d'.repeat(64),expiresAt:now()+60000},'digital_decision');
+  expect(next.incarnation).toBe(1);expect(next.id).not.toBe(d.id);expect((await r.journal.read(s.grant.token,d.id)).state).toBe('committed');
+  return {d,w,next};
+ });
+ expect(await(await s.send(path+'/outcome')).json()).toEqual(original);
+ await s.unit.run(async store=>{const r=memberRuntime(store,s.c,now);expect(r.journal.currentIncarnation(s.offer.id)).toBe(1);expect(await r.journal.read(s.grant.token,made.w.id)).toEqual({...made.w,state:'committed',assertionFingerprint:'b'.repeat(64),receiptDigest:'c'.repeat(64)});expect((await r.journal.read(s.grant.token,made.next.id)).incarnation).toBe(1);});
+ // A second blocking decision in the same incarnation is still refused by PostgreSQL.
+ await expect(s.unit.run(store=>{store.map('member_operations').set('duplicate-next',{...made.next,id:'duplicate-next'});})).rejects.toThrow('one_blocking_member_statement');
+ await s.unit.run(async store=>{
+  const r=memberRuntime(store,s.c,now),d=await r.journal.read(s.grant.token,made.next.id);
+  await r.journal.claimVerified(s.grant.token,d.id,{requestDigest:d.requestDigest,reviewedRevision:d.reviewedRevision,assertionFingerprint:'e'.repeat(64)});r.journal.recordCommitted(d.id,'e'.repeat(64),'f'.repeat(64));
+  const w=await r.journal.prepare(s.grant.token,{offer:d.offer,mandate:d.mandate,presenter:d.presenter,canonical:'valence.member-withdrawal.1\n'+d.offer+'\nnext',reviewedRevision:'1'.repeat(64),expiresAt:now()+60000},'digital_withdrawal');
+  await r.journal.claimVerified(s.grant.token,w.id,{requestDigest:w.requestDigest,reviewedRevision:w.reviewedRevision,assertionFingerprint:'2'.repeat(64)});r.journal.recordCommitted(w.id,'2'.repeat(64),'3'.repeat(64));
+  expect(r.journal.advanceAfterWithdrawal(s.grant.token,d.id,w.id)).toBe(2);
+  expect(()=>r.journal.advanceAfterWithdrawal(s.grant.token,made.d.id,made.w.id)).toThrow('Stale');
+ });
+ expect(await(await s.send(path+'/outcome')).json()).toEqual(original);
+ // An arbitrary physical incarnation never bypasses the old one-per-offer constraint.
+ await expect(s.unit.run(store=>{const rows=store.map('member_operations');rows.set('physical-one',{offer:'physical-test',kind:'physical_statement',state:'prepared',incarnation:1});rows.set('physical-two',{offer:'physical-test',kind:'physical_statement',state:'prepared',incarnation:2});})).rejects.toThrow('one_blocking_member_statement');
+});
+
+test('advancing a decision incarnation rolls back with the enclosing unit and rejects corrupt heads',async()=>{
+ const s=await digitalSetup(),p=await(await s.prepare()).json();
+ await s.send('/member/operations/'+p.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)});
+ await expect(s.unit.run(async store=>{
+  const r=memberRuntime(store,s.c,now),d=await r.journal.read(s.grant.token,p.operationID);
+  const w=await r.journal.prepare(s.grant.token,{offer:d.offer,mandate:d.mandate,presenter:d.presenter,canonical:'valence.member-withdrawal.1\n'+d.offer+'\nfixture',reviewedRevision:'a'.repeat(64),expiresAt:now()+60000},'digital_withdrawal');
+  await r.journal.claimVerified(s.grant.token,w.id,{requestDigest:w.requestDigest,reviewedRevision:w.reviewedRevision,assertionFingerprint:'b'.repeat(64)});r.journal.recordCommitted(w.id,'b'.repeat(64),'c'.repeat(64));
+  r.journal.advanceAfterWithdrawal(s.grant.token,d.id,w.id);throw new Error('fixture unit failure');
+ })).rejects.toThrow('fixture unit failure');
+ await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);expect(r.journal.currentIncarnation(s.offer.id)).toBe(0);expect(r.operations.find(o=>o.kind==='digital_withdrawal')).toBeNull();});
+ await s.unit.run(store=>{store.map('member_decision_heads').set(s.offer.id,{offer:s.offer.id,incarnation:1,decision:p.operationID,withdrawal:'absent'});});
+ await expect(s.unit.run(store=>memberRuntime(store,s.c,now).journal.currentIncarnation(s.offer.id))).rejects.toThrow('unavailable');
+});

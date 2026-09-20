@@ -68,7 +68,8 @@ export function openDecisionAuthorisations(r:ReturnType<typeof memberRuntime>, o
     integer(goods+delivery.carriage);
     const decisions=[...input.decisions].sort((a,b)=>a.candidate<b.candidate?-1:a.candidate>b.candidate?1:0);
     const view={approval,mandate:structuredClone(mandate),decisions,goods,carriage:delivery.carriage,total:goods+delivery.carriage};
-    const sealed=structuredClone({offer,catalogue,delivery,view});
+    const incarnation=r.journal.currentIncarnation(offer.id);
+    const sealed=structuredClone({offer,catalogue,delivery,view,...(incarnation===0?{}:{incarnation})});
     if(Buffer.byteLength(stable(sealed))>262144)throw new Error('Decision snapshot too large');
     return {sealed,canonical:canonicalDecisions(offer.id,decisions).toString(),revision:hash(sealed),bound};
   }
@@ -87,7 +88,7 @@ export function openDecisionAuthorisations(r:ReturnType<typeof memberRuntime>, o
   return {
     async prepare(token:string,input:Input){
       const fixed=structuredClone(input),fresh=snapshot(token,fixed);
-      const previous=r.operations.find(o=>o.offer===fixed.offer&&['prepared','dispatching','uncertain','committed'].includes(o.state));
+      const previous=r.operations.findCurrent('digital_decision',o=>o.offer===fixed.offer&&['prepared','dispatching','uncertain','committed'].includes(o.state));
       if(previous){
         const old=await r.journal.read(token,previous.id);
         if(old.state==='prepared'&&old.expiresAt<=clock())r.journal.refuseBeforeDispatch(old.id,'expired');
