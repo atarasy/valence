@@ -32,7 +32,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),member=prepare||digital||!!match||!!mandate,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),member=prepare||digital||!!match||!!mandate,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and

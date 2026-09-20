@@ -103,9 +103,19 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
   if(offer.status!==200)return offer;
   const delivery=r.deliveries.find(id);
   // Clause 49 and §7.5b: the carrier code resolves to an address, so the merchant sees carriage and status only.
-  return reply(200,{offer:JSON.parse(offer.body),delivery:delivery?{carriage:delivery.carriage,status:delivery.status}:null,recovery:r.engine.recoveries.for(id)??null,settlement:r.engine.settlement(id)??null});
+  return reply(200,{offer:JSON.parse(offer.body),delivery:delivery?{carriage:delivery.carriage,status:delivery.status}:null,recovery:r.engine.recoveries.for(id)??null,settlement:r.engine.settlement(id)??null,carriage_quote:r.quotes.find(id)??null});
  }
  if(parts.length===3&&method==='POST'){
+  if(parts[2]==='carriage-quote'){
+   if(url.search||Object.keys(b).sort().join(',')!=='carriage')return reply(400,{error:'malformed',message:'quotation takes only carriage and no query'});
+   if(binding!=='digital')return reply(422,{error:'not_digital',message:'a pre-order quotation is for a digital offer'});
+   if(!Number.isSafeInteger(b.carriage)||(b.carriage as number)<0)return reply(422,{error:'bad_carriage',message:'carriage must be a nonnegative safe whole number'});
+   const offer=r.engine.mustGet(id,r.now()),held=r.quotes.find(id);
+   // Exact retry returns the original row, including its timestamp, even after decision.
+   if(held)return held.carriage===b.carriage?reply(200,held):reply(422,{error:'carriage_fixed',message:'the quoted carriage cannot change'});
+   if(!['drafted','presented'].includes(offer.state)||offer.expires_at<=r.now())return reply(409,{error:'quote_unavailable',message:'quote before a live offer is decided'});
+   return reply(201,r.quotes.record(id,b.carriage as number,r.now()));
+  }
   if(parts[2]==='present')return forward('/offers/'+encodeURIComponent(id)+'/present',input);
   // A digital offer has no goods in a home. The engine records a delivery on one anyway, and the hub then
   // draws that carriage on the approval, so the presenter surface refuses both physical steps for it.

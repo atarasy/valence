@@ -1,5 +1,5 @@
 import {afterAll,beforeAll,expect,test} from 'bun:test';
-import {generateKeyPairSync,randomUUID,sign} from 'node:crypto';
+import {generateKeyPairSync,randomUUID,sign,type KeyObject} from 'node:crypto';
 import {createPool,initialiseDeployment,postgresStore,type Identity} from './store.ts';
 import {migrateDatabase} from './migrate.ts';
 import {openPostgresMemberHTTP} from './http.ts';
@@ -15,7 +15,7 @@ const pool=createPool(url),ids:string[]=[];
 const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:1000,maximumPending:8,budgetWindowMs:60000,maximumRequests:500,maximumTrackedTokens:100};
 beforeAll(()=>migrateDatabase(url));
 afterAll(async()=>{for(const id of ids){await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await pool.end();});
-const pem=(pair:ReturnType<typeof generateKeyPairSync>)=>pair.publicKey.export({type:'spki',format:'pem'}).toString();
+const pem=(pair:{publicKey:KeyObject})=>pair.publicKey.export({type:'spki',format:'pem'}).toString();
 // §13.2, question 55. The household's identifier is the name of its own key
 // and its mandate's is that identifier with a label, so both are derived here
 // rather than written as `house` and `mandate-1`.
@@ -112,4 +112,30 @@ test('presenter routes refuse member tokens and member routes refuse presenter t
  expect((await s.send('amr1_'+'x'.repeat(43),'/presenter/self')).status).toBe(401);
  expect((await s.send(s.tokenA,'/auth/session')).status).toBe(401);
  expect((await s.send(s.tokenA,'/presenter/identities',{})).status).toBe(404);
+});
+
+test('digital quotation is scoped, immutable, replayable and never a delivery',async()=>{
+ const s=await setup();
+ await s.send(s.tokenB,'/presenter/configs',s.b.catalogue('quote-1'));
+ await s.send(s.tokenB,'/presenter/disclosures',s.b.disclosure());
+ const create=async(binding='digital')=>(await (await s.send(s.tokenB,'/presenter/offers',{...s.offerBody('quote-1','tea-b'),binding})).json()) as {id:string};
+ const offer=await create(),path='/presenter/offers/'+offer.id+'/carriage-quote';
+ expect((await s.send(s.tokenA,path,{carriage:550})).status).toBe(404);
+ expect((await s.send('amr1_'+'x'.repeat(43),path,{carriage:550})).status).toBe(401);
+ for(const carriage of [-1,0.5,Number.MAX_SAFE_INTEGER+1,'550',null])expect((await s.send(s.tokenB,path,{carriage})).status).toBe(422);
+ for(const extra of [{status:'placed'},{code:'address-resolving-code'},{presenter:s.a.presenter.id}])expect((await s.send(s.tokenB,path,{carriage:550,...extra})).status).toBe(400);
+ expect((await s.send(s.tokenB,path+'?override=true',{carriage:550})).status).toBe(400);
+ const results=await Promise.all([s.send(s.tokenB,path,{carriage:550}),s.send(s.tokenB,path,{carriage:550})]);
+ expect(results.map(r=>r.status).sort()).toEqual([200,201]);
+ const saved=await results[0]!.json();expect(await results[1]!.json()).toEqual(saved);
+ expect(saved).toMatchObject({offer:offer.id,carriage:550});expect(Object.keys(saved).sort()).toEqual(['carriage','offer','quoted_at']);
+ expect((await s.send(s.tokenB,path,{carriage:551})).status).toBe(422);
+ const detail=await (await s.send(s.tokenB,'/presenter/offers/'+offer.id)).json();
+ expect(detail.delivery).toBeNull();expect(detail.carriage_quote).toEqual(saved);
+ expect((await s.send(s.tokenB,'/presenter/offers/'+offer.id+'/delivery',{carriage:550,status:'delivered'})).status).toBe(422);
+ const physical=await create('physical');expect((await s.send(s.tokenB,'/presenter/offers/'+physical.id+'/carriage-quote',{carriage:550})).status).toBe(422);
+ const zero=await create();expect((await s.send(s.tokenB,'/presenter/offers/'+zero.id+'/carriage-quote',{carriage:0})).status).toBe(201);
+ const expired=await create();
+ await s.unit.run(store=>{const rows=store.map<any>('offers'),row=rows.get(expired.id);row.expires_at=1;rows.set(expired.id,row);});
+ expect((await s.send(s.tokenB,'/presenter/offers/'+expired.id+'/carriage-quote',{carriage:500})).status).toBe(409);
 });

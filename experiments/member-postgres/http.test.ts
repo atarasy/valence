@@ -11,6 +11,7 @@ import {openPostgresMemberHTTP} from './http.ts';
 import {credentialSPKI} from '../member-login/credential-key.ts';
 import {isHouseholdName,nameOf} from '../../engine/src/common/names.ts';
 import {memberRuntime} from './runtime.ts';
+import {presenterCredentials} from './presenter-http.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 import {seedUnified,loginResponse} from '../member-transactions/unified-fixture.ts';
 import {fixtureTime} from '../member-transactions/atomic-fixture.ts';
@@ -173,7 +174,7 @@ test('an expired unsigned operation is refused by the next prepare instead of bl
 
 // Digital decisions reuse the verified member identity and database unit, but
 // carry a distinct signed profile and a frozen decision result rather than a payment receipt.
-async function digitalSetup(){
+async function digitalSetup(quote=true){
  const s=await setup();
  // Finish the fixture's earlier physical statement before presenting another offer.
  const previous=await (await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]})).json();
@@ -184,15 +185,17 @@ async function digitalSetup(){
   r.engine.registerConfig(catalogue,signConfig(catalogue));
   const o=r.engine.createOffer({binding:'digital',household:s.input.house,purpose:'replenish',config_version:'digital-cfg',expires_at:fixtureTime+3600000,mandate:s.input.mandate,price_band:null,giver:null,candidates:[{product:'digital-tea',quantity:1,predicted_conversion:null,is_exploration:true,given_by:null}]});
   await r.engine.present(o.id,now());
-  r.deliveries.record({offer:o.id,carriage:550,code:'digital-test-carriage',status:'placed',now:now()});
   const {ApprovalDesk}=await import('../../engine/src/hub/approval.ts');
   new ApprovalDesk(store).record({offer:o.id,perCandidate:Object.fromEntries(o.candidates.map(c=>[c.id,{alternatives:['Use existing supplies'],argument_against:'You may already have enough.'}])),excluded:[],mandate:{kind:'standing',scope:'Test supplies',lapses_at:fixtureTime+10000000}});
   r.authority.bindResource({kind:'offer',id:o.id},{household:s.input.house,presenter:'merchant-1'});
   return o;
  });
+ const presenterToken=await s.unit.run(store=>presenterCredentials(memberRuntime(store,s.c,now)).issue('merchant-1',now()).token);
+ if(quote)expect((await s.send('/presenter/offers/'+offer.id+'/carriage-quote',{carriage:550},presenterToken)).status).toBe(201);
+ expect(await s.unit.run(store=>memberRuntime(store,s.c,now).deliveries.find(offer.id))).toBeUndefined();
  const decisions=offer.candidates.map(c=>({candidate:c.id,valence:'kept',kept_as:'self'}));
  const prepare=()=>s.send('/member/decisions/prepare',{offer:offer.id,decisions});
- return {...s,offer,decisions,prepare};
+ return {...s,offer,decisions,prepare,presenterToken};
 }
 test('digital decision commits once across independent HTTP runtimes and retains the original result',async()=>{
  const s=await digitalSetup(),detail=await (await s.send('/offers/'+s.offer.id)).json(),reply=await s.prepare();expect(reply.status).toBe(200);const p=await reply.json();
@@ -245,7 +248,7 @@ test('digital changed review, missing carriage and cross-household access refuse
  for(const suffix of ['', '/outcome'])expect((await s.send(path+suffix,undefined,other.token)).status).toBe(404);
  expect((await s.send('/member/decisions/prepare',{offer:s.offer.id,decisions:s.decisions},other.token)).status).toBe(404);
  await s.send(path+'/cancel',{});
- await s.unit.run(store=>store.map('delivery').delete(s.offer.id));
+ await s.unit.run(store=>store.map('carriage_quotes').delete(s.offer.id));
  expect((await s.prepare()).status).toBe(404);
  expect((await s.send('/member/decisions/prepare',{offer:s.offer.id,decisions:[]})).status).toBe(404);
 });
@@ -276,4 +279,43 @@ test('digital explicit refusal survives a discarded submit response without anot
  expect(value.operationState).toBe('committed');expect(value.decision.state).toBe('settled');
  expect(value.decision.candidates.every((c:any)=>c.valence==='returned')).toBe(true);
  expect(await s.unit.run(store=>memberRuntime(store,s.c,now).engine.settlement(s.offer.id)?.charged)).toBe(0);
+});
+
+test('digital approval uses quoted carriage and never treats a fabricated delivery as a quote',async()=>{
+ const s=await digitalSetup(false);
+ await s.unit.run(store=>memberRuntime(store,s.c,now).deliveries.record({offer:s.offer.id,carriage:999,code:'fixture-only',status:'placed',now:now()}));
+ expect((await s.prepare()).status).toBe(404);
+ expect((await (await s.send('/offers/'+s.offer.id+'/approval')).json()).carriage).toBeNull();
+ await s.send('/presenter/offers/'+s.offer.id+'/carriage-quote',{carriage:550},s.presenterToken);
+ expect((await (await s.send('/offers/'+s.offer.id+'/approval')).json()).carriage).toBe(550);
+ const p=await (await s.prepare()).json();expect(p.review.carriage).toBe(550);
+ // A corrupted trusted row must invalidate the prepared revision before verification.
+ await s.unit.run(store=>{const rows=store.map<any>('carriage_quotes'),q=rows.get(s.offer.id);rows.set(s.offer.id,{...q,carriage:551});});
+ expect((await s.send('/member/operations/'+p.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)})).status).toBe(404);
+ expect(await s.unit.run(store=>memberRuntime(store,s.c,now).engine.mustGet(s.offer.id,now()).state)).toBe('presented');
+});
+
+// Optional cross-repository contract probe: an explicitly named local Vox checkout,
+// a local transport bridge and this disposable PostgreSQL deployment. No hosted calls.
+test.skipIf(!process.env.VOX_TEST_SOURCE)('Vox service quotation reaches member preparation and signed digital decision',async()=>{
+ const root=process.env.VOX_TEST_SOURCE!,s=await digitalSetup(false);
+ const {createValenceClient}=await import(root+'/src/service/valenceClient.ts');
+ const {createHandler}=await import(root+'/src/service/server.ts');
+ const {ensureRole,loadKeys}=await import(root+'/src/service/keys.ts');
+ const app=await openPostgresMemberHTTP(pool,s.identity,s.c,now),bridge=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+   const url=new URL(request.url);return app.fetch(new Request(s.c.origin+url.pathname+url.search,{method:request.method,headers:request.headers,...(request.method==='GET'?{}:{body:await request.text()})}),{peer:'vox-local-bridge'});
+ }});
+ const dir=mkdtempSync(join(tmpdir(),'vox-quote-contract-'));
+ try{
+  ensureRole(dir,'presenter','merchant-1');ensureRole(dir,'merchant','merchant-1');
+  const origin='http://127.0.0.1:'+bridge.port,handler=createHandler({keys:loadKeys(dir),valence:createValenceClient(origin,s.presenterToken),webDist:dir,origin,allowedHosts:['vox.local']});
+  const quote=()=>handler(new Request('http://vox.local/api/offers/'+s.offer.id+'/carriage-quote',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({carriage:550})}));
+  const response=await quote();expect(response.status).toBe(200);const first=await response.json();expect(await(await quote()).json()).toEqual(first);
+  const detail=await(await s.send('/presenter/offers/'+s.offer.id,undefined,s.presenterToken)).json();expect(detail.delivery).toBeNull();expect(detail.carriage_quote).toEqual(first);
+  const approval=await(await s.send('/offers/'+s.offer.id+'/approval')).json();expect(approval.carriage).toBe(550);
+  const p=await(await s.prepare()).json();expect(p.review.carriage).toBe(550);expect(p.review.total).toBe(1750);
+  const committed=await s.send('/member/operations/'+p.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)});
+  expect(committed.status).toBe(200);expect((await committed.json()).operationState).toBe('committed');
+  expect(await(await quote()).json()).toEqual(first);
+ }finally{bridge.stop(true);rmSync(dir,{recursive:true,force:true});}
 });

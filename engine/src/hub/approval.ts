@@ -200,7 +200,7 @@ export class ApprovalDesk {
   render(
     engine: ValenceEngine,
     offer: Offer,
-    delivery: Delivery | undefined
+    delivery: Pick<Delivery, "carriage"> | undefined
   ): Approval | { missing: string } {
     const deliberation = this.deliberations.get(offer.id);
     if (!deliberation) {

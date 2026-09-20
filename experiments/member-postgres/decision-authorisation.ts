@@ -47,7 +47,7 @@ export function openDecisionAuthorisations(r:ReturnType<typeof memberRuntime>, o
     if(mandate.household!==offer.household||mandate.lapses_at<=at)throw new Error('Mandate unavailable');
     const catalogue=r.engine.configsForPresenter(offer.presenter).find(c=>c.version===offer.config_version);
     if(!catalogue)throw new Error('Catalogue unavailable');
-    const delivery=r.deliveries.find(offer.id);
+    const delivery=r.quotes.find(offer.id);
     if(!delivery)throw new Error('Carriage unavailable');integer(delivery.carriage);
     const approval=approvals.render(r.engine,offer,delivery);
     if('missing' in approval)throw new Error('Deliberation unavailable');

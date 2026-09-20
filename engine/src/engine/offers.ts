@@ -265,6 +265,7 @@ export class ValenceEngine {
   readonly householdLedger: HouseholdLedger;
   private daySource: DaySource;
   private deliverySource: DeliverySource;
+  private approvalCarriageSource?: {find(offer:string):Promise<{carriage:number}|undefined>};
 
   /**
    * §16, question 54. The mandate an offer names, read as the offer's
@@ -413,6 +414,14 @@ export class ValenceEngine {
   /** §6.5, §10a.5. The delivery this offer's screens render the carriage from. */
   async deliveryFor(offerId: string): Promise<Delivery | undefined> {
     return this.deliverySource.find(offerId);
+  }
+
+  /** Digital approval may quote carriage before any parcel exists. Statements still require delivery. */
+  readApprovalCarriageFrom(source:{find(offer:string):Promise<{carriage:number}|undefined>}):void {
+    this.approvalCarriageSource=source;
+  }
+  async approvalCarriageFor(offerId:string):Promise<{carriage:number}|undefined> {
+    return this.approvalCarriageSource ? this.approvalCarriageSource.find(offerId) : this.deliveryFor(offerId);
   }
 
   /** §16.3. Point the day's total at the hub that holds the person's copy. */
