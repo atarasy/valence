@@ -1,3 +1,4 @@
+import {verifyRuntimeArtifact} from './runtime-artifact.ts';
 import { readFileSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import type { Pool } from 'pg';
 import { createPool, type Identity } from './store.ts';
@@ -33,6 +34,7 @@ function summary(snapshot: DeploymentSnapshot) {
 /** In-memory transfer only. Neither snapshots nor connection URLs are returned. */
 export async function runMigrationCommand(command: MigrationCommand, plan: MigrationPlan, env: Record<string,string|undefined>) {
  if(!commands.includes(command))refuse();const {p,runtime}=validate(plan);
+ if(!['inspect-source','inspect-target'].includes(command)){const artifact=env.ATARASY_MIGRATION_ARTIFACT_DIR;if(!artifact)refuse();verifyRuntimeArtifact(artifact!,p.identity,p.config,p.runtimeFingerprint);}
  const sourceURL=env.ATARASY_MIGRATION_SOURCE_URL,targetURL=env.ATARASY_MIGRATION_TARGET_URL;
  const needsSource=command!=='inspect-target',needsTarget=['inspect-target','restore','activate'].includes(command);
  if((needsSource&&!sourceURL)||(needsTarget&&!targetURL))refuse();

@@ -14,7 +14,7 @@ Snapshots contain sensitive household and authentication records and must be han
 
 ## Freeze and activate
 
-`freezeDeployment(pool, identity, ticket, runtimeFingerprint)` atomically records the caller-supplied UUID ticket, disables source writes and captures final state. The runtime SHA-256 fingerprint is retained and checked; these functions do not measure or attest the running binary. A matching retry verifies schema and pre-freeze content and returns the same final snapshot. Competing tickets refuse. Failure before commit rolls back the ticket and disable. Normal writers and bootstrap refuse a disabled source.
+`freezeDeployment(pool, identity, ticket, runtimeFingerprint)` atomically records the caller-supplied UUID ticket, disables source writes and captures final state. The runtime SHA-256 fingerprint is retained and checked. The operator CLI now recomputes it from a reviewed local build; these database functions do not independently measure or attest the running binary. A matching retry verifies schema and pre-freeze content and returns the same final snapshot. Competing tickets refuse. Failure before commit rolls back the ticket and disable. Normal writers and bootstrap refuse a disabled source.
 
 `activateDeploymentCandidate(sourcePool, targetPool, identity, ticket, runtimeFingerprint)` holds the source lock, validates the disabled target and its local instance, and commits source retirement bound to that exact instance. Only then does it atomically record target activation and enable the target. The source stays disabled. A second independently restored candidate has another instance and cannot activate that retired ticket.
 

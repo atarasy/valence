@@ -5,9 +5,9 @@ import {migrateDatabase} from './migrate.ts';
 import {captureDeployment,restoreDeploymentCandidate} from './operational-snapshot.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const source=createPool(url),db='snapshot_'+randomUUID().replaceAll('-',''),targetURL=new URL(url);targetURL.pathname='/'+db;
-const target=createPool(targetURL.toString()),ids:string[]=[];
+const target=createPool(targetURL.toString()),ids:string[]=[],artifactDirectories:string[]=[];
 beforeAll(async()=>{await migrateDatabase(url);await source.query(`CREATE DATABASE "${db}"`);await migrateDatabase(targetURL.toString());});
-afterAll(async()=>{await target.end();await source.query(`DROP DATABASE "${db}" WITH (FORCE)`);for(const id of ids){await source.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await source.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await source.end();});
+afterAll(async()=>{const {rmSync}=await import('node:fs');for(const directory of artifactDirectories)rmSync(directory,{recursive:true,force:true});await target.end();await source.query(`DROP DATABASE "${db}" WITH (FORCE)`);for(const id of ids){await source.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await source.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await source.end();});
 async function setup(){const identity:Identity={id:'snapshot_'+randomUUID().replaceAll('-',''),environment:'test',origin:'https://unit.example',epoch:1};ids.push(identity.id);await initialiseDeployment(source,identity);const unit=postgresStore(source,identity);await unit.run(store=>{store.map('snapshot_probe').set('second',{n:2});store.map('future_namespace').set('retained',{v:'unknown to snapshot code'});});return {identity,unit};}
 test('all ordered bytes restore disabled and existing deployments cannot be overwritten',async()=>{const s=await setup(),snapshot=await captureDeployment(source,s.identity);const result=await restoreDeploymentCandidate(target,snapshot,s.identity);expect(result).toMatchObject({verified:true,enabled:false});const restored=await captureDeployment(target,s.identity);expect(restored.rows).toEqual(snapshot.rows);expect(restored.sourceEnabled).toBe(false);await expect(postgresStore(target,s.identity).run(()=>null)).rejects.toThrow('fenced');await expect(restoreDeploymentCandidate(target,snapshot,s.identity)).rejects.toThrow();expect((await captureDeployment(source,s.identity)).digest).toBe(snapshot.digest);});
 test('wrong scope digest tampering and schema changes refuse before destination creation',async()=>{const s=await setup(),snapshot=await captureDeployment(source,s.identity);await expect(restoreDeploymentCandidate(target,snapshot,{...s.identity,epoch:2})).rejects.toThrow();const changed=structuredClone(snapshot);changed.rows[0]!.value='{}';await expect(restoreDeploymentCandidate(target,changed,s.identity)).rejects.toThrow();await target.query('CREATE TABLE atarasy_member.unrecognised (id int)');try{await expect(restoreDeploymentCandidate(target,snapshot,s.identity)).rejects.toThrow();}finally{await target.query('DROP TABLE atarasy_member.unrecognised');}expect((await target.query('SELECT 1 FROM atarasy_member.control WHERE id=$1',[s.identity.id])).rowCount).toBe(0);});
@@ -163,7 +163,11 @@ async function commandSetup(){
  const s=await setup(),{memberRuntimeIdentity}=await import('./config.ts');
  const config={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1 as const,recoveryGraceDays:3,dayBoundary:'UTC' as const,maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
  await s.unit.run(store=>{store.map('member_config').set('current',memberRuntimeIdentity(config));store.map('private_probe').set('secret',{token:'do-not-print-household-secret'});});
- return {...s,plan:{identity:s.identity,ticket:randomUUID(),runtimeFingerprint:'b'.repeat(64),config},env:{ATARASY_MIGRATION_SOURCE_URL:url!,ATARASY_MIGRATION_TARGET_URL:targetURL.toString()}};
+ const {mkdtempSync,mkdirSync,writeFileSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{writeRuntimeManifest}=await import('./runtime-artifact.ts');
+ const artifact=mkdtempSync(join(tmpdir(),'migration-artifact-'));artifactDirectories.push(artifact);mkdirSync(join(artifact,'api'));mkdirSync(join(artifact,'public'));
+ for(const path of ['api/index.js','vercel.json','package.json','.vercelignore','public/robots.txt'])writeFileSync(join(artifact,path),'synthetic artifact '+path);
+ const runtimeFingerprint=writeRuntimeManifest(artifact,s.identity,config);
+ return {...s,plan:{identity:s.identity,ticket:randomUUID(),runtimeFingerprint,config},env:{ATARASY_MIGRATION_SOURCE_URL:url!,ATARASY_MIGRATION_TARGET_URL:targetURL.toString(),ATARASY_MIGRATION_ARTIFACT_DIR:artifact}};
 }
 test('operator commands inspect freeze restore retry activate without returning private rows',async()=>{
  const {runMigrationCommand}=await import('./migration-command.ts'),s=await commandSetup();
@@ -191,4 +195,10 @@ test('CLI emits only bounded summaries and redacts underlying failures',async()=
   const good=await invoke(['inspect-source',plan],s.env);expect(good.code).toBe(0);expect(JSON.parse(good.out)).toMatchObject({ok:true,enabled:true});expect(good.err).toBe('');expect(good.out).not.toContain('do-not-print');expect(good.out).not.toContain(url!);
   const bad=await invoke(['inspect-source',plan],{ATARASY_MIGRATION_SOURCE_URL:'postgres://do-not-print-password@127.0.0.1:1/missing'});expect(bad.code).toBe(1);expect(bad.out).toBe('');expect(JSON.parse(bad.err).error).toBe('migration_failed');expect(bad.err).not.toContain('do-not-print-password');expect(bad.err).not.toContain('127.0.0.1');
  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a changed local runtime artifact refuses migration before freezing the source',async()=>{
+ const {runMigrationCommand}=await import('./migration-command.ts'),{appendFileSync}=await import('node:fs'),s=await commandSetup();
+ appendFileSync(s.env.ATARASY_MIGRATION_ARTIFACT_DIR+'/api/index.js','changed');
+ await expect(runMigrationCommand('freeze',s.plan,s.env)).rejects.toThrow();expect((await captureDeployment(source,s.identity)).sourceEnabled).toBe(true);
 });
