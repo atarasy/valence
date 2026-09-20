@@ -336,6 +336,8 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
   });
 
   test("a claim that has already lapsed is not kept", () => {
+    // Re-measured 2026-09-20: admission-only removal was masked by claimFor's
+    // expiry check. Retargeting both exposes this claim and fails this test.
     // NOTE (mutation check, 2026-09-18): import_keeps_a_lapsed_claim. A claim
     // that can never be signed is a row nobody can act on, and the import
     // route's own shape check admits `lapses_at: 0` where `record` refuses it.
