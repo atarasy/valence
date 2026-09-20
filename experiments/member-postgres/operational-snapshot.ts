@@ -71,12 +71,21 @@ export async function restoreDeploymentCandidate(pool: Pool, input: DeploymentSn
   for (const row of s.rows) await c.query('INSERT INTO atarasy_member.engine_rows (deployment,namespace,key,value) VALUES ($1,$2,$3,$4)',[s.identity.id,row.namespace,row.key,row.value]);
   const actual = await c.query<Row>('SELECT namespace,key,value FROM atarasy_member.engine_rows WHERE deployment=$1 ORDER BY ordinal',[s.identity.id]);
   if (JSON.stringify(actual.rows) !== JSON.stringify(s.rows)) fail();
+  // A copied frozen source must never be mistaken for the source by abort.
+  const frozenRows = s.rows.filter(r => r.namespace === freezeNamespace);
+  if (frozenRows.length) {
+   const raw = JSON.parse(frozenRows[0]!.value), f = migration(s,raw.ticket,raw.runtime);
+   if (s.sourceEnabled || f.phase !== 'frozen') fail();
+   const candidate: TargetWriter = {instance:randomUUID(),ticket:f.ticket,runtime:f.runtime,content:f.content,schema:f.schema,phase:'ready'};
+   await c.query('INSERT INTO atarasy_member.engine_rows (deployment,namespace,key,value) VALUES ($1,$2,$3,$4)',[s.identity.id,targetNamespace,'current',JSON.stringify(candidate)]);
+   await captureLocked(c,s.identity);
+  }
   await c.query('COMMIT'); return {verified:true,enabled:false,digest:s.digest};
  } catch(error) { await c.query('ROLLBACK').catch(()=>{broken=true;}); throw error; } finally { c.release(broken); }
 }
 
 const freezeNamespace = 'member_writer_migration';
-type FrozenWriter = { profile: 'atarasy.postgres-writer-freeze.1'; ticket: string; runtime: string; phase: 'frozen'; content: string; schema: string };
+type FrozenWriter = { profile: 'atarasy.postgres-writer-freeze.2'; ticket: string; runtime: string; phase: 'frozen'; content: string; schema: string };
 /** Stop the source and capture its final state atomically. A retry must name the same ticket and runtime. */
 export async function freezeDeployment(pool: Pool, input: Identity, ticket: string, runtime: string): Promise<DeploymentSnapshot> {
  const p = structuredClone(input); validIdentity(p);
@@ -84,16 +93,27 @@ export async function freezeDeployment(pool: Pool, input: Identity, ticket: stri
  const c = await pool.connect(); let broken = false;
  try {
   await c.query('BEGIN');
-  const before = await captureLocked(c,p), records = before.rows.filter(r => r.namespace === freezeNamespace);
+  let before = await captureLocked(c,p);
+  if (before.rows.some(r => r.namespace === historyNamespace && r.key === ticket)) fail();
+  const arrived = targetRecord(before);
+  if (arrived) {
+   if (!before.sourceEnabled || arrived.phase !== 'active' || arrived.ticket === ticket) fail();
+   const old = migration(before,arrived.ticket,arrived.runtime,false);
+   if (old.phase !== 'frozen' || arrived.content !== old.content || arrived.schema !== old.schema) fail();
+   await c.query('INSERT INTO atarasy_member.engine_rows (deployment,namespace,key,value) VALUES ($1,$2,$3,$4)',[p.id,historyNamespace,arrived.ticket,JSON.stringify({outcome:'arrived',migration:old,target:arrived})]);
+   await c.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1 AND namespace IN ($2,$3)',[p.id,freezeNamespace,targetNamespace]);
+   before = await captureLocked(c,p);
+  }
+  const records = before.rows.filter(r => r.namespace === freezeNamespace);
   if (records.length) {
    if (records.length !== 1 || records[0]!.key !== 'current' || before.sourceEnabled) fail();
    const held = JSON.parse(records[0]!.value) as FrozenWriter;
-   if (!held || Object.keys(held).sort().join(',') !== 'content,phase,profile,runtime,schema,ticket' || held.profile !== 'atarasy.postgres-writer-freeze.1' || held.phase !== 'frozen' || held.ticket !== ticket || held.runtime !== runtime || held.schema !== before.schema || held.content !== sha(before.rows.filter(r => r.namespace !== freezeNamespace))) fail();
+   if (!held || Object.keys(held).sort().join(',') !== 'content,phase,profile,runtime,schema,ticket' || held.profile !== 'atarasy.postgres-writer-freeze.2' || held.phase !== 'frozen' || held.ticket !== ticket || held.runtime !== runtime || held.schema !== before.schema || held.content !== sha(before.rows.filter(r => r.namespace !== freezeNamespace))) fail();
    await c.query('COMMIT'); return before;
   }
   // An unrelated administrative disable is not a migration ticket.
   if (!before.sourceEnabled) fail();
-  const frozen: FrozenWriter = { profile: 'atarasy.postgres-writer-freeze.1', ticket, runtime, phase: 'frozen', content: sha(before.rows), schema: before.schema };
+  const frozen: FrozenWriter = { profile: 'atarasy.postgres-writer-freeze.2', ticket, runtime, phase: 'frozen', content: sha(before.rows), schema: before.schema };
   await c.query('INSERT INTO atarasy_member.engine_rows (deployment,namespace,key,value) VALUES ($1,$2,$3,$4)',[p.id,freezeNamespace,'current',JSON.stringify(frozen)]);
   await c.query('UPDATE atarasy_member.control SET enabled=false WHERE id=$1',[p.id]);
   const final = await captureLocked(c,p);
@@ -108,7 +128,7 @@ function migration(snapshot: DeploymentSnapshot, ticket: string, runtime: string
  if (rows.length !== 1 || rows[0]!.key !== 'current') fail();
  const f = JSON.parse(rows[0]!.value);
  const keys = f?.phase === 'retired' ? 'content,phase,profile,runtime,schema,target,ticket' : 'content,phase,profile,runtime,schema,ticket';
- if (!f || Object.keys(f).sort().join(',') !== keys || f.profile !== 'atarasy.postgres-writer-freeze.1' || !['frozen','retired'].includes(f.phase) || f.ticket !== ticket || f.runtime !== runtime || f.schema !== snapshot.schema || !/^[a-f0-9]{64}$/.test(f.content) || (f.phase === 'retired' && !uuid(f.target))) fail();
+ if (!f || Object.keys(f).sort().join(',') !== keys || f.profile !== 'atarasy.postgres-writer-freeze.2' || !['frozen','retired'].includes(f.phase) || f.ticket !== ticket || f.runtime !== runtime || f.schema !== snapshot.schema || !/^[a-f0-9]{64}$/.test(f.content) || (f.phase === 'retired' && !uuid(f.target))) fail();
  if (checkContent && f.content !== sha(snapshot.rows.filter(r => ![freezeNamespace,targetNamespace].includes(r.namespace)))) fail();
  return f;
 }
@@ -166,4 +186,22 @@ export async function activateDeploymentCandidate(source: Pool, target: Pool, in
  } catch(error) {
   await a.query('ROLLBACK').catch(()=>{brokenA=true;}); if (b) await b.query('ROLLBACK').catch(()=>{brokenB=true;}); throw error;
  } finally { a.release(brokenA); b?.release(brokenB); }
+}
+
+const historyNamespace = 'member_writer_history';
+/** Abort only a still-frozen source, never a restored candidate or a retired writer. */
+export async function abortDeploymentMigration(pool: Pool, input: Identity, ticket: string, runtime: string): Promise<{aborted:true}> {
+ const p=structuredClone(input);validIdentity(p);if(!uuid(ticket)||!/^[a-f0-9]{64}$/.test(runtime))fail();
+ const c=await pool.connect();let broken=false;
+ try{
+  await c.query('BEGIN');const snapshot=await captureLocked(c,p);
+  const history=snapshot.rows.find(r=>r.namespace===historyNamespace&&r.key===ticket);
+  if(history){const h=JSON.parse(history.value);if(h.outcome!=='aborted'||h.migration?.ticket!==ticket||h.migration?.runtime!==runtime)fail();await c.query('COMMIT');return {aborted:true};}
+  const f=migration(snapshot,ticket,runtime);
+  if(snapshot.sourceEnabled||targetRecord(snapshot)||f.phase!=='frozen')fail();
+  await c.query('INSERT INTO atarasy_member.engine_rows (deployment,namespace,key,value) VALUES ($1,$2,$3,$4)',[p.id,historyNamespace,ticket,JSON.stringify({outcome:'aborted',migration:f})]);
+  await c.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1 AND namespace=$2 AND key=$3',[p.id,freezeNamespace,'current']);
+  await c.query('UPDATE atarasy_member.control SET enabled=true WHERE id=$1',[p.id]);
+  await captureLocked(c,p);await c.query('COMMIT');return {aborted:true};
+ }catch(error){await c.query('ROLLBACK').catch(()=>{broken=true;});throw error;}finally{c.release(broken);}
 }

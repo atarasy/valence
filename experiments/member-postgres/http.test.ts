@@ -503,7 +503,7 @@ test('disabled snapshot candidate preserves digital withdrawal history, successo
  await pool.query(`CREATE DATABASE "${db}"`);const destination=createPool(destinationURL.toString());
  try{
   await migrateDatabase(destinationURL.toString());await restoreDeploymentCandidate(destination,snapshot,s.identity);
-  expect((await captureDeployment(destination,s.identity)).rows).toEqual(snapshot.rows);
+  expect((await captureDeployment(destination,s.identity)).rows.filter(r=>r.namespace!=='member_writer_target')).toEqual(snapshot.rows);
   await expect(postgresStore(destination,s.identity).run(()=>null)).rejects.toThrow('fenced');
   // Rehearse the implemented retire-before-enable protocol on synthetic databases.
   await expect(s.unit.run(()=>null)).rejects.toThrow('fenced');

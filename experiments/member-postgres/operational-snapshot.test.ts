@@ -113,3 +113,48 @@ test('lost source-retirement and target-activation acknowledgements resume from 
   expect((await activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).activated).toBe(true);
  }
 });
+test('abort restores only the source and permanently invalidates copied candidates and ticket reuse',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate,abortDeploymentMigration}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='6'.repeat(64);
+ const frozen=await freezeDeployment(source,s.identity,ticket,runtime);await restoreDeploymentCandidate(target,frozen,s.identity);
+ await expect(abortDeploymentMigration(target,s.identity,ticket,runtime)).rejects.toThrow();
+ expect(await abortDeploymentMigration(source,s.identity,ticket,runtime)).toEqual({aborted:true});
+ await s.unit.run(store=>{store.map('after_abort').set('new',1);});
+ expect(await abortDeploymentMigration(source,s.identity,ticket,runtime)).toEqual({aborted:true});
+ await expect(freezeDeployment(source,s.identity,ticket,runtime)).rejects.toThrow();
+ await expect(activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).rejects.toThrow();
+ expect((await captureDeployment(target,s.identity)).sourceEnabled).toBe(false);
+ const next=await freezeDeployment(source,s.identity,randomUUID(),runtime);expect(next.rows.some(r=>r.namespace==='after_abort')).toBe(true);
+});
+test('abort racing activation never enables both writers',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate,abortDeploymentMigration}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='7'.repeat(64);
+ await restoreDeploymentCandidate(target,await freezeDeployment(source,s.identity,ticket,runtime),s.identity);
+ const results=await Promise.allSettled([abortDeploymentMigration(source,s.identity,ticket,runtime),activateDeploymentCandidate(source,target,s.identity,ticket,runtime)]);
+ expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+ const states=await Promise.all([captureDeployment(source,s.identity),captureDeployment(target,s.identity)]);expect(states.filter(s=>s.sourceEnabled)).toHaveLength(1);
+});
+test('a migrated active host can migrate again without losing newer writes or prior migration history',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate,abortDeploymentMigration}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='8'.repeat(64);
+ await restoreDeploymentCandidate(target,await freezeDeployment(source,s.identity,ticket,runtime),s.identity);const first=await activateDeploymentCandidate(source,target,s.identity,ticket,runtime);
+ await expect(abortDeploymentMigration(source,s.identity,ticket,runtime)).rejects.toThrow();
+ await postgresStore(target,s.identity).run(store=>{store.map('after_first_move').set('retained',{counter:9});});
+ const nextTicket=randomUUID(),next=await freezeDeployment(target,s.identity,nextTicket,runtime);
+ expect(next.rows.some(r=>r.namespace==='member_writer_target')).toBe(false);
+ expect(JSON.parse(next.rows.find(r=>r.namespace==='member_writer_history'&&r.key===ticket)!.value).target.instance).toBe(first.instance);
+ expect(await freezeDeployment(target,s.identity,nextTicket,runtime)).toEqual(next);
+ const thirdDB='third_'+randomUUID().replaceAll('-',''),thirdURL=new URL(url!);thirdURL.pathname='/'+thirdDB;await source.query(`CREATE DATABASE "${thirdDB}"`);const third=createPool(thirdURL.toString());
+ try{await migrateDatabase(thirdURL.toString());await restoreDeploymentCandidate(third,next,s.identity);const moved=await activateDeploymentCandidate(target,third,s.identity,nextTicket,runtime);expect(moved.instance).not.toBe(first.instance);
+ expect(await postgresStore(third,s.identity).run(store=>store.map('after_first_move').get('retained'))).toEqual({counter:9});
+ await expect(postgresStore(target,s.identity).run(()=>null)).rejects.toThrow('fenced');await expect(s.unit.run(()=>null)).rejects.toThrow('fenced');
+ await expect(activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).rejects.toThrow();
+ }finally{await third.end();await source.query(`DROP DATABASE "${thirdDB}" WITH (FORCE)`);}
+});
+test('abort rolls back before commit and lost commit acknowledgement is idempotently recoverable',async()=>{
+ const {freezeDeployment,abortDeploymentMigration}=await import('./operational-snapshot.ts');
+ for(const afterCommit of [false,true]){
+  const s=await setup(),ticket=randomUUID(),runtime='a'.repeat(64),frozen=await freezeDeployment(source,s.identity,ticket,runtime);
+  const failing={async connect(){const c=await source.connect();return new Proxy(c,{get(client,key){if(key==='query')return async(...args:any[])=>{if(!afterCommit&&typeof args[0]==='string'&&args[0].startsWith('UPDATE atarasy_member.control SET enabled=true'))throw new Error('abort interruption');const result=await(client.query as any)(...args);if(afterCommit&&args[0]==='COMMIT')throw new Error('abort interruption');return result;};const value=Reflect.get(client,key);return typeof value==='function'?value.bind(client):value;}});}} as typeof source;
+  await expect(abortDeploymentMigration(failing,s.identity,ticket,runtime)).rejects.toThrow('abort interruption');
+  if(!afterCommit)expect(await captureDeployment(source,s.identity)).toEqual(frozen);
+  expect(await abortDeploymentMigration(source,s.identity,ticket,runtime)).toEqual({aborted:true});expect(await s.unit.run(()=>true)).toBe(true);
+ }
+});
