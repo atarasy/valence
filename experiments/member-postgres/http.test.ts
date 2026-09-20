@@ -299,7 +299,7 @@ test('digital approval uses quoted carriage and never treats a fabricated delive
 
 // Optional cross-repository contract probe: an explicitly named local Vox checkout,
 // a local transport bridge and this disposable PostgreSQL deployment. No hosted calls.
-test.skipIf(!process.env.VOX_TEST_SOURCE)('Vox service quotation reaches member preparation and signed digital decision',async()=>{
+test.skipIf(!process.env.VOX_TEST_SOURCE)('Vox service quotation and permission request reach authenticated member decisions',async()=>{
  const root=process.env.VOX_TEST_SOURCE!,s=await digitalSetup(false);
  const {createValenceClient}=await import(root+'/src/service/valenceClient.ts');
  const {createHandler}=await import(root+'/src/service/server.ts');
@@ -311,6 +311,13 @@ test.skipIf(!process.env.VOX_TEST_SOURCE)('Vox service quotation reaches member 
  try{
   ensureRole(dir,'presenter','merchant-1');ensureRole(dir,'merchant','merchant-1');
   const origin='http://127.0.0.1:'+bridge.port,handler=createHandler({keys:loadKeys(dir),valence:createValenceClient(origin,s.presenterToken),webDist:dir,origin,allowedHosts:['vox.local']});
+  const access=await handler(new Request('http://vox.local/api/access-requests',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({household:s.input.house,product:'digital-tea',product_name:'Digital tea',review_expires_at:now()+5000,access_expires_at:now()+10000})}));
+  expect(access.status).toBe(201);const review=await access.json() as any;expect(review.terms.requester).toEqual({id:'merchant-1',name:'Synthetic merchant'});
+  const memberReview=await(await s.send('/member/permissions/requests/'+review.terms.requestID)).json();expect(memberReview.digest).toBe(review.digest);
+  const granted=await(await s.send('/member/permissions/requests/'+review.terms.requestID+'/grant',{digest:review.digest})).json();expect(granted.permission.scope).toEqual(['duplicate_check']);
+  const checked=()=>handler(new Request('http://vox.local/api/access-requests/'+review.terms.requestID+'/duplicate-check',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}));
+  expect(await(await checked()).json()).toEqual({already_received:false});
+  await s.send('/member/permissions/revoke',{permission:granted.permission.id});expect((await checked()).status).toBe(404);
   const quote=()=>handler(new Request('http://vox.local/api/offers/'+s.offer.id+'/carriage-quote',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({carriage:550})}));
   const response=await quote();expect(response.status).toBe(200);const first=await response.json();expect(await(await quote()).json()).toEqual(first);
   const detail=await(await s.send('/presenter/offers/'+s.offer.id,undefined,s.presenterToken)).json();expect(detail.delivery).toBeNull();expect(detail.carriage_quote).toEqual(first);
