@@ -158,3 +158,37 @@ test('abort rolls back before commit and lost commit acknowledgement is idempote
   expect(await abortDeploymentMigration(source,s.identity,ticket,runtime)).toEqual({aborted:true});expect(await s.unit.run(()=>true)).toBe(true);
  }
 });
+
+async function commandSetup(){
+ const s=await setup(),{memberRuntimeIdentity}=await import('./config.ts');
+ const config={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1 as const,recoveryGraceDays:3,dayBoundary:'UTC' as const,maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
+ await s.unit.run(store=>{store.map('member_config').set('current',memberRuntimeIdentity(config));store.map('private_probe').set('secret',{token:'do-not-print-household-secret'});});
+ return {...s,plan:{identity:s.identity,ticket:randomUUID(),runtimeFingerprint:'b'.repeat(64),config},env:{ATARASY_MIGRATION_SOURCE_URL:url!,ATARASY_MIGRATION_TARGET_URL:targetURL.toString()}};
+}
+test('operator commands inspect freeze restore retry activate without returning private rows',async()=>{
+ const {runMigrationCommand}=await import('./migration-command.ts'),s=await commandSetup();
+ expect(await runMigrationCommand('inspect-source',s.plan,s.env)).toMatchObject({ok:true,enabled:true,phase:'unfrozen'});
+ await expect(runMigrationCommand('restore',s.plan,s.env)).rejects.toThrow();expect((await captureDeployment(source,s.identity)).sourceEnabled).toBe(true);
+ expect(await runMigrationCommand('freeze',s.plan,s.env)).toMatchObject({ok:true,enabled:false,phase:'frozen'});
+ expect(await runMigrationCommand('restore',s.plan,s.env)).toMatchObject({ok:true,restored:true,enabled:false});
+ expect(await runMigrationCommand('restore',s.plan,s.env)).toMatchObject({ok:true,restored:true});
+ expect(await runMigrationCommand('activate',s.plan,s.env)).toMatchObject({ok:true,activated:true});
+ const report=await runMigrationCommand('inspect-target',s.plan,s.env);expect(report).toMatchObject({ok:true,enabled:true,phase:'active'});expect(JSON.stringify(report)).not.toContain('do-not-print');
+});
+test('operator plan mismatch fails before freezing and abort remains explicit',async()=>{
+ const {runMigrationCommand}=await import('./migration-command.ts'),s=await commandSetup();
+ const wrong=structuredClone(s.plan);wrong.config.explorationRate=0.4;
+ await expect(runMigrationCommand('freeze',wrong,s.env)).rejects.toThrow();expect((await captureDeployment(source,s.identity)).sourceEnabled).toBe(true);
+ await runMigrationCommand('freeze',s.plan,s.env);expect(await runMigrationCommand('abort',s.plan,s.env)).toMatchObject({ok:true,aborted:true});expect((await captureDeployment(source,s.identity)).sourceEnabled).toBe(true);
+ await expect(runMigrationCommand('freeze',s.plan,{DATABASE_URL:url!})).rejects.toThrow();
+});
+test('CLI emits only bounded summaries and redacts underlying failures',async()=>{
+ const {mkdtempSync,writeFileSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),s=await commandSetup();
+ const dir=mkdtempSync(join(tmpdir(),'migration-command-')),plan=join(dir,'plan.json');writeFileSync(plan,JSON.stringify(s.plan));
+ const cli=new URL('./migration-command.ts',import.meta.url).pathname;
+ try{
+  const invoke=async(args:string[],env:Record<string,string>)=>{const child=Bun.spawn([process.execPath,cli,...args],{env:{PATH:process.env.PATH!,...env},stdout:'pipe',stderr:'pipe'});const [out,err,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);return {out,err,code};};
+  const good=await invoke(['inspect-source',plan],s.env);expect(good.code).toBe(0);expect(JSON.parse(good.out)).toMatchObject({ok:true,enabled:true});expect(good.err).toBe('');expect(good.out).not.toContain('do-not-print');expect(good.out).not.toContain(url!);
+  const bad=await invoke(['inspect-source',plan],{ATARASY_MIGRATION_SOURCE_URL:'postgres://do-not-print-password@127.0.0.1:1/missing'});expect(bad.code).toBe(1);expect(bad.out).toBe('');expect(JSON.parse(bad.err).error).toBe('migration_failed');expect(bad.err).not.toContain('do-not-print-password');expect(bad.err).not.toContain('127.0.0.1');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});

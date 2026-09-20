@@ -108,3 +108,5 @@ Measured after the deploy: `/auth/session` 401, `/auth/login/options` 200 with a
 ## Operational snapshot candidate
 
 [Same-deployment snapshots](OPERATIONAL_SNAPSHOT.md) now preserve all PostgreSQL deployment rows and restore into an absent, disabled candidate with matching schema. They retain digital operation history, incarnation heads and passkey counters. Atomic source freeze now issues a durable ticket and final snapshot; target binding and retire-before-enable activation are implemented and tested with interruption recovery. Abort-before-retirement and subsequent moves with retained history are implemented; routing, operator transport and deployment acceptance remain open.
+
+[Operator migration commands](MIGRATION_COMMAND.md) expose inspection, freeze, in-memory restoration, activation and abort through an explicit plan and dedicated connection environment. They verify persisted runtime configuration and emit redacted summaries; routing and deployed binary attestation remain separate.
