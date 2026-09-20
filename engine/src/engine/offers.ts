@@ -1,3 +1,4 @@
+import { verifyMemberWithdrawal, type MemberWithdrawalEnvelope, type MemberWithdrawalScope } from '../shared/member-withdrawal.js';
 import { verifyMemberDecision, type MemberDecisionEnvelope, type MemberDecisionScope } from '../shared/member-decision.js';
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
@@ -89,6 +90,7 @@ export type EngineConfig = {
   memberStatementScope?: MemberStatementScope;
   /** Deployment-bound authenticated digital decisions; absent means disabled. */
   memberDecisionScope?: MemberDecisionScope;
+  memberWithdrawalScope?: MemberWithdrawalScope;
   /**
    * §16.3. Where the deployment puts the start of a household's day, for the
    * daily ceiling. The specification does not name one: a household's day
@@ -521,7 +523,14 @@ export class ValenceEngine {
         throw new Error('Invalid member decision deployment scope');
       }
     }
-    this.config = { ...config, ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }),
+    const withdrawalScope = config.memberWithdrawalScope;
+    if (withdrawalScope !== undefined) {
+      const origin = new URL(withdrawalScope.origin);
+      if (Object.keys(withdrawalScope).sort().join(',') !== 'environment,origin' || typeof withdrawalScope.environment !== 'string' || !withdrawalScope.environment || origin.protocol !== 'https:' || origin.origin !== withdrawalScope.origin || origin.hostname !== config.relyingPartyId) {
+        throw new Error('Invalid member withdrawal deployment scope');
+      }
+    }
+    this.config = { ...config, ...(withdrawalScope === undefined ? {} : { memberWithdrawalScope: Object.freeze({ ...withdrawalScope }) }), ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }),
       ...(decisionScope === undefined ? {} : { memberDecisionScope: Object.freeze({ ...decisionScope }) }) };
     Object.freeze(this.config);
   }
@@ -1374,7 +1383,32 @@ export class ValenceEngine {
    * theirs alone and needs no co-signer: withdrawing removes a commitment, and
    * every rule about second signatures is about adding one.
    */
+  memberWithdrawalReview(offerId: string, now = Date.now()): { offer: string; decidedAt: number; decisionRevision: string; canonical: string } {
+    const offer = this.mustGet(offerId, now), confirmations = this.confirmations.get(offerId) ?? [];
+    if (offer.binding !== 'digital' || offer.state !== 'decided' || offer.decided_at === null || !confirmations.length || this.settlements.has(offerId)) {
+      throw conflict('not_withdrawable', 'a signed unsettled digital decision is required');
+    }
+    // A new assertion appends to the retained confirmation register even if
+    // the same choices are decided again in the very same millisecond.
+    const decisionRevision = createHash('sha256').update(JSON.stringify([
+      'valence.member-decision-generation.1', offer.id, offer.decided_at,
+      offer.candidates.map(c => [c.id, c.valence, c.kept_as, c.lineage, c.decided_at]), confirmations
+    ])).digest('hex');
+    const canonical = ['valence.member-withdrawal.1', offer.id, String(offer.decided_at), decisionRevision].join('\n');
+    return { offer: offer.id, decidedAt: offer.decided_at, decisionRevision, canonical };
+  }
+
+  /** The deployment adapter supplies the complete envelope, never a verification boolean. */
+  async withdrawMember(envelope: MemberWithdrawalEnvelope, assertion: Assertion, now = Date.now()): Promise<Offer> {
+    const fixed = structuredClone(envelope), proof = structuredClone(assertion);
+    return this.withdrawDecisionsInternal(fixed.offer, { assertion: proof }, now, fixed);
+  }
+
   async withdrawDecisions(offerId: string, sent: PersonalSignature, now = Date.now()): Promise<Offer> {
+    return this.withdrawDecisionsInternal(offerId, structuredClone(sent), now);
+  }
+
+  private async withdrawDecisionsInternal(offerId: string, sent: PersonalSignature, now: number, memberEnvelope?: MemberWithdrawalEnvelope): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "decided") {
       throw conflict("bad_state", `cannot withdraw decisions on an offer in ${offer.state}`);
@@ -1436,7 +1470,11 @@ export class ValenceEngine {
     if (!householdKey) {
       throw unprocessable("unsigned", `no key is registered for the household of mandate ${offer.mandate}`);
     }
-    if (!verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId)) {
+    const withdrawalCovered = memberEnvelope
+      ? 'assertion' in sent && verifyMemberWithdrawal(memberEnvelope, sent.assertion, householdKey,
+          this.config.memberWithdrawalScope, this.config.relyingPartyId, this.memberWithdrawalReview(offerId, now).canonical, offer, now)
+      : verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId);
+    if (!withdrawalCovered) {
       throw unprocessable("bad_signature", "the signature does not cover taking this set back");
     }
     // §16.5, question 47, decided 2026-09-15. **A box past its expiry cannot
