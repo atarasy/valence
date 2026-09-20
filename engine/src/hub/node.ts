@@ -1,3 +1,4 @@
+import type { CarriageQuote, CarriageQuotes } from "./carriage-quote.js";
 import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { FixedProtections, ValenceEngine } from "../engine/offers.js";
@@ -49,7 +50,8 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * none, and its decided sets arrive with no record, which is what they did
  * before the field existed.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/8";
+// /9 adds immutable digital quotations; older readers must not silently drop them.
+export const EXPORT_FORMAT_VERSION = "valence-node/9";
 
 export type NodeExport = {
   format: string;
@@ -122,6 +124,7 @@ export type NodeExport = {
   mandates: Mandate[];
   /** §7.5b. Carriage and where each parcel is. The person's side of clause 49. */
   deliveries: Delivery[];
+  carriage_quotes: CarriageQuote[];
 };
 
 export type RecoveryRecord = {
@@ -233,7 +236,8 @@ export function exportNode(
   mandates: MandateRegister,
   deliveries: DeliveryRegister,
   household: string,
-  now = Date.now()
+  now = Date.now(),
+  quotes?: CarriageQuotes
 ): NodeExport {
   // Clause 43, §13.2. The person's own copy first: on a deployment presenting
   // the hub alone there is no engine store to read, and an export built from
@@ -274,6 +278,7 @@ export function exportNode(
     // a claim, whichever it was here, which is what makes the semantics uniform
     // rather than a thing a relay can lie about.
     mandates: [...mandates.forHousehold(household), ...mandates.claimsFor(household)],
+    carriage_quotes: quotes?.forOffers(offers.map(o => o.id)) ?? [],
     deliveries: deliveries.forHousehold(offers.map((o) => o.id)),
   };
 }
@@ -286,16 +291,7 @@ export function exportNode(
  * content moved, and only asking each surface says the answers did.
  */
 export function digest(node: NodeExport): string {
-  const stable = {
-    format: node.format,
-    household: node.household,
-    offers: node.offers,
-    settlements: node.settlements,
-    notes: node.notes,
-    lineage: node.lineage,
-    receipts: node.receipts,
-    recoveries: node.recoveries,
-  };
+  const { exported_at: _time, ...stable } = node;
   return createHash("sha256").update(JSON.stringify(stable)).digest("hex");
 }
 

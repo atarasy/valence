@@ -1,3 +1,4 @@
+import { CarriageQuotes } from '../../engine/src/hub/carriage-quote.ts';
 import { validateNodeImport, validateArchiveDependencies } from './node-import.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { ValenceEngine } from '../../engine/src/engine/offers.ts';
@@ -59,7 +60,7 @@ export function openLocalHTTP(path: string, options: Policy) {
             return await unit.run(async store => {
               const registry = new Registry(store), ledger = new InMemoryLedger(store);
               const engine = new ValenceEngine(ledger, { explorationRate: p.explorationRate, reminderLimit: p.reminderLimit, recoveryGraceDays: p.recoveryGraceDays, relyingPartyId: p.rpID, isInNetwork: merchant => { try { registry.resolve(merchant); return true; } catch { return false; } } }, store);
-              const hub = { registry, recovery: new RecoveryRegister(store), approvals: new ApprovalDesk(store), permissions: new PermissionLedger(store), deliveries: new DeliveryRegister(store) };
+              const hub = { registry, recovery: new RecoveryRegister(store), approvals: new ApprovalDesk(store), permissions: new PermissionLedger(store), quotes: new CarriageQuotes(store), deliveries: new DeliveryRegister(store) };
               engine.readDeliveriesFrom(new LocalDeliveries(hub.deliveries));
               if (archive) validateArchiveDependencies(archive, engine);
               const response = await createApp(engine, hub)(fixed);

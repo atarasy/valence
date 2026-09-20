@@ -90,3 +90,17 @@ test('decision protections survive an archive and cannot name an unrelated offer
   const previous = structuredClone(s.node); previous.format = 'valence-node/7'; delete previous.decided_protections;
   expect(validateNodeImport(previous, HOUSE).decided_protections).toEqual({});
 });
+
+test('quotation archives require the new register and bind every quote to a digital offer', async () => {
+  const s = await fixture();
+  expect(s.node.format).toBe('valence-node/9');
+  expect(s.node.carriage_quotes).toEqual([]);
+  const legacy = structuredClone(s.node); legacy.format = 'valence-node/8'; delete legacy.carriage_quotes;
+  expect(validateNodeImport(legacy, HOUSE).carriage_quotes).toEqual([]);
+  const absent = structuredClone(s.node); delete absent.carriage_quotes;
+  expect(() => validateNodeImport(absent, HOUSE)).toThrow();
+  for (const quote of [{offer:s.node.offers[0].id,carriage:0,quoted_at:0},{offer:'foreign',carriage:1,quoted_at:1}]) {
+    const changed = structuredClone(s.node); changed.carriage_quotes = [quote];
+    expect(() => validateNodeImport(changed, HOUSE)).toThrow();
+  }
+});

@@ -61,7 +61,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     const fixed=new Request(request.url,{method:request.method,headers:request.headers,...(bytes===undefined?{}:{body:bytes})});
     const result=await unit.run(async store=>{
      binding(store);const r=memberRuntime(store,c,now);
-     if(presenter)return presenterRequest(r,{deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
+     if(presenter)return presenterRequest(r,{quotes:r.quotes,deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
      if(member){
       if(url.search)return {status:404,body:JSON.stringify({error:'operation_unavailable'})};
       const action=mandate?('mandate-'+mandate[1]):(prepare||digital||withdrawal)?'prepare':match![2]??'review',method=['review','outcome'].includes(action)?'GET':'POST';
@@ -98,7 +98,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
       const value=await (action==='prepare'?api.prepare(token,inputBody as {offer:string;disputed:string[]}):action==='review'?api.read(token,match![1]!):action==='outcome'?api.outcome(token,match![1]!):action==='cancel'?api.cancel(token,match![1]!):api.settle(token,match![1]!,(inputBody as {assertion:PreparedAssertion}).assertion));
       return {status:200,body:JSON.stringify(value)};
      }
-     const hub={deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)};
+     const hub={quotes:r.quotes,deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)};
      const read=memberReadBoundary({environment:c.environment,origin:c.origin,now,resolveSession:r.authority.resolveSession,ownerOf:async resource=>{
       let owner:{household:string;presenter?:string};try{if(resource.kind==='offer'){const o=r.engine.mustGet(resource.id);owner={household:o.household,presenter:o.presenter};}else owner={household:r.engine.mandates.mustGet(resource.id).household};}catch{r.authority.invalidateResource(resource);return;}
       try{r.authority.bindResource(resource,owner);}catch{r.authority.invalidateResource(resource);return;}return r.authority.ownerOf(resource);

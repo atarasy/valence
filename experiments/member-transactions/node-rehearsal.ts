@@ -1,3 +1,4 @@
+import { CarriageQuotes } from '../../engine/src/hub/carriage-quote.ts';
 import { databaseFor } from './shared-database.ts';
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
@@ -18,7 +19,7 @@ export function archiveDigest(node: unknown) { const { exported_at: _time, ...co
 type Policy = Parameters<typeof openLocalHTTP>[1];
 function exported(store: Store, p: Policy, household: string, at: number) {
   const engine = new ValenceEngine(new InMemoryLedger(store), { explorationRate: p.explorationRate, reminderLimit: p.reminderLimit, recoveryGraceDays: p.recoveryGraceDays, relyingPartyId: p.rpID }, store);
-  const node = validateNodeImport(exportNode(engine, new RecoveryRegister(store), new PermissionLedger(store), engine.mandates, new DeliveryRegister(store), household, at), household);
+  const node = validateNodeImport(exportNode(engine, new RecoveryRegister(store), new PermissionLedger(store), engine.mandates, new DeliveryRegister(store), household, at, new CarriageQuotes(store)), household);
   for (const o of node.offers) {
     const config = engine.configsForPresenter(o.presenter).find(c => c.version === o.config_version);
     if (!config || o.candidates.some(c => { const p = config.products[c.product]; return !p || p.price !== c.unit_price || p.merchant !== c.merchant || p.maker !== c.maker || p.ships !== c.ships; })) throw new Error('Archive catalogue mismatch');

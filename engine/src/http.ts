@@ -1,3 +1,4 @@
+import type { CarriageQuotes } from "./hub/carriage-quote.js";
 import { isDeepStrictEqual } from "node:util";
 import { type Mandate } from "./hub/mandates.js";
 import { challengeForGift } from "./shared/gift.js";
@@ -153,6 +154,7 @@ export type Hub = {
   registry: Registry;
   /** §7.5b. Carriage and where the parcel is, on the person's side of clause 49. */
   deliveries: DeliveryRegister;
+  quotes?: CarriageQuotes;
 };
 
 /**
@@ -257,13 +259,13 @@ const MERGED_KEYS = [["receipts", "ref"], ["recoveries", "id"], ["permissions", 
 /** §14. The field each keyed list is stored under, which a store binds as its key. */
 const ROW_KEYS = [
   ["offers", "id"], ["settlements", "offer"], ["notes", "candidate"], ["lineage", "id"],
-  ["collections", "offer"], ["mandates", "id"], ["deliveries", "offer"],
+  ["collections", "offer"], ["mandates", "id"], ["deliveries", "offer"], ["carriage_quotes", "offer"],
 ] as const;
 
 /** §14. The fields of a node export that hold lists, each written row by row. */
 const LISTS_A_NODE_CARRIES = [
   "offers", "settlements", "notes", "lineage", "receipts", "recoveries",
-  "collections", "permissions", "queries", "mandates", "deliveries", "payments",
+  "collections", "permissions", "queries", "mandates", "deliveries", "payments", "carriage_quotes",
 ] as const;
 
 async function route(
@@ -1314,7 +1316,7 @@ async function route(
       // decided, or one that expired, moves as finished rather than staying
       // behind its reserve.
       await engine.settleWhatOwesNothing(household);
-      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, household));
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, household, Date.now(), hub.quotes));
     }
   }
 
@@ -1328,9 +1330,14 @@ async function route(
       // /6; an offer it does not name reads as unconfirmed (question 50).
       // A /6 export predates question 61 and carries no `payments` and no
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
+      if (body_.format === EXPORT_FORMAT_VERSION && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
+      const arrivingQuotes = body_.carriage_quotes ?? [];
+      if (!Array.isArray(arrivingQuotes)) throw badRequest("malformed", "carriage_quotes must be a list");
+      if (arrivingQuotes.length && !hub.quotes) throw unprocessable("unsupported_carriage_quotes", "this host cannot retain digital quotations");
+      hub.quotes?.checkRows(arrivingQuotes);
       const moving = segment(parts[1]);
       // §13.2, question 55. The identifier on the path is a household's key,
       // and every offer and mandate this body carries names a mandate of that
@@ -1454,6 +1461,7 @@ async function route(
       // box was refused there for good. **The block is per host now**, which is
       // the cost of this shape: a presenter can deliver at the new host while
       // an unsigned statement waits at the old one.
+      for (const quote of arrivingQuotes) if (!(body_.offers ?? []).some(o => o.id === quote.offer && o.binding === "digital")) throw unprocessable("unscoped_carriage_quote", "a quotation must name a carried digital offer");
       const collectionOf = new Map((body_.collections ?? []).map((c) => [c.offer, c]));
       const leftBehind = (body_.offers ?? []).filter((o) => moneyStillToMove(o, collectionOf.get(o.id))).map((o) => o.id);
       if (leftBehind.length) {
@@ -1463,6 +1471,7 @@ async function route(
         body_.settlements = (body_.settlements ?? []).filter((r) => !behind.has(r.offer));
         body_.collections = (body_.collections ?? []).filter((r) => !behind.has(r.offer));
         body_.deliveries = (body_.deliveries ?? []).filter((r) => !behind.has(r.offer));
+        body_.carriage_quotes = arrivingQuotes.filter(r => !behind.has(r.offer));
         body_.notes = (body_.notes ?? []).filter((r) => !behindCandidates.has(r.candidate));
         if (body_.confirmations) for (const id of leftBehind) delete body_.confirmations[id];
         if (body_.decided_protections) for (const id of leftBehind) delete body_.decided_protections[id];
@@ -1501,6 +1510,7 @@ async function route(
       // status moves as the parcel does, so only the carriage the household
       // was shown and the code are compared, and the host keeps its own row.
       const alreadyHere = new Set((body_.offers ?? []).filter((o) => engine.alreadyCarried(o)).map((o) => o.id));
+      for (const quote of body_.carriage_quotes ?? []) if (alreadyHere.has(quote.offer) && !isDeepStrictEqual(hub.quotes?.find(quote.offer), quote)) throw conflict("bad_state", "a carried offer cannot acquire a quotation by re-import");
       if (alreadyHere.size) {
         const heldCandidates = new Set((body_.offers ?? []).filter((o) => alreadyHere.has(o.id)).flatMap((o) => o.candidates.map((c) => c.id)));
         const differs = (what: string, id: string) =>
@@ -1670,6 +1680,7 @@ async function route(
         permissions.importFor(moving, body_.permissions ?? [], body_.queries ?? []);
         for (const m of body_.mandates ?? []) if (taken.has(m.id)) engine.mandates.importMandate(m);
         deliveries.importRows(body_.deliveries ?? []);
+        hub.quotes?.importRows(body_.carriage_quotes ?? []);
       });
       // Question 61. A gift this household pays for stays where its reserve
       // is, as its own offers do, and the answer names it with them.
