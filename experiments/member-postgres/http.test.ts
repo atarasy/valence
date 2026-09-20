@@ -492,3 +492,30 @@ test('historical decision without generation metadata still reads but cannot inv
  expect(await(await s.send('/member/operations/'+s.decision.operationID+'/outcome')).json()).toEqual(s.decided);
  expect((await s.prepareWithdrawal()).status).toBe(404);
 });
+
+test('disabled snapshot candidate preserves digital withdrawal history, successor review and passkey counter',async()=>{
+ const {captureDeployment,restoreDeploymentCandidate}=await import('./operational-snapshot.ts');
+ const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json();
+ const withdrawal=await(await s.send('/member/operations/'+w.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).json();
+ expect(withdrawal.operationState).toBe('committed');
+ const next=await(await s.prepare()).json(),snapshot=await captureDeployment(pool,s.identity);
+ const db='snapshot_http_'+randomUUID().replaceAll('-',''),destinationURL=new URL(url!);destinationURL.pathname='/'+db;
+ await pool.query(`CREATE DATABASE "${db}"`);const destination=createPool(destinationURL.toString());
+ try{
+  await migrateDatabase(destinationURL.toString());await restoreDeploymentCandidate(destination,snapshot,s.identity);
+  expect((await captureDeployment(destination,s.identity)).rows).toEqual(snapshot.rows);
+  await expect(postgresStore(destination,s.identity).run(()=>null)).rejects.toThrow('fenced');
+  // Synthetic rehearsal only: stop the fixture source before enabling its exact clone.
+  await pool.query('UPDATE atarasy_member.control SET enabled=false WHERE id=$1',[s.identity.id]);
+  await destination.query('UPDATE atarasy_member.control SET enabled=true WHERE id=$1',[s.identity.id]);
+  const app=await openPostgresMemberHTTP(destination,s.identity,s.c,now);
+  const send=(path:string,body?:unknown)=>app.fetch(s.request(path,body,s.grant.token),{peer:'snapshot-target'});
+  expect(await(await send('/member/operations/'+s.decision.operationID+'/outcome')).json()).toEqual(s.decided);
+  expect(await(await send('/member/operations/'+w.operationID+'/outcome')).json()).toEqual(withdrawal);
+  expect(await(await send('/member/operations/'+next.operationID)).json()).toEqual(next);
+  const path='/member/operations/'+next.operationID+'/submit';
+  expect((await send(path,{assertion:loginResponse(s.pair,s.input.credential,s.user,next.publicKey.challenge,4)})).status).toBe(404);
+  expect((await send(path,{assertion:loginResponse(s.pair,s.input.credential,s.user,next.publicKey.challenge,5)})).status).toBe(200);
+  await postgresStore(destination,s.identity).run(store=>{const r=memberRuntime(store,s.c,now);expect(r.journal.currentIncarnation(s.offer.id)).toBe(1);expect(r.quotes.find(s.offer.id)?.carriage).toBe(550);});
+ }finally{await destination.end();await pool.query(`DROP DATABASE "${db}" WITH (FORCE)`);}
+});

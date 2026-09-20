@@ -104,3 +104,7 @@ Measured after the deploy: `/auth/session` 401, `/auth/login/options` 200 with a
 ## Physical-device acceptance preparation
 
 [Trusted operator procedure](deployment/DEVICE_ACCEPTANCE.md) prepares a separate authentication-only test account. Its helpers are absent from the deployed HTTP entry. **Since 2026-09-16 the `statement` step does create a real household and a real mandate**, because a household's identifier is now the name of a key and the key is the device's own passkey. Preparation itself still creates neither: the principal it makes has no household until that step. The sentence that used to stand here said the flow created neither at all, and was left behind by question 55. See `device-acceptance.test.ts` for the isolated public-registration verification.
+
+## Operational snapshot candidate
+
+[Same-deployment snapshots](OPERATIONAL_SNAPSHOT.md) now preserve all PostgreSQL deployment rows and restore into an absent, disabled candidate with matching schema. They retain digital operation history, incarnation heads and passkey counters. Writer cutover, routing and activation remain separate unimplemented operations.
