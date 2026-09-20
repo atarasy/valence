@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { tightestDailyCeiling } from "../src/engine/mandate-source.js";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift, withdrawSigned} from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { canonicalConfig } from "../src/engine/offers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
@@ -250,7 +250,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     engine.readMandatesFrom(cooling(3600));
     const offer = await collected(made);
     const [coffee, tea, nori] = offer.candidates;
-    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await expect(withdrawSigned(engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     // The box is as it was, so the household can still sign its statement.
     const after = engine.mustGet(offer.id);
     expect(after.state).toBe("decided");
@@ -270,7 +270,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(offer.id);
     await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
-    const taken = await engine.withdrawDecisions(offer.id);
+    const taken = await withdrawSigned(engine, offer.id);
     for (const c of taken.candidates) expect(c.valence).toBe("offered");
   });
 
@@ -291,7 +291,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     const [used, returned, kept] = offer.candidates;
     await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
     await engine.collect({ offer: offer.id, consumed: [used!.id], returned: [returned!.id], at: Date.now() });
-    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await expect(withdrawSigned(engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     // The box stays decided and settleable, so the consumed line is charged.
     expect(engine.mustGet(offer.id).state).toBe("decided");
     const settlement = await settleSigned(engine, offer.id);

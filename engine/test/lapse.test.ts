@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "../src/common/store.js";
 import { MAX_COOLING_SECONDS, MAX_LAPSE_MS, canonicalMandate, type Mandate } from "../src/hub/mandates.js";
-import { canonicalDecisions } from "../src/shared/decisions.js";
+import { canonicalDecisions, canonicalWithdrawal } from "../src/shared/decisions.js";
 import { LocalMandates } from "../src/engine/mandate-source.js";
-import { CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, otherHousehold, settleSigned } from "./helpers.js";
+import { CONFIG_VERSION, GIFT_GIVER, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, otherHousehold, presentGift, settleSigned, withdrawSigned } from "./helpers.js";
 
 /**
  * §16.1, §16.3, §16.5. The lapse, as the first refutation pass over question
@@ -211,7 +211,7 @@ describe("§16.3, §16.5: a decided set keeps what it was decided under", () => 
     const { engine, T, big, small } = await decidedUnder({ ceiling_daily: 500, cooling_seconds: 86_400 }, 60_000);
     const after = T + 61_000;
     await expect(engine.settle(small.id, after)).rejects.toMatchObject({ code: "mandate_cooling" });
-    expect((await engine.withdrawDecisions(big.id, after)).state).toBe("presented");
+    expect((await withdrawSigned(engine, big.id, after)).state).toBe("presented");
   });
 
   test("nor when the co-signer agrees to bring the lapse forward", async () => {
@@ -219,7 +219,7 @@ describe("§16.3, §16.5: a decided set keeps what it was decided under", () => 
     record(engine, { ...one, lapses_at: T + 10_000, version: 2 }, T + 3, true);
     const after = T + 11_000;
     await expect(engine.settle(small.id, after)).rejects.toMatchObject({ code: "mandate_cooling" });
-    expect((await engine.withdrawDecisions(big.id, after)).state).toBe("presented");
+    expect((await withdrawSigned(engine, big.id, after)).state).toBe("presented");
   });
 
   test("a lapse does not remove the daily ceiling of a set decided under it", async () => {
@@ -439,5 +439,81 @@ describe("§16.1: a protection is a whole number and never below zero", () => {
     // Past the bound the window is over, and the negative ceiling is read as
     // zero, which is the tightest protection and not the absence of one.
     await expect(engine.settle(o.id, T + window + 1)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+  });
+});
+
+describe("§16.5: a signed set is taken back by a signature over taking it back", () => {
+  test("a caller holding the offer id cannot turn a written refusal into a purchase", async () => {
+    // NOTE (mutation check, 2026-09-20): withdraw_takes_any_caller. The
+    // unsigned take-back succeeded, the expiry defaulted the line the
+    // recipient had refused, and the giver was charged 1,200.
+    //
+    // The third refutation pass over question 68, its finding 2, and the
+    // thing nobody had listed in three passes. Each half was known and
+    // correct: §16.1 says taking a set back asks for no signature, because
+    // withdrawing removes a commitment; §16.5 now makes the window the
+    // longest across every mandate the household holds. The join is that the
+    // window is the interval in which the unsigned route is open, so
+    // question 68 lengthened it. On `main` the same attack is refused
+    // `bad_state`, because there the window came from the label the offer
+    // names and had closed.
+    const T = Date.now();
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    const base = { ceiling_out_of_network: 10_000_000 };
+    // The gift names `.1`, which sets no window. `.2` is a second label the
+    // household recorded alone, with the longest window §16.5 allows.
+    record(engine, mandate("1", base, T), T);
+    record(engine, mandate("2", { ...base, cooling_seconds: MAX_COOLING_SECONDS }, T), T);
+
+    const gift = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+      expires_at: T + 2 * DAY, mandate: `${HOUSEHOLD}.1`, price_band: { min: 0, max: 10_000_000 },
+      giver: GIFT_GIVER.household,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await presentGift(engine, gift.id, T);
+    const decisions = engine.mustGet(gift.id, T).candidates.map((c) => ({ candidate: c.id, valence: "returned" as const }));
+    await engine.decide(gift.id, decisions, sign(null, canonicalDecisions(gift.id, decisions), MANDATE_PAIR.privateKey).toString("base64"), T);
+    // It owes nothing, so §6.4 would settle it at once; the second label's
+    // window holds it in `decided` instead, which is what gives the attack
+    // its five days.
+    expect(engine.mustGet(gift.id, T).state).toBe("decided");
+
+    const five = T + 5 * DAY;
+    await expect(engine.withdrawDecisions(gift.id, { signature: "" }, five))
+      .rejects.toMatchObject({ code: "bad_signature" });
+    // A signature over another offer's withdrawal is not this one's either.
+    const elsewhere = sign(null, Buffer.from(["valence.withdraw.1", "offer-elsewhere", String(T)].join("\n")), MANDATE_PAIR.privateKey).toString("base64");
+    await expect(engine.withdrawDecisions(gift.id, { signature: elsewhere }, five))
+      .rejects.toMatchObject({ code: "bad_signature" });
+
+    // So the refusal stands past the expiry, and the giver pays for nothing.
+    engine.sweep(five);
+    expect(engine.mustGet(gift.id, five).candidates.map((c) => c.valence)).toEqual(["returned"]);
+    // Past the second label's window, the refusal settles at nothing.
+    const after = T + MAX_COOLING_SECONDS * 1_000 + 1;
+    expect((await engine.settle(gift.id, after)).charged).toBe(0);
+    expect(engine.paymentsBy(GIFT_GIVER.household).map((p) => p.charged)).toEqual([0]);
+  });
+
+  test("the household's own take-back still works, and a re-decision needs its own", async () => {
+    const T = Date.now();
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    record(engine, mandate("1", { ceiling_out_of_network: 10_000_000, cooling_seconds: 86_400 }, T), T);
+    const o = offer(engine, `${HOUSEHOLD}.1`, T);
+    await engine.present(o.id, T);
+    await keep(engine, o.id, T);
+    const taken = await withdrawSigned(engine, o.id, T + 60_000);
+    expect(taken.state).toBe("presented");
+
+    // The moment of the decision is inside the signed bytes, so the
+    // signature that took the first set back does not take the second back.
+    const spent = sign(null, canonicalWithdrawal(o.id, T), MANDATE_PAIR.privateKey).toString("base64");
+    // A different set, because §10.5 spends a confirmation once.
+    const again = engine.mustGet(o.id, T + 120_000).candidates.map((c) => ({ candidate: c.id, valence: "returned" as const }));
+    await engine.decide(o.id, again, sign(null, canonicalDecisions(o.id, again), MANDATE_PAIR.privateKey).toString("base64"), T + 120_000);
+    await expect(engine.withdrawDecisions(o.id, { signature: spent }, T + 180_000))
+      .rejects.toMatchObject({ code: "bad_signature" });
+    expect((await withdrawSigned(engine, o.id, T + 180_000)).state).toBe("presented");
   });
 });

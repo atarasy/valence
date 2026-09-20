@@ -6,6 +6,7 @@ import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
 import { canonicalDisclosure } from "../src/shared/disclosure.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
+import { canonicalWithdrawal } from "../src/shared/decisions.js";
 import { canonicalGift } from "../src/shared/gift.js";
 import { DeliveryRegister } from "../src/hub/delivery.js";
 import { LocalDeliveries } from "../src/engine/delivery-source.js";
@@ -76,6 +77,23 @@ export async function settleSigned(
   const carried = await engine.deliveryFor(offerId);
   const signature = sign(null, canonicalStatement(offerId, carried ? carried.carriage : 0, lines), MANDATE_PAIR.privateKey).toString("base64");
   return await engine.settle(offerId, now, { signed: { signature }, disputed });
+}
+
+/**
+ * §16.5, decided 2026-09-20. Take a signed set back, signed. The route asked
+ * for nothing until the third refutation pass over question 68 measured a
+ * caller holding nothing but an offer id voiding a recipient's written
+ * refusal of a gift, after which §12's expiry charged the giver.
+ */
+export async function withdrawSigned(
+  engine: ValenceEngine,
+  offerId: string,
+  now = Date.now(),
+  key = MANDATE_PAIR.privateKey
+) {
+  const offer = engine.mustGet(offerId, now);
+  const bytes = canonicalWithdrawal(offerId, offer.decided_at ?? 0);
+  return await engine.withdrawDecisions(offerId, { signature: sign(null, bytes, key).toString("base64") }, now);
 }
 
 export const CONFIG_VERSION = "cfg-1";

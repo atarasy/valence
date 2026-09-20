@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, houseFor, makeEngine, presentGift } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, decideSigned, houseFor, makeEngine, presentGift, withdrawSigned} from "./helpers.js";
 import { canonicalMandate } from "../src/hub/mandates.js";
 import { canonicalGift } from "../src/shared/gift.js";
 import { householdOfMandate, isHouseholdName, nameOf } from "../src/common/names.js";
@@ -281,7 +281,7 @@ describe("§14.2, question 57: a move carries what happened", () => {
     // once since question 62, and a settled set is not taken back at all.
     await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })) as never);
     (engine as unknown as { confirmations: Map<string, string[]> }).confirmations.delete(offer.id);
-    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await expect(withdrawSigned(engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     expect(engine.mustGet(offer.id).state).toBe("decided");
   });
 

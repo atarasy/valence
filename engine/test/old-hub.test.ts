@@ -11,8 +11,7 @@ import { RemoteMandates } from "../src/engine/mandate-source.js";
 import { canonicalMandate, type Mandate } from "../src/hub/mandates.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import {
-  CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, presentGift, settleSigned,
-} from "./helpers.js";
+  CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, presentGift, settleSigned, withdrawSigned} from "./helpers.js";
 
 /**
  * §16.3, §16.5, decided 2026-09-20 after the second refutation pass over
@@ -218,7 +217,7 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     await expect(s.engine.settle(own.id, s.T + 86_400_001)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
     // And the take-back 61 seconds into a day-long window, which the pass
     // measured refused `no_cooling`.
-    expect((await s.engine.withdrawDecisions(back.id, s.T + 61_000)).state).toBe("presented");
+    expect((await withdrawSigned(s.engine, back.id, s.T + 61_000)).state).toBe("presented");
   });
 
   test("a household this host has never read cannot decide, and that is what the rule costs", async () => {

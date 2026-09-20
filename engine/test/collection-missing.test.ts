@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, settleSigned } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, settleSigned, withdrawSigned} from "./helpers.js";
 import { needsStatement, statementLines } from "../src/shared/statement.js";
 import { renderStatement } from "../src/hub/statement.js";
 import { MISSING_NOTE_LIMIT } from "../src/engine/physical.js";
@@ -286,7 +286,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     });
     // A collection fixes what is in the home; the missing line and the kept
     // line stay as the collection left them, and the recourse is the statement.
-    await expect(made.engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await expect(withdrawSigned(made.engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     expect(made.engine.mustGet(offer.id).candidates.map((c) => c.valence)).toEqual(["lost", "returned", "kept"]);
   });
 
@@ -345,11 +345,11 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     };
     // Before the expiry the window means what it says.
     const early = await signedBox(HOUSEHOLD);
-    await expect(early.made.engine.withdrawDecisions(early.offer.id)).resolves.toMatchObject({ state: "presented" });
+    await expect(withdrawSigned(early.made.engine, early.offer.id)).resolves.toMatchObject({ state: "presented" });
     // At the expiry, inside the grace and after it, the set stands.
     const { made, offer: late } = await signedBox(HOUSEHOLD);
     for (const at of [late.expires_at, late.expires_at + DAY, late.expires_at + 10 * DAY]) {
-      await expect(made.engine.withdrawDecisions(late.id, at)).rejects.toMatchObject({ code: "not_withdrawable" });
+      await expect(withdrawSigned(made.engine, late.id, at)).rejects.toMatchObject({ code: "not_withdrawable" });
     }
     const after = made.engine.mustGet(late.id, late.expires_at + 10 * DAY);
     expect(after.state).toBe("decided");

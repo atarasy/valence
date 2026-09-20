@@ -125,6 +125,11 @@ function offerView(o: Offer, recovery: Recovery | undefined) {
     presented_at: o.presented_at,
     expires_at: o.expires_at,
     state: o.state,
+    // §16.5, decided 2026-09-20. **The moment the set was decided**, which the
+    // window runs from and which a withdrawal is signed over. It was not on
+    // this surface, and taking a set back asked for no signature, so nothing
+    // needed it; a member's client cannot sign for a moment it cannot read.
+    decided_at: o.decided_at,
     exploration_floor_met: o.exploration_floor_met,
     mandate: o.mandate,
     candidates: o.candidates.map((c) => candidateView(c, recovery)),
@@ -651,9 +656,40 @@ async function route(
           view(await engine.decide(id, decisions, confirmation))
         );
       }
-      // §16.5. The person takes back a signed set inside its cooling window.
+      // §16.5. The person takes back a signed set inside its cooling window,
+      // **and signs for doing it** (decided 2026-09-20, after the third
+      // refutation pass over question 68). The route took no body at all, so
+      // whoever held the offer id could void a decision the household had
+      // signed; the pass turned a recipient's written refusal of a gift into
+      // a 1,200 charge to its giver that way.
       if (method === "DELETE" && action === "decisions") {
-        return json(view(await engine.withdrawDecisions(id)));
+        const raw = strict(await body(request), ["signature", "assertion"], "withdrawal");
+        const hasSignature = raw.signature !== undefined;
+        const hasAssertion = raw.assertion !== undefined;
+        if (hasSignature === hasAssertion) {
+          throw badRequest(
+            "malformed",
+            "taking a set back carries a signature or an assertion, and not both"
+          );
+        }
+        let sent: PersonalSignature;
+        if (hasSignature) {
+          sent = { signature: requireString(raw, "signature", "withdrawal") };
+        } else {
+          const a = strict(
+            raw.assertion,
+            ["authenticator_data", "client_data_json", "signature"],
+            "assertion"
+          );
+          sent = {
+            assertion: {
+              authenticator_data: requireString(a, "authenticator_data", "assertion"),
+              client_data_json: requireString(a, "client_data_json", "assertion"),
+              signature: requireString(a, "signature", "assertion"),
+            },
+          };
+        }
+        return json(view(await engine.withdrawDecisions(id, sent)));
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.

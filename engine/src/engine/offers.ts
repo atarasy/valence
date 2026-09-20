@@ -9,6 +9,7 @@ import { canonicalStatement, disputable, needsStatement, owesSettlement, stateme
 import { canonicalGift, type GiftTerms } from "../shared/gift.js";
 import {
   canonicalDecisions,
+  canonicalWithdrawal,
   confirmationToken,
   verifyBy,
   verifyDecisions,
@@ -1337,7 +1338,7 @@ export class ValenceEngine {
    * theirs alone and needs no co-signer: withdrawing removes a commitment, and
    * every rule about second signatures is about adding one.
    */
-  async withdrawDecisions(offerId: string, now = Date.now()): Promise<Offer> {
+  async withdrawDecisions(offerId: string, sent: PersonalSignature, now = Date.now()): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "decided") {
       throw conflict("bad_state", `cannot withdraw decisions on an offer in ${offer.state}`);
@@ -1374,6 +1375,33 @@ export class ValenceEngine {
         "not_withdrawable",
         "no confirmation is recorded for this set, because a collection resolved it or it arrived without one, so there is nothing to withdraw"
       );
+    }
+    // §16.5, decided 2026-09-20 after the third refutation pass over question
+    // 68. **A signed decision is taken back by a signature over taking it
+    // back.** This route asked for nothing, and the guard above is the only
+    // reason that was ever tolerable: a set nobody signed is refused there,
+    // so what reaches this line is always a set the household signed, and
+    // whoever held the offer id could void it. The pass measured a recipient
+    // signing `returned` on every line of a gift, which owed nothing and was
+    // final, and a caller holding nothing but the offer id taking that back
+    // five days later: §12 defaulted the first line at the expiry and charged
+    // the giver 1,200 for a gift refused **in writing**. `main` refuses it,
+    // because there the window came from the label the offer names and had
+    // closed; question 68 made the window the longest across every mandate
+    // the household holds, so **the change lengthened the interval in which
+    // an unsigned request can void a signed set**, and nothing in three
+    // passes had asked what the window's own length is worth to somebody
+    // holding an offer id.
+    //
+    // The moment the set was decided is inside the signed bytes, so a
+    // signature covers the set that stands and not the next one. It is not
+    // §15's nonce, which binds a request to a person for every route at once.
+    const householdKey = this.householdKeyFor(offer);
+    if (!householdKey) {
+      throw unprocessable("unsigned", `no key is registered for the household of mandate ${offer.mandate}`);
+    }
+    if (!verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId)) {
+      throw unprocessable("bad_signature", "the signature does not cover taking this set back");
     }
     // §16.5, question 47, decided 2026-09-15. **A box past its expiry cannot
     // have its signed set taken back.** The reset returns every line the
