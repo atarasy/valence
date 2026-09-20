@@ -68,6 +68,8 @@ describe("§14.2: an import writes only its own household's rows", () => {
   });
 
   test("a mandate this host already holds is not replaced, even by its own household", async () => {
+    // Re-measured 2026-09-20: the route-only mutation was masked by the
+    // register guard. Removing both replaces the claim and fails this test.
     // NOTE (mutation check, 2026-09-15): import_mandate_replaces_held. The
     // second row was written, and with it a mandate nobody signed.
     //
