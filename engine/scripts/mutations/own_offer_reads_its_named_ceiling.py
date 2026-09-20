@@ -8,7 +8,7 @@ p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
 old = """      : mandate
         ? Math.min(
             mandate.ceiling_out_of_network,
-            (await this.mandateSource.outOfNetworkCeilingOf(offer.household, now)) ?? Infinity
+            (await this.outOfNetworkRead(offer.household, now)) ?? Infinity
           )
         : null;
 """

@@ -311,6 +311,13 @@
                   "signature"
                 ]
               }
+            },
+            "decided_at": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
             }
           },
           "required": [
@@ -644,6 +651,13 @@
             "signature"
           ]
         }
+      },
+      "decided_at": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0
       }
     },
     "required": [

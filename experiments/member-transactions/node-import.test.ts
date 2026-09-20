@@ -69,3 +69,24 @@ test('failed archive import leaves no offers and marks the destination unavailab
   expect(rows(join(dest, 'archive.sqlite')).some((r: any) => r.namespace === 'offers')).toBe(false);
   expect(() => openLocalHTTP(join(dest, 'archive.sqlite'), policy)).toThrow('Unknown atomic store schema');
 });
+
+test('decision protections survive an archive and cannot name an unrelated offer', async () => {
+  const s = await fixture(true);
+  const key = s.node.offers[0].id;
+  expect(s.node.decided_protections[key]).toBeDefined();
+  s.node.decided_protections[key].stale = ['cooling_seconds'];
+  expect(validateNodeImport(s.node, HOUSE).decided_protections).toEqual(s.node.decided_protections);
+  for (const change of [
+    (n: any) => { n.decided_protections.foreign = n.decided_protections[key]; },
+    (n: any) => { n.decided_protections[key].at = -1; },
+    (n: any) => { n.decided_protections[key].cooling_seconds = '3600'; },
+    (n: any) => { n.decided_protections[key].stale = ['unknown']; },
+    (n: any) => { n.decided_protections[key].authority = 'injected'; },
+    (n: any) => { delete n.decided_protections; },
+  ]) {
+    const bad = structuredClone(s.node); change(bad);
+    expect(() => validateNodeImport(bad, HOUSE)).toThrow('Invalid node archive');
+  }
+  const previous = structuredClone(s.node); previous.format = 'valence-node/7'; delete previous.decided_protections;
+  expect(validateNodeImport(previous, HOUSE).decided_protections).toEqual({});
+});

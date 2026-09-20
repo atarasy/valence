@@ -17,3 +17,18 @@ test('an offer, list or approval candidate may carry collected_as, and only a co
   offer.candidates[0].collected_as = 'lost'; approval.candidates[0].collected_as = 'lost'; list.offers[0].candidates[0].collected_as = 'lost';
   expect([validProjection('offer', offer), validProjection('approval', approval), validProjection('list', list)]).toEqual([false, false, false]);
 });
+
+// A signed take-back needs the exact decision time. Keep old responses
+// readable, while rejecting a malformed value instead of passing it to a signer.
+test('offer and list admit a decision time and reject malformed signing input', () => {
+  const offer = structuredClone(fixtures['digital-offer']) as any;
+  const list = structuredClone(fixtures['house-a-list']) as any;
+  for (const value of [null, 0, 1720000000000]) {
+    offer.decided_at = value; list.offers[0].decided_at = value;
+    expect([validProjection('offer', offer), validProjection('list', list)]).toEqual([true, true]);
+  }
+  for (const value of [-1, 0.5, '1720000000000', Number.MAX_SAFE_INTEGER + 1]) {
+    offer.decided_at = value; list.offers[0].decided_at = value;
+    expect([validProjection('offer', offer), validProjection('list', list)]).toEqual([false, false]);
+  }
+});
