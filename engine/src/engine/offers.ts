@@ -129,7 +129,7 @@ function utcMidnight(now: number): number {
  * under, and "this was not read at the decision" is part of that answer.
  */
 type Fixed = number | null;
-type FixedProtections = {
+export type FixedProtections = {
   at: number;
   cooling_seconds: Fixed;
   ceiling_daily?: Fixed;
@@ -2313,6 +2313,34 @@ export class ValenceEngine {
    */
   protectionsOf(offerId: string): FixedProtections | undefined {
     return this.decidedProtections.get(offerId);
+  }
+
+  /**
+   * §14.2, §16.5, decided 2026-09-20 after the third refutation pass over
+   * question 68. **What each of these sets was decided under, for a move.**
+   * §16.5 makes recording the window a MUST and reading the recorded one a
+   * MUST, and nothing carried the record across §14, so a household lost both
+   * by exercising clause 43: at the receiving host its mandates arrive as
+   * claims (question 56), so the live reads answer null, and with no record
+   * either the set has neither a window nor a fixed ceiling. **That is the
+   * shape of question 50's `confirmations`**, a register that lived only in
+   * what a host remembered, dropped on the way, and it cost four refutation
+   * rounds.
+   */
+  decidedProtectionsFor(offerIds: string[]): Record<string, FixedProtections> {
+    const out: Record<string, FixedProtections> = {};
+    for (const id of offerIds) {
+      const held = this.decidedProtections.get(id);
+      if (held) out[id] = held;
+    }
+    return out;
+  }
+
+  /** §14.2. The receiving end, one offer at a time, never replacing a row. */
+  importDecidedProtections(rows: Record<string, FixedProtections>): void {
+    for (const [id, fixed] of Object.entries(rows)) {
+      if (!this.decidedProtections.has(id)) this.decidedProtections.set(id, fixed);
+    }
   }
 
   confirmationsFor(offerIds: string[]): Record<string, string[]> {

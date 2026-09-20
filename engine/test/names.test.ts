@@ -600,7 +600,7 @@ describe("§12, §14, question 61: a giver's payments move with the giver", () =
     const offer = await giftFrom(engine);
 
     const inFlight = await exportOf(a, giver);
-    expect(inFlight.format).toBe("valence-node/7");
+    expect(inFlight.format).toBe("valence-node/8");
     expect(inFlight.gifts_in_flight).toEqual([offer.id]);
     expect(inFlight.payments).toEqual([]);
     const { engine: engineB } = makeEngine();
@@ -663,6 +663,75 @@ describe("§12, §14, question 61: a giver's payments move with the giver", () =
     const settlement = { offer: "planted-gift", settled_at: 3, charged: 999_999, payer: giver, signed_by: "merchant-1", receipt: "planted" };
     expect((await importTo(a, recipient, { format: "valence-node/7", offers: [planted], settlements: [settlement] })).status).toBe(201);
     expect((await exportOf(a, giver)).payments).toEqual([]);
+  });
+});
+
+describe("§14.2, §16.5: what a decided set was decided under moves with it", () => {
+  /**
+   * §16.5 makes recording the window a MUST and reading the recorded one a
+   * MUST, and nothing carried the record across §14, so a household lost
+   * both by exercising clause 43. **That is the shape of question 50's
+   * `confirmations`**, a register that lived only in what a host remembered
+   * and was dropped on the way, and that one cost four refutation rounds.
+   * Named by the third refutation pass over question 68.
+   *
+   * **No money moves on it today** and the pass says so: question 57 leaves
+   * an unfinished set at the host that holds its reserve, so a set that
+   * arrives has settled and has nothing left for a window to bar. What is
+   * carried is the household's own record of what it was held to.
+   */
+  const hub = () => ({
+    deliveries: new DeliveryRegister(), approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+    permissions: new PermissionLedger(), registry: new Registry(),
+  });
+  const exportOf = async (handle: ReturnType<typeof createApp>, who: string) =>
+    (await handle(new Request(`https://unit.example/households/${encodeURIComponent(who)}/export`))).json() as Promise<Record<string, unknown>>;
+  const importTo = (handle: ReturnType<typeof createApp>, who: string, body: unknown) =>
+    handle(new Request(`https://unit.example/households/${encodeURIComponent(who)}/import`, { method: "POST", body: JSON.stringify(body) }));
+
+  test("the record is exported with the offer and arrives at the next host", async () => {
+    // NOTE (mutation check, 2026-09-20): export_drops_decided_protections.
+    // The export carried none, and the receiving host held none.
+    const now = Date.now();
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    const offer = engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: now + HOUR, mandate: MANDATE, price_band: null, giver: null,
+      candidates: [{ product: "tea-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await engine.present(offer.id, now);
+    await decideSigned(engine, offer.id, engine.mustGet(offer.id, now).candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
+    await engine.settle(offer.id, now);
+    const held = engine.protectionsOf(offer.id);
+    expect(held).toBeDefined();
+
+    const leaving = await exportOf(a, HOUSEHOLD);
+    expect(leaving.format).toBe("valence-node/8");
+    expect((leaving.decided_protections as Record<string, unknown>)[offer.id]).toEqual(held as never);
+
+    const { engine: engineB } = makeEngine();
+    const b = createApp(engineB, hub());
+    expect((await importTo(b, HOUSEHOLD, leaving)).status).toBe(201);
+    expect(engineB.protectionsOf(offer.id)).toEqual(held as never);
+  });
+
+  test("a record naming an offer the import does not carry is refused", async () => {
+    // NOTE (mutation check, 2026-09-20): import_protections_unscoped. The
+    // import answered 201 and put a window on an offer of the host's own.
+    //
+    // §14.2, question 52's rule. Unscoped, a body of nothing but
+    // `decided_protections` would fix a window on an offer this host already
+    // holds, and the window is the interval `DELETE /offers/{id}/decisions`
+    // is open inside (§16.5).
+    const { engine } = makeEngine();
+    const a = createApp(engine, hub());
+    const r = await importTo(a, HOUSEHOLD, {
+      format: "valence-node/8",
+      decided_protections: { "offer-not-carried": { at: 1, cooling_seconds: 99 } },
+    });
+    expect(r.status).toBe(422);
+    expect(((await r.json()) as { error: string }).error).toBe("unscoped_protections");
   });
 });
 

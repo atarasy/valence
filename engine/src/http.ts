@@ -1328,7 +1328,7 @@ async function route(
       // /6; an offer it does not name reads as unconfirmed (question 50).
       // A /6 export predates question 61 and carries no `payments` and no
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = segment(parts[1]);
@@ -1422,6 +1422,18 @@ async function route(
           throw badRequest("malformed", "a collection's lines must be lists");
         }
       }
+      // §16.5, question 68. The same shape check as `confirmations` below,
+      // for the same reason: a store binds a key it was handed, and a value
+      // that is not a record leaves a decided set holding something no read
+      // can use.
+      const protections = body_.decided_protections;
+      if (
+        protections !== undefined &&
+        (protections === null || typeof protections !== "object" || Array.isArray(protections) ||
+          Object.values(protections).some((v) => !v || typeof v !== "object" || Array.isArray(v) || typeof (v as { at?: unknown }).at !== "number"))
+      ) {
+        throw badRequest("malformed", "decided_protections must map offer ids to what each set was decided under");
+      }
       const shaped = body_.confirmations;
       if (
         shaped !== undefined &&
@@ -1453,11 +1465,22 @@ async function route(
         body_.deliveries = (body_.deliveries ?? []).filter((r) => !behind.has(r.offer));
         body_.notes = (body_.notes ?? []).filter((r) => !behindCandidates.has(r.candidate));
         if (body_.confirmations) for (const id of leftBehind) delete body_.confirmations[id];
+        if (body_.decided_protections) for (const id of leftBehind) delete body_.decided_protections[id];
       }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
         if (!carried.has(id)) {
           throw unprocessable("unscoped_confirmation", `a confirmation names ${id}, which this import does not carry`);
+        }
+      }
+      // §14.2, question 52. Bound to the offers this body carries, exactly as
+      // the register above is: unscoped, a body of nothing but
+      // `decided_protections` would put a window on an offer the host already
+      // holds, and the window is what `DELETE /offers/{id}/decisions` is open
+      // inside.
+      for (const id of Object.keys(body_.decided_protections ?? {})) {
+        if (!carried.has(id)) {
+          throw unprocessable("unscoped_protections", `a record of what a set was decided under names ${id}, which this import does not carry`);
         }
       }
       // §14.2, question 51. Every refusal the rows below can give is decided
@@ -1509,7 +1532,12 @@ async function route(
         body_.collections = (body_.collections ?? []).filter((r) => !alreadyHere.has(r.offer));
         body_.deliveries = (body_.deliveries ?? []).filter((r) => !alreadyHere.has(r.offer));
         body_.notes = (body_.notes ?? []).filter((r) => !heldCandidates.has(r.candidate));
+        for (const id of alreadyHere) {
+          const arriving = body_.decided_protections?.[id];
+          if (arriving && !isDeepStrictEqual(engine.protectionsOf(id), arriving)) throw differs("record of what was decided for", id);
+        }
         if (body_.confirmations) for (const id of alreadyHere) delete body_.confirmations[id];
+        if (body_.decided_protections) for (const id of alreadyHere) delete body_.decided_protections[id];
       }
       // §14.2, question 52. Every row names the household on the path or an
       // offer this body carries, and none replaces a row the host holds. Only
@@ -1620,6 +1648,7 @@ async function route(
             engine.importConfirmations({ [offer.id]: register[offer.id]! });
           }
         }
+        engine.importDecidedProtections(body_.decided_protections ?? {});
         for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
         for (const n of body_.notes ?? []) engine.importNote(n);
         for (const e of body_.lineage ?? []) engine.importEdge(e, moving);

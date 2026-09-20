@@ -1,6 +1,6 @@
 import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
-import type { ValenceEngine } from "../engine/offers.js";
+import type { FixedProtections, ValenceEngine } from "../engine/offers.js";
 import type { LineageEdge, Note, Offer, Payment, Settlement, PresenterConfig, Recovery } from "../common/types.js";
 import type { Permission, Query, PermissionLedger } from "./permissions.js";
 import type { Mandate, MandateRegister } from "./mandates.js";
@@ -43,7 +43,13 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * `missing_notes` (question 46), for the same reason. A /4 export is still
  * read: it carries no missing items, and its rows import with none.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/7";
+/**
+ * Bumped to /8 on 2026-09-20, when `decided_protections` was named below
+ * (§16.5, the third refutation pass over question 68). A /7 export carries
+ * none, and its decided sets arrive with no record, which is what they did
+ * before the field existed.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/8";
 
 export type NodeExport = {
   format: string;
@@ -59,6 +65,16 @@ export type NodeExport = {
    * this field would drop it.
    */
   confirmations: Record<string, string[]>;
+  /**
+   * §16.5, question 68, decided 2026-09-20. **What each decided set was
+   * decided under**: the window and, where it may owe, the ceiling, with the
+   * values that came from an earlier reading named. §16.5 requires an
+   * implementation to record these at the decision and to read the recorded
+   * ones at settlement and at withdrawal, and nothing carried them across a
+   * move, so a household that exercised clause 43 arrived with the protections
+   * of every decided set gone. New in `valence-node/8`.
+   */
+  decided_protections: Record<string, FixedProtections>;
   settlements: Settlement[];
   notes: Note[];
   /**
@@ -248,6 +264,7 @@ export function exportNode(
       .map((o) => engine.recoveries.for(o.id))
       .filter((r): r is Recovery => r !== undefined),
     confirmations: engine.confirmationsFor(offers.map((o) => o.id)),
+    decided_protections: engine.decidedProtectionsFor(offers.map((o) => o.id)),
     ...permissions.exportFor(household),
     // §14.2, question 56. The signed rows and the claims together, because the
     // export is the record of what this household has and an offer that moved
