@@ -11,7 +11,7 @@ import { RemoteMandates } from "../src/engine/mandate-source.js";
 import { canonicalMandate, type Mandate } from "../src/hub/mandates.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
 import {
-  CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, presentGift,
+  CONFIG_VERSION, HOUSEHOLD, MANDATE, MANDATE_PAIR, houseFor, makeEngine, presentGift, settleSigned,
 } from "./helpers.js";
 
 /**
@@ -272,6 +272,44 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     s.deliveries.record({ offer: box.id, carriage: 0, code: `dc-${box.id.slice(0, 8)}`, status: "delivered" });
     await s.engine.collect({ offer: box.id, returned: [], consumed: [box.candidates[0]!.id], at: s.T + 1 });
     expect(s.engine.mustGet(box.id, s.T + 1).state).toBe("decided");
+  });
+
+  test("an old hub does not stop a box the household has signed for", async () => {
+    // NOTE (mutation check, 2026-09-20): statement_asks_for_a_window. The
+    // settlement was refused `hub_refused` and the next box was refused
+    // `statement_unsigned`.
+    //
+    // §16.5 said the window is asked for at every settlement, "including one
+    // whose application is the household's signature over a statement and
+    // which no window bars, so a hub that predates this refuses those
+    // settlements too". The third refutation pass over question 68 measured
+    // the sentence's other end: the refusal leaves the statement unsigned,
+    // §6.5 blocks that presenter's next box, and nothing times it out. It was
+    // measured on a household holding **no mandate at all**, which is the
+    // worst version of it: its weekly deliveries stop over a protection it
+    // has not set, until its host is upgraded.
+    //
+    // **That household is now refused a step earlier**, at the collection,
+    // which reads the same protections (§11.2) and has nothing to fall back
+    // to. So this measures the household the fallback does reach, which is
+    // every member whose hub has answered once, and for which the statement
+    // is the only step left that a window could not have barred anyway.
+    const s = split();
+    await s.setUp();
+    await s.warm();
+    const box = s.engine.createOffer({
+      binding: "physical", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+      expires_at: s.T + DAY, mandate: MANDATE, price_band: null, giver: null,
+      candidates: [{ product: "tea-b", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await s.engine.present(box.id, s.T);
+    s.deliveries.record({ offer: box.id, carriage: 0, code: `dc-${box.id.slice(0, 8)}`, status: "delivered" });
+    await s.engine.collect({ offer: box.id, returned: [], consumed: [box.candidates[0]!.id], at: s.T + 1 });
+    expect((await settleSigned(s.engine, box.id, [], s.T + 2)).charged).toBe(900);
+
+    // §6.5's block lifts, so the next box presents.
+    const next = s.own("coffee-a", s.T + 3);
+    expect((await s.engine.present(next.id, s.T + 3)).state).toBe("presented");
   });
 
   test("a hub that is not there refuses a presentation and a settlement, and not a decision", async () => {

@@ -1731,18 +1731,33 @@ export class ValenceEngine {
     //
     // §16.5, decided 2026-09-19. **Never shorter than the window the set was
     // decided under**, which a lapse since the decision does not end.
+    //
+    // §16.5, decided 2026-09-20 after the third refutation pass over question
+    // 68. **The window is asked for only where it can bar the settlement.**
+    // It was read before this test and not inside it, on the reasoning that a
+    // rule with nothing to disturb rests on nothing a break could catch. What
+    // that bought instead: a hub predating question 68 answers the household
+    // route without `cooling_seconds`, so the read refuses `hub_refused`, and
+    // on a statement settlement that refusal leaves the statement unsigned
+    // and §6.5 blocks that presenter's next box. Measured by the pass on a
+    // household holding **no mandate at all**: its weekly boxes stop until
+    // its host is upgraded, over a protection it has not set. The rule that
+    // a window never bars a statement is proven by
+    // `statement_ignores_the_window` instead, which is a break of this test.
     const fixed = this.decidedProtections.get(offer.id);
-    const coolingSeconds = longerWindow(
-      await this.coolingRead(offer.household, now),
-      known(fixed?.cooling_seconds)
-    );
-    if (!needsStatement(offer, missing) && coolingSeconds != null && offer.decided_at !== null) {
-      const opens = offer.decided_at + coolingSeconds * 1000;
-      if (now < opens) {
-        throw unprocessable(
-          "mandate_cooling",
-          `this set cannot settle before ${opens}, the cooling window the person set`
-        );
+    if (!needsStatement(offer, missing) && offer.decided_at !== null) {
+      const coolingSeconds = longerWindow(
+        await this.coolingRead(offer.household, now),
+        known(fixed?.cooling_seconds)
+      );
+      if (coolingSeconds != null) {
+        const opens = offer.decided_at + coolingSeconds * 1000;
+        if (now < opens) {
+          throw unprocessable(
+            "mandate_cooling",
+            `this set cannot settle before ${opens}, the cooling window the person set`
+          );
+        }
       }
     }
 
