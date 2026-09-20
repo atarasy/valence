@@ -494,19 +494,19 @@ test('historical decision without generation metadata still reads but cannot inv
 });
 
 test('disabled snapshot candidate preserves digital withdrawal history, successor review and passkey counter',async()=>{
- const {captureDeployment,restoreDeploymentCandidate}=await import('./operational-snapshot.ts');
+ const {captureDeployment,restoreDeploymentCandidate,freezeDeployment}=await import('./operational-snapshot.ts');
  const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json();
  const withdrawal=await(await s.send('/member/operations/'+w.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).json();
  expect(withdrawal.operationState).toBe('committed');
- const next=await(await s.prepare()).json(),snapshot=await captureDeployment(pool,s.identity);
+ const next=await(await s.prepare()).json(),snapshot=await freezeDeployment(pool,s.identity,randomUUID(),'f'.repeat(64));
  const db='snapshot_http_'+randomUUID().replaceAll('-',''),destinationURL=new URL(url!);destinationURL.pathname='/'+db;
  await pool.query(`CREATE DATABASE "${db}"`);const destination=createPool(destinationURL.toString());
  try{
   await migrateDatabase(destinationURL.toString());await restoreDeploymentCandidate(destination,snapshot,s.identity);
   expect((await captureDeployment(destination,s.identity)).rows).toEqual(snapshot.rows);
   await expect(postgresStore(destination,s.identity).run(()=>null)).rejects.toThrow('fenced');
-  // Synthetic rehearsal only: stop the fixture source before enabling its exact clone.
-  await pool.query('UPDATE atarasy_member.control SET enabled=false WHERE id=$1',[s.identity.id]);
+  // Source was frozen by the implementation; destination activation remains test-only.
+  await expect(s.unit.run(()=>null)).rejects.toThrow('fenced');
   await destination.query('UPDATE atarasy_member.control SET enabled=true WHERE id=$1',[s.identity.id]);
   const app=await openPostgresMemberHTTP(destination,s.identity,s.c,now);
   const send=(path:string,body?:unknown)=>app.fetch(s.request(path,body,s.grant.token),{peer:'snapshot-target'});

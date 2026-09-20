@@ -107,4 +107,4 @@ Measured after the deploy: `/auth/session` 401, `/auth/login/options` 200 with a
 
 ## Operational snapshot candidate
 
-[Same-deployment snapshots](OPERATIONAL_SNAPSHOT.md) now preserve all PostgreSQL deployment rows and restore into an absent, disabled candidate with matching schema. They retain digital operation history, incarnation heads and passkey counters. Writer cutover, routing and activation remain separate unimplemented operations.
+[Same-deployment snapshots](OPERATIONAL_SNAPSHOT.md) now preserve all PostgreSQL deployment rows and restore into an absent, disabled candidate with matching schema. They retain digital operation history, incarnation heads and passkey counters. Atomic source freeze now issues a durable ticket and final snapshot; target binding, retire-before-enable activation, routing and rollback remain separate implementation work.

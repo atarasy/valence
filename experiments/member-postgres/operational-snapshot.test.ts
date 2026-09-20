@@ -22,3 +22,46 @@ test('failure after the first restored row leaves neither candidate control nor 
  expect((await target.query('SELECT 1 FROM atarasy_member.engine_rows WHERE deployment=$1',[s.identity.id])).rowCount).toBe(0);
  expect((await restoreDeploymentCandidate(target,snapshot,s.identity)).verified).toBe(true);
 });
+
+test('freezing returns a final snapshot and blocks every old writer including bootstrap',async()=>{
+ const {freezeDeployment}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='a'.repeat(64);
+ const frozen=await freezeDeployment(source,s.identity,ticket,runtime);expect(frozen.sourceEnabled).toBe(false);
+ await expect(s.unit.run(store=>store.map('snapshot_probe').set('late',3))).rejects.toThrow('fenced');
+ await expect(initialiseDeployment(source,s.identity)).rejects.toThrow('fenced');
+ expect(await freezeDeployment(source,s.identity,ticket,runtime)).toEqual(frozen);
+ await expect(freezeDeployment(source,s.identity,randomUUID(),runtime)).rejects.toThrow();
+ await expect(freezeDeployment(source,s.identity,ticket,'b'.repeat(64))).rejects.toThrow();
+ expect((await restoreDeploymentCandidate(target,frozen,s.identity)).enabled).toBe(false);
+});
+test('freeze waits for committed writers and refuses a subsequent ticket',async()=>{
+ const {freezeDeployment}=await import('./operational-snapshot.ts'),s=await setup();let release!:()=>void,entered!:()=>void;
+ const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r);
+ const write=s.unit.run(async store=>{store.map('before_freeze').set('first',1);entered();await gate;store.map('at_freeze').set('last',2);});await started;
+ let done=false;const a=freezeDeployment(source,s.identity,randomUUID(),'c'.repeat(64)).then(v=>{done=true;return v;});
+ try{await Bun.sleep(40);expect(done).toBe(false);}finally{release();}await write;
+ const frozen=await a;expect(frozen.rows.some(r=>r.namespace==='at_freeze')).toBe(true);
+ await expect(freezeDeployment(source,s.identity,randomUUID(),'c'.repeat(64))).rejects.toThrow();
+});
+test('freeze failure after disabling source rolls back ticket and permits the original writer',async()=>{
+ const {freezeDeployment}=await import('./operational-snapshot.ts'),s=await setup(),before=await captureDeployment(source,s.identity);let disabled=false;
+ const failing={async connect(){const c=await source.connect();return new Proxy(c,{get(client,key){if(key==='query')return async(...args:any[])=>{if(disabled&&typeof args[0]==='string'&&args[0].startsWith('SELECT environment'))throw new Error('injected freeze readback failure');const result=await(client.query as any)(...args);if(typeof args[0]==='string'&&args[0].startsWith('UPDATE atarasy_member.control SET enabled=false'))disabled=true;return result;};const value=Reflect.get(client,key);return typeof value==='function'?value.bind(client):value;}});}} as typeof source;
+ await expect(freezeDeployment(failing,s.identity,randomUUID(),'d'.repeat(64))).rejects.toThrow('injected freeze readback failure');expect(disabled).toBe(true);
+ expect(await captureDeployment(source,s.identity)).toEqual(before);expect(await s.unit.run(()=>true)).toBe(true);
+});
+test('freeze retry detects changed data and cannot adopt an unrelated disabled source',async()=>{
+ const {freezeDeployment}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='e'.repeat(64);
+ await freezeDeployment(source,s.identity,ticket,runtime);
+ await source.query("UPDATE atarasy_member.engine_rows SET value='{}' WHERE deployment=$1 AND namespace='snapshot_probe'",[s.identity.id]);
+ await expect(freezeDeployment(source,s.identity,ticket,runtime)).rejects.toThrow();
+ const other=await setup();await source.query('UPDATE atarasy_member.control SET enabled=false WHERE id=$1',[other.identity.id]);
+ await expect(freezeDeployment(source,other.identity,randomUUID(),runtime)).rejects.toThrow();
+});
+
+test('simultaneous different freeze tickets have exactly one durable winner',async()=>{
+ const {freezeDeployment}=await import('./operational-snapshot.ts'),s=await setup(),tickets=[randomUUID(),randomUUID()];
+ const results=await Promise.allSettled(tickets.map(ticket=>freezeDeployment(source,s.identity,ticket,'9'.repeat(64))));
+ expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+ const snapshot=await captureDeployment(source,s.identity);expect(snapshot.sourceEnabled).toBe(false);
+ const held=JSON.parse(snapshot.rows.find(r=>r.namespace==='member_writer_migration')!.value);
+ expect(results[tickets.indexOf(held.ticket)]!.status).toBe('fulfilled');
+});
