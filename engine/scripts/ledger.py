@@ -23,14 +23,33 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 # The sibling checkout, as `conformance.sh` assumes it. `ATARAXIA_HOME` moves it
 # for a worktree, which is where this project measures a branch.
-LEDGER = pathlib.Path(
-    os.environ.get("ATARAXIA_HOME", HERE.parents[2] / "ataraxia")
-) / "tests" / "MUTATIONS.md"
+FELL_BACK = "ATARAXIA_HOME" not in os.environ
+HOME = pathlib.Path(os.environ.get("ATARAXIA_HOME", HERE.parents[2] / "ataraxia"))
+LEDGER = HOME / "tests" / "MUTATIONS.md"
 
 scripts = {p.stem for p in (HERE / "mutations").glob("*.py")}
+# **A checker that passes because it found nothing has stopped working.** A
+# missing ledger already stops this one, and the third refutation pass over
+# question 68 read that stop as a clean run. So it says what it was going to
+# compare and how the path was arrived at. The other half is quieter and was
+# not named: on a worktree without `ATARAXIA_HOME` the fallback can resolve to
+# the **main** checkout, whose ledger has no row for anything a branch added,
+# and every one of them then reads as missing a row it has.
 if not LEDGER.exists():
-    print(f"ledger not found at {LEDGER}", file=sys.stderr)
+    print(
+        f"STOPPED: no ledger at {LEDGER}\n"
+        f"  {len(scripts)} mutation scripts were going to be compared against it, and none was.\n"
+        f"  set ATARAXIA_HOME to the ataraxia checkout that belongs to this branch.",
+        file=sys.stderr,
+    )
     raise SystemExit(2)
+if FELL_BACK:
+    print(
+        f"!! ATARAXIA_HOME is not set, so the rows below come from\n"
+        f"!! {LEDGER}\n"
+        f"!! and not from whatever branch this engine is on.\n",
+        file=sys.stderr,
+    )
 
 # The ledger's rows open with the mutation in backticks. **The cell may carry
 # more than the name**: two rows read "`name` (re-anchored 2026-09-09)", and a

@@ -31,12 +31,28 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent.parent
 SPEC = HERE.parent / "SPEC.md"
-SUITES = pathlib.Path(
-    os.environ.get("ATARAXIA_TESTS", pathlib.Path.home() / "Documents/GitHub/ataraxia/tests")
-)
+DEFAULT_SUITES = pathlib.Path.home() / "Documents/GitHub/ataraxia/tests"
+SUITES = pathlib.Path(os.environ.get("ATARAXIA_TESTS", DEFAULT_SUITES))
 
 if not SPEC.exists():
     sys.exit(f"no specification at {SPEC}")
+
+# **A checker that passes because it found nothing has stopped working**, and
+# this one had two ways to do it. Without `ATARAXIA_TESTS` it reads the main
+# checkout whatever branch the engine is on, so a name a branch's own suites
+# assert reads as asserted by nobody: that is how the second refutation pass
+# over question 68 came to call `cooling_too_long` a false negative, and the
+# third pass had to say "run it with ATARAXIA_TESTS set" in its own report.
+# And a suites directory holding no `*.test.ts` at all printed a full clean
+# third column. Both say so now, and the second stops.
+FELL_BACK = "ATARAXIA_TESTS" not in os.environ
+if FELL_BACK:
+    print(
+        f"!! ATARAXIA_TESTS is not set, so the suite column below describes\n"
+        f"!! {DEFAULT_SUITES}\n"
+        f"!! and not whatever branch this engine is on. Set it to the suites you mean.\n",
+        file=sys.stderr,
+    )
 
 spec = SPEC.read_text()
 
@@ -64,12 +80,18 @@ for path in (HERE / "src").rglob("*.ts"):
 # Quoted-string occurrences in suite files, including comments and inputs.
 # They are candidates for review, not evidence of response assertions.
 asserted = set()
-if SUITES.exists():
-    for path in SUITES.rglob("*.test.ts"):
-        asserted.update(re.findall(r'"([a-z][a-z_]{3,})"', path.read_text()))
-else:
-    print(f"note: no suites at {SUITES}; the third column is unmeasured\n")
+suite_files = sorted(SUITES.rglob("*.test.ts")) if SUITES.exists() else []
+if not suite_files:
+    sys.exit(
+        f"STOPPED: no suite file was read.\n"
+        f"  looked in {SUITES}\n"
+        f"  the third column would have read NO for every name, which is not a measurement.\n"
+        f"  set ATARAXIA_TESTS to the tests directory of the ataraxia checkout you mean."
+    )
+for path in suite_files:
+    asserted.update(re.findall(r'"([a-z][a-z_]{3,})"', path.read_text()))
 
+print(f"suites read: {len(suite_files)} files under {SUITES}{' (fallback, ATARAXIA_TESTS unset)' if FELL_BACK else ''}\n")
 print(f"§16.6 names {len(named)} refusals of a protection\n")
 print(f"{'name':<34} {'engine':<8} {'suite text':<10}")
 for name in named:
