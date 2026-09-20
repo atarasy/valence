@@ -71,8 +71,17 @@ function split(fields: Partial<Mandate> = {}) {
     ceiling_out_of_network: 10_000_000, ceiling_daily: null, cooling_seconds: null,
     co_signers: [], version: 1, lapses_at: T + 300 * DAY,
   };
+  const dead = () => Promise.reject(new Error("connect ECONNREFUSED"));
   return {
     T, engine, ledger, deliveries, era,
+    /** The hub stops answering at all, which is what `fetch` throws. */
+    goDark() {
+      engine.readMandatesFrom(new RemoteMandates("http://hub.example", dead as never));
+    },
+    /** And comes back, at whatever era `era.old` says. */
+    goLive() {
+      engine.readMandatesFrom(new RemoteMandates("http://hub.example", fetchImpl as never));
+    },
     /** A later version of the household's own mandate, signed by it alone. */
     loosen(over: Partial<Mandate>) {
       return record(
@@ -97,6 +106,30 @@ function split(fields: Partial<Mandate> = {}) {
         candidates: [{ product, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
       } as never);
     },
+    /**
+     * One decision made while the hub is current, which is what leaves this
+     * host a last reading to fall back to. §16.3 and §16.5 refuse a decision
+     * for a household this host has never read anything for, and a member
+     * whose hub has answered once is every member after their first set.
+     */
+    async warm(product = "tea-a", now = T) {
+      const was = era.old;
+      era.old = false;
+      const o = engine.createOffer({
+        binding: "digital", household: HOUSEHOLD, purpose: "replenish", config_version: CONFIG_VERSION,
+        expires_at: now + DAY, mandate: MANDATE, price_band: null, giver: null,
+        candidates: [{ product, quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+      } as never);
+      await engine.present(o.id, now);
+      // **Kept and not returned**, so that the payer's daily ceiling is read
+      // too: a set that can owe nothing does not ask for one (§16.3), and a
+      // household warmed by a refusal alone still has no ceiling to fall back
+      // to. Measured while writing this file.
+      const decisions = engine.mustGet(o.id, now).candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const }));
+      await engine.decide(o.id, decisions, sign(null, canonicalDecisions(o.id, decisions), MANDATE_PAIR.privateKey).toString("base64"), now);
+      era.old = was;
+      return o;
+    },
     decideAll(id: string, valence: "kept" | "returned", now = T) {
       const decisions = engine.mustGet(id, now).candidates.map((c) => valence === "kept"
         ? { candidate: c.id, valence, kept_as: "self" as const }
@@ -114,6 +147,10 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     // the recipient had declined, and the giver was charged 700.
     const s = split();
     await s.setUp();
+    // §16.3, §16.5, decided 2026-09-20 after the third pass. The fallback is
+    // to the last reading and not to no protection, so this host must have
+    // had one. The test below measures the household that has never had one.
+    await s.warm();
     const gift = s.engine.createOffer({
       binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
       expires_at: s.T + 2_000, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 },
@@ -138,9 +175,90 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     expect(s.engine.paymentsBy(GIVER.household).map((p) => p.charged)).toEqual([0]);
   });
 
+  test("an outage at the decision leaves the last reading standing", async () => {
+    // NOTE (mutation check, 2026-09-20): decide_falls_back_to_nothing. The
+    // take-back 61 seconds into a day-long window was refused `no_cooling`
+    // and 900 settled under a ceiling of 500, which is the third refutation
+    // pass's harness a1, word for word.
+    //
+    // The pass's point was not that the outage is likely. On a split
+    // deployment the engine is the presenter's side, the hub is the
+    // household's, and the decision arrives through the engine, so the party
+    // that profits from the read failing is the party that knows when to make
+    // it fail. A fallback to the last reading cannot be chosen that way.
+    const s = split({ ceiling_daily: 500, cooling_seconds: 86_400 });
+    await s.setUp();
+    await s.warm();
+
+    // Two sets: one to settle past the window and one to take back inside it.
+    const own = s.own("tea-b");
+    const back = s.own("coffee-a");
+    await s.engine.present(own.id, s.T);
+    await s.engine.present(back.id, s.T);
+    // The outage is the decision and nothing else: the hub is up before it
+    // and up after it.
+    s.goDark();
+    expect((await s.decideAll(own.id, "kept")).state).toBe("decided");
+    expect((await s.decideAll(back.id, "kept")).state).toBe("decided");
+    s.goLive();
+    s.era.old = false;
+
+    // What was recorded says it was not read, which is the half a person and
+    // a presenter can be told (§16.5).
+    expect(s.engine.protectionsOf(own.id)).toMatchObject({
+      cooling_seconds: 86_400, ceiling_daily: 500, stale: ["cooling_seconds", "ceiling_daily"],
+    });
+
+    // The household now drops both, alone, having named nobody. Neither
+    // reaches the set already decided.
+    await s.loosen({ ceiling_daily: 10_000_000, cooling_seconds: null, version: 2 });
+    // The window recorded at the decision still stands, and so does the
+    // ceiling: 900 is refused on a ceiling of 500 the household has dropped.
+    await expect(s.engine.settle(own.id, s.T + 61_000)).rejects.toMatchObject({ code: "mandate_cooling" });
+    await expect(s.engine.settle(own.id, s.T + 86_400_001)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+    // And the take-back 61 seconds into a day-long window, which the pass
+    // measured refused `no_cooling`.
+    expect((await s.engine.withdrawDecisions(back.id, s.T + 61_000)).state).toBe("presented");
+  });
+
+  test("a household this host has never read cannot decide, and that is what the rule costs", async () => {
+    // NOTE (mutation check, 2026-09-20): decide_proceeds_with_nothing_read.
+    // The decision assertion read `decided`, and the gift settled at 0.
+    //
+    // **This is the cost of the decision of 2026-09-20 and not a defect of
+    // it.** The second refutation pass made a decision unrefusable, and the
+    // third measured what "unrefusable" bought the party holding the
+    // connection; the founder's answer is a fallback to the last reading,
+    // which a household with no reading here does not have. So against a hub
+    // that has never carried `cooling_seconds`, the recipient cannot decline
+    // a gift at all, §12 defaults it at the expiry, and the giver is charged
+    // 700 for goods nobody said yes to. A deployment whose hub predates
+    // question 68 therefore sells nothing to a member until it is upgraded,
+    // and the failure is loud rather than silent, which is the trade.
+    const s = split();
+    await s.setUp();
+    const gift = s.engine.createOffer({
+      binding: "digital", household: HOUSEHOLD, purpose: "ceremonial", config_version: CONFIG_VERSION,
+      expires_at: s.T + 2_000, mandate: MANDATE, price_band: { min: 0, max: 1_000_000 },
+      giver: GIVER.household,
+      candidates: [{ product: "miso-a", quantity: 1, predicted_conversion: 0.5, is_exploration: true, given_by: null }],
+    } as never);
+    await presentGift(s.engine, gift.id, s.T, GIVER);
+    await expect(s.decideAll(gift.id, "returned")).rejects.toMatchObject({ code: "hub_refused" });
+
+    const late = s.T + 3_000;
+    s.engine.sweep(late);
+    expect(s.engine.mustGet(gift.id, late).candidates.map((c) => c.valence)).toEqual(["defaulted"]);
+    s.era.old = false;
+    expect((await s.engine.settle(gift.id, late)).charged).toBe(700);
+  });
+
   test("a household's own set is decided, and a courier's collection recorded", async () => {
     const s = split();
     await s.setUp();
+    // A product this test does not use again: an exploration candidate is one
+    // this household has not been offered before.
+    await s.warm("coffee-a");
     const own = s.own();
     await s.engine.present(own.id, s.T);
     expect((await s.decideAll(own.id, "kept")).state).toBe("decided");
@@ -170,6 +288,7 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     // conformance contract does not ask an implementation for.
     const s = split({ cooling_seconds: 60 });
     await s.setUp();
+    await s.warm();
     // Two offers presented while the hub answers, so that the decision below
     // has somewhere to land once it stops.
     const decided = s.own("tea-b");
@@ -179,8 +298,7 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     await s.decideAll(settling.id, "kept");
 
     // The hub goes away: the socket refuses, which is what `fetch` throws.
-    const dead = () => Promise.reject(new Error("connect ECONNREFUSED"));
-    s.engine.readMandatesFrom(new RemoteMandates("http://hub.example", dead as never));
+    s.goDark();
     await expect(s.engine.present(s.own("nori-a").id, s.T)).rejects.toMatchObject({ code: "hub_unreachable" });
     await expect(s.engine.settle(settling.id, s.T + 61_000)).rejects.toMatchObject({ code: "hub_unreachable" });
     // A decision is the one thing that proceeds, because the message it
@@ -206,12 +324,16 @@ describe("§16.3, §16.5: a hub that cannot answer does not refuse a decision", 
     // set. The hub answers at its own clock, so this is written as a
     // loosening rather than as a lapse, which a virtual clock cannot reach
     // across a split deployment.
-    const s = split({ ceiling_daily: 500 });
+    const s = split({ ceiling_daily: 10_000_000 });
     await s.setUp();
+    // The last reading this host has is taken while the ceiling is wide, so
+    // that a break falling back to it rather than reading live is visible.
+    await s.warm();
+    await s.loosen({ ceiling_daily: 500, version: 2 });
     const own = s.own("tea-b");
     await s.engine.present(own.id, s.T);
     await s.decideAll(own.id, "kept");
-    await s.loosen({ ceiling_daily: 10_000_000, version: 2 });
+    await s.loosen({ ceiling_daily: 10_000_000, version: 3 });
     s.era.old = false;
     await expect(s.engine.settle(own.id, s.T + 1_000)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
   });

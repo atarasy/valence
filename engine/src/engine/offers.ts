@@ -109,32 +109,35 @@ function utcMidnight(now: number): number {
  * is absent where the set could owe nothing when it was decided, because a
  * value that can never refuse is not worth a round trip.
  *
- * **`"unknown"` is what could not be read**, decided 2026-09-20 after the
- * second pass. A decision is never refused because the source could not
- * answer, so a hub that is unreachable, or that predates the field, leaves
- * the record saying so and the set falls back to the live values, which is
- * where it stood before this rule.
+ * **A read that fails falls back to the last value this host read for that
+ * household**, decided 2026-09-20 after the third refutation pass over
+ * question 68. The second pass's decision was that a decision is never
+ * refused because the source could not answer, and the first build met it by
+ * recording `"unknown"` and applying nothing: the third pass measured what
+ * that is worth to the party that holds the connection. On a split
+ * deployment (§13.1) the engine is the presenter's side and the hub is the
+ * household's, and one silent read at one moment, which is a moment that
+ * party knows because the decision arrives through it, removed a day-long
+ * cooling window and a ceiling of 500 from a set that then charged 900.
+ * **The read that has to fail belonged to the party that profits from it
+ * failing.** A last reading cannot be chosen that way: it is whatever the
+ * household last set, and switching the network off leaves it in place.
+ *
+ * `stale` names the values that came from an earlier reading, because §16.5's
+ * record is what a person and a presenter are later told the set was decided
+ * under, and "this was not read at the decision" is part of that answer.
  */
-type Fixed = number | null | "unknown";
-type FixedProtections = { at: number; cooling_seconds: Fixed; ceiling_daily?: Fixed };
+type Fixed = number | null;
+type FixedProtections = {
+  at: number;
+  cooling_seconds: Fixed;
+  ceiling_daily?: Fixed;
+  stale?: ("cooling_seconds" | "ceiling_daily")[];
+};
 
 /** What a record holds of a value, or null where it holds nothing usable. */
 function known(value: Fixed | undefined): number | null {
   return typeof value === "number" ? value : null;
-}
-
-/**
- * One read for a record, or `"unknown"` where it could not be made. Every
- * refusal is swallowed and not only the hub's, because the record exists to
- * hold what was read and a decision proceeds whatever the answer; a source
- * that throws for its own reasons is still a source that did not answer.
- */
-async function readOrUnknown(read: () => Promise<number | null>): Promise<Fixed> {
-  try {
-    return await read();
-  } catch {
-    return "unknown";
-  }
 }
 
 /** The longer of two windows, where null is no window. */
@@ -195,6 +198,15 @@ export class ValenceEngine {
    * recorded after the decision replaces the one the set was decided under.
    */
   private readonly decidedProtections: Map<string, FixedProtections>;
+  /**
+   * §16.3, §16.5, decided 2026-09-20. **The last answer this host had from
+   * the mandate source for each household**, one row per household and kind,
+   * which a decision falls back to where the source cannot be reached. It is
+   * on the store rather than in memory because an outage that follows a
+   * restart is the same outage, and a cache that empties with the process
+   * would hand the party holding the connection the switch again.
+   */
+  private readonly lastProtectionRead: Map<string, Fixed>;
   private readonly memberStatementConfirmations: Map<string, string>;
   /** §16.3, question 66. The tail of each payer's settlements in flight. Memory only: it orders, it records nothing. */
   private readonly settling = new Map<string, Promise<void>>();
@@ -340,10 +352,52 @@ export class ValenceEngine {
    * because the hub was down either.
    */
   private async protectionsAt(offer: Offer, now: number, mayOwe: boolean): Promise<FixedProtections> {
-    const cooling_seconds = await readOrUnknown(() => this.coolingRead(offer.household, now));
-    if (!mayOwe) return { at: now, cooling_seconds };
-    const ceiling_daily = await readOrUnknown(() => this.dailyCeilingRead(offer.giver ?? offer.household, now));
-    return { at: now, cooling_seconds, ceiling_daily };
+    const stale: ("cooling_seconds" | "ceiling_daily")[] = [];
+    const cooling = await this.readOrLast("cooling_seconds", offer.household, () => this.coolingRead(offer.household, now));
+    if (cooling.stale) stale.push("cooling_seconds");
+    const fixed: FixedProtections = { at: now, cooling_seconds: cooling.value };
+    if (mayOwe) {
+      const payer = offer.giver ?? offer.household;
+      const ceiling = await this.readOrLast("ceiling_daily", payer, () => this.dailyCeilingRead(payer, now));
+      if (ceiling.stale) stale.push("ceiling_daily");
+      fixed.ceiling_daily = ceiling.value;
+    }
+    if (stale.length > 0) fixed.stale = stale;
+    return fixed;
+  }
+
+  /**
+   * §16.3, §16.5, decided 2026-09-20 after the third refutation pass over
+   * question 68. **One read for the record: the source's answer, or the last
+   * answer this host had from it for this household.**
+   *
+   * A read that has never succeeded here has no last answer, and **that
+   * decision is refused** rather than made under no protection at all. It is
+   * the one case the second pass's decision does not cover, and its cost is
+   * measured in `old-hub.test.ts`: against a hub that has never carried
+   * `cooling_seconds`, a recipient cannot decline a gift, so §12 defaults it
+   * at the expiry and the giver is charged. What the fallback buys is that a
+   * hub which answered once goes on protecting the household through an
+   * outage, which is the case the pass could switch on at will.
+   *
+   * Every refusal is caught and not only the hub's: the record exists to hold
+   * what was read, and a source that throws for its own reasons is still a
+   * source that did not answer.
+   */
+  private async readOrLast(
+    kind: "cooling_seconds" | "ceiling_daily",
+    household: string,
+    read: () => Promise<number | null>
+  ): Promise<{ value: Fixed; stale: boolean }> {
+    const key = `${kind}|${household}`;
+    try {
+      const value = await read();
+      this.lastProtectionRead.set(key, value);
+      return { value, stale: false };
+    } catch (err) {
+      if (!this.lastProtectionRead.has(key)) throw err;
+      return { value: this.lastProtectionRead.get(key) ?? null, stale: true };
+    }
   }
 
   /** §13.1. Point the engine at a hub it does not share a process with. */
@@ -392,6 +446,7 @@ export class ValenceEngine {
     this.settlements = store.map("settlements");
     this.settledHere = store.map("settled_here");
     this.decidedProtections = store.map("decided_protections");
+    this.lastProtectionRead = store.map("mandate_reads");
     // §14.2, question 66. **What a store says about itself is written when
     // it is opened, not inferred later.** A store that predates the record of
     // where a settlement was made cannot say which of its settlements a move
@@ -1157,8 +1212,9 @@ export class ValenceEngine {
     // afterwards. Read before anything is written, so that a decision is
     // never half-applied, and then checked again, because the read is the one
     // wait in this method and another decision could have reached the same
-    // lines during it. A read that fails records `"unknown"` and refuses
-    // nothing (`protectionsAt`, decided 2026-09-20).
+    // lines during it. A read that fails records the last value this host
+    // read for that household and refuses nothing; one it has never read for
+    // that household refuses (`readOrLast`, decided 2026-09-20).
     const planned = new Map(plan.map(({ candidate, d }) => [candidate.id, d.valence]));
     const completes = offer.candidates.every((c) => c.valence !== "offered" || planned.has(c.id));
     // A physical box can owe what its collection finds, whatever the household
@@ -2204,6 +2260,18 @@ export class ValenceEngine {
    * signatures rather than being them, and a receiving host compares them
    * without reading them.
    */
+  /**
+   * §16.5. **What a decided set was decided under**, and which of those values
+   * came from an earlier reading because the source did not answer at the
+   * decision. The third refutation pass over question 68 named the silence as
+   * unreadable anywhere: the record was the only holder of it and no route
+   * exposed it, so a household saw `no_cooling` and could not tell it from a
+   * mandate that set no window.
+   */
+  protectionsOf(offerId: string): FixedProtections | undefined {
+    return this.decidedProtections.get(offerId);
+  }
+
   confirmationsFor(offerIds: string[]): Record<string, string[]> {
     const out: Record<string, string[]> = {};
     for (const id of offerIds) {
