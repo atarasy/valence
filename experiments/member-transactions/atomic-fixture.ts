@@ -1,5 +1,5 @@
 // Fixture only: actual engine lifecycle and local ledger; fixture signatures, no provider.
-import { sign } from 'node:crypto';
+import { sign, type KeyObject } from 'node:crypto';
 import type { Store } from '../../engine/src/common/store.ts';
 import { ValenceEngine } from '../../engine/src/engine/offers.ts';
 import { InMemoryLedger } from '../../engine/src/engine/ledger.ts';
@@ -14,8 +14,8 @@ import { canonicalMandate } from '../../engine/src/hub/mandates.ts';
 // §13.2, question 55. A household's identifier is the name of its key and a
 // mandate's is that identifier with a label, so the fixture derives both from
 // the pair it signs with rather than naming a household `house`.
-export const houseOf = (pair: { publicKey: { export: (o: unknown) => unknown } }) =>
-  nameOf((pair.publicKey.export as (o: unknown) => Buffer | string)({ type: 'spki', format: 'pem' }).toString());
+export const houseOf = (pair: { publicKey: KeyObject }) =>
+  nameOf(pair.publicKey.export({ type: 'spki', format: 'pem' }).toString());
 export const mandateOf = (pair: Parameters<typeof houseOf>[0]) => `${houseOf(pair)}.1`;
 export const HOUSE = houseOf(MANDATE_PAIR);
 export const FIXTURE_MANDATE = mandateOf(MANDATE_PAIR);

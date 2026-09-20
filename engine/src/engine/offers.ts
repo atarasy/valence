@@ -1,3 +1,4 @@
+import { verifyMemberDecision, type MemberDecisionEnvelope, type MemberDecisionScope } from '../shared/member-decision.js';
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -86,6 +87,8 @@ export type EngineConfig = {
   relyingPartyId: string;
   /** Appendix A: internal contextual statement opt-in; no HTTP route. */
   memberStatementScope?: MemberStatementScope;
+  /** Deployment-bound authenticated digital decisions; absent means disabled. */
+  memberDecisionScope?: MemberDecisionScope;
   /**
    * §16.3. Where the deployment puts the start of a household's day, for the
    * daily ceiling. The specification does not name one: a household's day
@@ -502,7 +505,15 @@ export class ValenceEngine {
         throw new Error('Invalid member statement deployment scope');
       }
     }
-    this.config = { ...config, ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }) };
+    const decisionScope = config.memberDecisionScope;
+    if (decisionScope !== undefined) {
+      const origin = new URL(decisionScope.origin);
+      if (Object.keys(decisionScope).sort().join(',') !== 'environment,origin' || typeof decisionScope.environment !== 'string' || !decisionScope.environment || origin.protocol !== 'https:' || origin.origin !== decisionScope.origin || origin.hostname !== config.relyingPartyId) {
+        throw new Error('Invalid member decision deployment scope');
+      }
+    }
+    this.config = { ...config, ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }),
+      ...(decisionScope === undefined ? {} : { memberDecisionScope: Object.freeze({ ...decisionScope }) }) };
     Object.freeze(this.config);
   }
 
@@ -1058,11 +1069,27 @@ export class ValenceEngine {
     return this.commit(offer);
   }
 
+  /** A contextual assertion is never accepted through the legacy decision API. */
+  async decideMember(envelope: MemberDecisionEnvelope, decisions: Parameters<ValenceEngine['decide']>[1], assertion: Assertion, now = Date.now()): Promise<Offer> {
+    const fixed = structuredClone(envelope), lines = structuredClone(decisions), proof = structuredClone(assertion);
+    return this.decideInternal(fixed.offer, lines, proof, now, fixed);
+  }
+
   async decide(
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
     signature: string | Assertion,
     now = Date.now()
+  ): Promise<Offer> {
+    return this.decideInternal(offerId, structuredClone(decisions), structuredClone(signature), now);
+  }
+
+  private async decideInternal(
+    offerId: string,
+    decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
+    signature: string | Assertion,
+    now: number,
+    memberEnvelope?: MemberDecisionEnvelope
   ): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "presented") {
@@ -1079,8 +1106,16 @@ export class ValenceEngine {
     // §10.5. Two shapes, and the canonical form is what is signed in both:
     // once directly, and once as the challenge inside an authenticator's own
     // client data. A passkey cannot sign bytes a caller hands it.
-    const covered =
-      typeof signature === "string"
+    if (memberEnvelope && (offer.binding !== "digital" || decisions.length !== offer.candidates.length ||
+        new Set(decisions.map(d => d.candidate)).size !== offer.candidates.length ||
+        decisions.some(d => !offer.candidates.some(c => c.id === d.candidate) ||
+          !["kept", "returned"].includes(d.valence) || (d.valence === "kept" && d.kept_as !== "self") || d.lineage !== undefined))) {
+      throw badRequest("malformed", "member decisions require an explicit self-keep or refusal for every digital candidate");
+    }
+    const covered = memberEnvelope
+      ? typeof signature !== "string" && verifyMemberDecision(memberEnvelope, signature, mandateKey,
+          this.config.memberDecisionScope, this.config.relyingPartyId, canonicalDecisions(offerId, decisions).toString(), offer, now)
+      : typeof signature === "string"
         ? verifyDecisions(offerId, decisions, signature, mandateKey)
         : verifyDecisionAssertion(offerId, decisions, signature, mandateKey, this.config.relyingPartyId);
     if (!covered) {

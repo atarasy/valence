@@ -12,7 +12,7 @@ import { openOperationJournal,type JournalOperation } from './operation-journal.
 import type { MemberRuntimeConfig } from './config.ts';
 export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const path=memberRecords(store,{environment:c.environment,audience:c.origin});
- const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin}},store);
+ const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin},memberDecisionScope:{environment:c.environment,origin:c.origin}},store);
  const deliveries=new DeliveryRegister(store);engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
  const authority=openMemberAuthority(path,{environment:c.environment,audience:c.origin,maxSessionLifetimeMs:c.maxSessionLifetimeMs,now});
  const p={environment:c.environment,origin:c.origin,rpID:c.rpID,challengeLifetimeMs:c.maximumLifetimeMs,sessionLifetimeMs:c.maxSessionLifetimeMs,now};

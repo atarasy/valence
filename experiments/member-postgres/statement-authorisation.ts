@@ -70,6 +70,7 @@ export function openStatementAuthorisations(base: ReturnType<typeof memberRuntim
     }
     type Review = { sealed: ReturnType<typeof snapshot>['sealed']; revision: string; canonical: string; challenge: string; verified: null | { fingerprint: string; counter: number; at: number } };
     function saved(operation: JournalOperation): Review {
+      if (operation.kind !== 'physical_statement') throw new Error('Statement operation required');
       const value = reviews.get(operation.id) as Review|null;
       if (!value) throw new Error('Prepared statement unavailable');
       if (hash(value.sealed) !== operation.reviewedRevision || value.revision !== operation.reviewedRevision || value.canonical !== operation.canonical || value.challenge !== challenge(operation)) throw new Error('Prepared statement inconsistent');

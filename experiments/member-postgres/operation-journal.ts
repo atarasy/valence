@@ -7,7 +7,7 @@ type Authority = ReturnType<typeof openMemberAuthority>;
 type Bindings = ReturnType<typeof openMandateBindings>;
 export type StatementTerms = { offer: string; mandate: string; presenter: string; canonical: string; reviewedRevision: string; expiresAt: number };
 type State = 'prepared' | 'dispatching' | 'uncertain' | 'committed' | 'cancelled' | 'refused';
-export type JournalOperation = StatementTerms & { id: string; kind: 'physical_statement'; principal: string; credential: string; household: string; keyFingerprint: string; requestDigest: string; challenge: string; createdAt: number; state: State; assertionFingerprint: string | null; receiptDigest: string | null; refusal: string | null };
+export type JournalOperation = StatementTerms & { id: string; kind: 'physical_statement' | 'digital_decision'; principal: string; credential: string; household: string; keyFingerprint: string; requestDigest: string; challenge: string; createdAt: number; state: State; assertionFingerprint: string | null; receiptDigest: string | null; refusal: string | null };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 function identifier(value: string) { if (typeof value !== 'string' || !value.length || value.length > 512 || /[\u0000-\u001f]/.test(value)) throw new Error('Invalid operation input'); }
 function digest(value: string) { if (!/^[a-f0-9]{64}$/.test(value)) throw new Error('Invalid operation digest'); }
@@ -19,14 +19,14 @@ export function openOperationJournal(path: Records, authority: Authority, bindin
   const now = () => { const value = (policy.now ?? Date.now)(); timestamp(value); return value; };
   const scope = JSON.stringify([1, authority.scope.environment, authority.scope.audience]);
   path.assert(authority,bindings);const db=path,operations=records<JournalOperation>(path,'member_operations');
-  function requestHash(value: Pick<JournalOperation, 'principal' | 'credential' | 'household' | 'keyFingerprint' | 'offer' | 'mandate' | 'presenter' | 'canonical' | 'reviewedRevision' | 'expiresAt'>) {
-    return hash(JSON.stringify(['atarasy.member-operation.1', scope, value.principal, value.credential, value.household, value.keyFingerprint, value.offer, value.mandate, value.presenter, value.canonical, value.reviewedRevision, value.expiresAt]));
+  function requestHash(value: Pick<JournalOperation, 'principal' | 'credential' | 'household' | 'keyFingerprint' | 'offer' | 'mandate' | 'presenter' | 'canonical' | 'reviewedRevision' | 'expiresAt' | 'kind'>) {
+    return hash(JSON.stringify([value.kind === 'digital_decision' ? 'atarasy.member-decision-operation.1' : 'atarasy.member-operation.1', scope, value.principal, value.credential, value.household, value.keyFingerprint, value.offer, value.mandate, value.presenter, value.canonical, value.reviewedRevision, value.expiresAt]));
   }
   function get(id: string): JournalOperation {
     identifier(id);
     const operation=operations.get(id);if(!operation||operation.id!==id)throw new Error('Operation unavailable');
     const keys = 'assertionFingerprint canonical challenge createdAt credential expiresAt household id keyFingerprint kind mandate offer presenter principal receiptDigest refusal requestDigest reviewedRevision state'.split(' ').sort().join(',');
-    if (Object.keys(operation).sort().join(',') !== keys || operation.kind !== 'physical_statement' ||
+    if (Object.keys(operation).sort().join(',') !== keys || !['physical_statement','digital_decision'].includes(operation.kind) ||
         operation.requestDigest !== requestHash(operation) || operation.challenge !== createHash('sha256').update(operation.canonical).digest('base64url')) throw new Error('Inconsistent operation storage');
     timestamp(operation.createdAt); timestamp(operation.expiresAt);
     if (operation.expiresAt <= operation.createdAt) throw new Error('Inconsistent operation storage');
@@ -51,15 +51,16 @@ export function openOperationJournal(path: Records, authority: Authority, bindin
   }
   return path.register({
     findBlocking(predicate:(v:JournalOperation)=>boolean){return operations.find(predicate);},
-    async prepare(token: string, input: StatementTerms) {
+    async prepare(token: string, input: StatementTerms, kind: JournalOperation['kind'] = 'physical_statement') {
+      if (!['physical_statement','digital_decision'].includes(kind)) throw new Error('Invalid operation kind');
       const terms = structuredClone(input);
       if (Object.keys(terms).sort().join(',') !== 'canonical,expiresAt,mandate,offer,presenter,reviewedRevision') throw new Error('Invalid operation input');
       for (const value of [terms.offer, terms.mandate, terms.presenter]) identifier(value);
       digest(terms.reviewedRevision); timestamp(terms.expiresAt);
-      if (typeof terms.canonical !== 'string' || Buffer.byteLength(terms.canonical) > 65536 || !terms.canonical.startsWith('valence.statement.1\n' + terms.offer + '\n')) throw new Error('Invalid canonical statement');
+      if (typeof terms.canonical !== 'string' || Buffer.byteLength(terms.canonical) > 65536 || !terms.canonical.startsWith((kind === 'physical_statement' ? 'valence.statement.1\n' : '') + terms.offer + '\n')) throw new Error('Invalid canonical statement');
       return db.transaction(() => {
         const evidence = bound(token, terms), at = now();
-        const requestDigest = requestHash({ ...terms, principal: evidence.binding.principal, credential: evidence.binding.credential, household: evidence.binding.household, keyFingerprint: evidence.binding.fingerprint });
+        const requestDigest = requestHash({ ...terms, kind, principal: evidence.binding.principal, credential: evidence.binding.credential, household: evidence.binding.household, keyFingerprint: evidence.binding.fingerprint });
         const existing = operations.find(v=>v.offer===terms.offer&&['prepared','dispatching','uncertain','committed'].includes(v.state)) as { id: string } | null;
         if (existing) {
           const operation = get(existing.id); bound(token, operation, operation);
@@ -68,7 +69,7 @@ export function openOperationJournal(path: Records, authority: Authority, bindin
         }
         if (terms.expiresAt <= at || terms.expiresAt - at > policy.maximumLifetimeMs || terms.expiresAt > evidence.expiresAt) throw new Error('Operation expiry unavailable');
         const b = evidence.binding;
-        const operation: JournalOperation = { ...terms, id: randomUUID(), kind: 'physical_statement', principal: b.principal, credential: b.credential, household: b.household, keyFingerprint: b.fingerprint, requestDigest, challenge: createHash('sha256').update(terms.canonical).digest('base64url'), createdAt: at, state: 'prepared', assertionFingerprint: null, receiptDigest: null, refusal: null };
+        const operation: JournalOperation = { ...terms, id: randomUUID(), kind, principal: b.principal, credential: b.credential, household: b.household, keyFingerprint: b.fingerprint, requestDigest, challenge: createHash('sha256').update(terms.canonical).digest('base64url'), createdAt: at, state: 'prepared', assertionFingerprint: null, receiptDigest: null, refusal: null };
         operations.insert(operation.id,operation);
         return operation;
       }).immediate();

@@ -1,3 +1,4 @@
+import { signConfig } from '../../engine/test/helpers.ts';
 import {beforeAll,afterAll,expect,test} from 'bun:test';
 import {createPublicKey,randomUUID} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -168,4 +169,108 @@ test('an expired unsigned operation is refused by the next prepare instead of bl
  expect((await (await at('/member/operations/'+first.operationID+'/outcome')).json()).operationState).toBe('refused');
  const submitted=await at('/member/operations/'+second.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,second.publicKey.challenge,2)});
  expect(submitted.status).toBe(200);expect((await submitted.json()).operationState).toBe('committed');
+});
+
+// Digital decisions reuse the verified member identity and database unit, but
+// carry a distinct signed profile and a frozen decision result rather than a payment receipt.
+async function digitalSetup(){
+ const s=await setup();
+ // Finish the fixture's earlier physical statement before presenting another offer.
+ const previous=await (await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]})).json();
+ expect((await s.send('/member/operations/'+previous.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,previous.publicKey.challenge,2)})).status).toBe(200);
+ const offer=await s.unit.run(async store=>{
+  const r=memberRuntime(store,s.c,now);
+  const catalogue={version:'digital-cfg',presenter:'merchant-1',products:{'digital-tea':r.engine.configsForPresenter('merchant-1')[0]!.products['tea-0']!}};
+  r.engine.registerConfig(catalogue,signConfig(catalogue));
+  const o=r.engine.createOffer({binding:'digital',household:s.input.house,purpose:'replenish',config_version:'digital-cfg',expires_at:fixtureTime+3600000,mandate:s.input.mandate,price_band:null,giver:null,candidates:[{product:'digital-tea',quantity:1,predicted_conversion:null,is_exploration:true,given_by:null}]});
+  await r.engine.present(o.id,now());
+  r.deliveries.record({offer:o.id,carriage:550,code:'digital-test-carriage',status:'placed',now:now()});
+  const {ApprovalDesk}=await import('../../engine/src/hub/approval.ts');
+  new ApprovalDesk(store).record({offer:o.id,perCandidate:Object.fromEntries(o.candidates.map(c=>[c.id,{alternatives:['Use existing supplies'],argument_against:'You may already have enough.'}])),excluded:[],mandate:{kind:'standing',scope:'Test supplies',lapses_at:fixtureTime+10000000}});
+  r.authority.bindResource({kind:'offer',id:o.id},{household:s.input.house,presenter:'merchant-1'});
+  return o;
+ });
+ const decisions=offer.candidates.map(c=>({candidate:c.id,valence:'kept',kept_as:'self'}));
+ const prepare=()=>s.send('/member/decisions/prepare',{offer:offer.id,decisions});
+ return {...s,offer,decisions,prepare};
+}
+test('digital decision commits once across independent HTTP runtimes and retains the original result',async()=>{
+ const s=await digitalSetup(),reply=await s.prepare();expect(reply.status).toBe(200);const p=await reply.json();
+ expect(p.profile).toBe('atarasy.member-decision-authorisation.1');expect(p.review.goods).toBe(1200);expect(p.review.carriage).toBe(550);expect(p.review.total).toBe(1750);
+ const repeated=await (await s.prepare()).json();expect(repeated.operationID).toBe(p.operationID);
+ const assertion=loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3),path='/member/operations/'+p.operationID;
+ const second=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ const replies=await Promise.all([s.send(path+'/submit',{assertion}),second.fetch(s.request(path+'/submit',{assertion},s.grant.token),{peer:'digital-other'})]);
+ expect(replies.map(r=>r.status)).toEqual([200,200]);const result=await replies[0]!.json();expect(await replies[1]!.json()).toEqual(result);
+ expect(result.operationState).toBe('committed');expect(result.decision.state).toBe('decided');expect(result.decision.candidates[0].valence).toBe('kept');
+ expect(result.receipt).toBeUndefined();
+ // Advance the offer independently; recovery still returns exactly what this decision recorded.
+ await s.unit.run(store=>memberRuntime(store,s.c,now).engine.settle(s.offer.id,now()));
+ // Another composition reads the saved result without sending a signature again.
+ const fresh=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ expect(await (await fresh.fetch(s.request(path+'/outcome',undefined,s.grant.token),{peer:'digital-restart'})).json()).toEqual(result);
+ expect((await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,4)})).status).toBe(404);
+ expect((await s.send(path+'/cancel',{})).status).toBe(404);
+ const stored=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return {state:r.engine.mustGet(s.offer.id,now()).state,operation:r.operations.find(o=>o.id===p.operationID)};});
+ expect(stored.state).toBe('settled');expect(stored.operation?.kind).toBe('digital_decision');expect(stored.operation?.state).toBe('committed');
+});
+test('digital cancelled and expired preparations cannot be dispatched and can be replaced',async()=>{
+ const s=await digitalSetup(),p=await (await s.prepare()).json(),path='/member/operations/'+p.operationID;
+ expect(await (await s.send(path+'/cancel',{})).json()).toEqual({cancelled:true});
+ expect((await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)})).status).toBe(404);
+ const second=await (await s.prepare()).json();expect(second.operationID).not.toBe(p.operationID);
+ const later=()=>now()+60001,app=await openPostgresMemberHTTP(pool,s.identity,s.c,later);
+ expect((await app.fetch(s.request('/member/operations/'+second.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,second.publicKey.challenge,3)},s.grant.token),{peer:'expired'})).status).toBe(404);
+ const replacement=await app.fetch(s.request('/member/decisions/prepare',{offer:s.offer.id,decisions:s.decisions},s.grant.token),{peer:'replace'});
+ expect(replacement.status).toBe(200);expect((await replacement.json()).operationID).not.toBe(second.operationID);
+});
+test('digital changed review, missing carriage and cross-household access refuse without effect',async()=>{
+ const s=await digitalSetup(),p=await (await s.prepare()).json(),path='/member/operations/'+p.operationID;
+ await s.unit.run(store=>{const rows=store.map<any>('deliberations'),v=rows.get(s.offer.id);v.perCandidate[s.offer.candidates[0]!.id].argument_against='Changed terms';rows.set(s.offer.id,v);});
+ expect((await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)})).status).toBe(404);
+ expect(await s.unit.run(store=>memberRuntime(store,s.c,now).engine.mustGet(s.offer.id,now()).state)).toBe('presented');
+ // A scoped token for another household cannot discover the preparation.
+ const outsider=await setup();
+ const other=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);
+  r.authority.provisionUnclaimedPrincipal('outsider',['merchant-1']);
+  r.authority.registerCredential(outsider.input.credential,'outsider');
+  r.login.provisionVerifiedPasskey(outsider.input.credential,coseOf(outsider.pair),1,outsider.user);
+  r.authority.markCredentialProven(outsider.input.credential);r.authority.adoptHousehold('outsider',outsider.input.credential);
+  return r.authority.createSessionAfterVerification(outsider.input.credential,now()+90000);
+ });
+ expect((await s.send('/auth/session',undefined,other.token)).status).toBe(200);
+ for(const suffix of ['', '/outcome'])expect((await s.send(path+suffix,undefined,other.token)).status).toBe(404);
+ expect((await s.send('/member/decisions/prepare',{offer:s.offer.id,decisions:s.decisions},other.token)).status).toBe(404);
+ await s.send(path+'/cancel',{});
+ await s.unit.run(store=>store.map('delivery').delete(s.offer.id));
+ expect((await s.prepare()).status).toBe(404);
+ expect((await s.send('/member/decisions/prepare',{offer:s.offer.id,decisions:[]})).status).toBe(404);
+});
+test('digital database write failure rolls back the engine decision, operation and counter',async()=>{
+ const s=await digitalSetup(),p=await (await s.prepare()).json(),path='/member/operations/'+p.operationID;
+ const assertion=loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3);
+ // A trigger scoped to this fixture fails a persisted decided offer after in-memory verification.
+ const fn='fail_digital_'+randomUUID().replaceAll('-','');
+ await pool.query(`CREATE FUNCTION atarasy_member.${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.deployment = '${s.identity.id}' AND NEW.namespace = 'offers' AND NEW.value::jsonb->>'state' = 'decided' THEN RAISE EXCEPTION 'injected decision write failure'; END IF; RETURN NEW; END $$`);
+ await pool.query(`CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON atarasy_member.engine_rows FOR EACH ROW EXECUTE FUNCTION atarasy_member.${fn}()`);
+ try{
+  expect((await s.send(path+'/submit',{assertion})).status).toBe(503);
+  const state=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return {offer:r.engine.mustGet(s.offer.id,now()).state,operation:r.operations.find(o=>o.id===p.operationID)?.state};});
+  expect(state).toEqual({offer:'presented',operation:'prepared'});
+ }finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
+ // Same assertion/counter remains usable because its counter write rolled back too.
+ expect((await s.send(path+'/submit',{assertion})).status).toBe(200);
+});
+test('digital explicit refusal survives a discarded submit response without another signature',async()=>{
+ const s=await digitalSetup(),decisions=s.offer.candidates.map(c=>({candidate:c.id,valence:'returned'}));
+ const p=await (await s.send('/member/decisions/prepare',{offer:s.offer.id,decisions})).json();
+ const path='/member/operations/'+p.operationID;
+ await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3)});
+ // The response is intentionally discarded; the client only retains the original operation ID.
+ const fresh=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ const response=await fresh.fetch(s.request(path+'/outcome',undefined,s.grant.token),{peer:'lost-response'});
+ expect(response.status).toBe(200);const value=await response.json();
+ expect(value.operationState).toBe('committed');expect(value.decision.state).toBe('settled');
+ expect(value.decision.candidates.every((c:any)=>c.valence==='returned')).toBe(true);
+ expect(await s.unit.run(store=>memberRuntime(store,s.c,now).engine.settlement(s.offer.id)?.charged)).toBe(0);
 });
