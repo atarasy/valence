@@ -434,24 +434,38 @@ describe("§14.2, question 56: a mandate that arrives by a move is a claim", () 
     expect(engine.mandates.claimFor(MANDATE)).toMatchObject({ version: 2 ** 20 });
   });
 
-  test("a version with no room to follow it is refused", () => {
-    // NOTE (mutation check, 2026-09-18): version_ceiling_unchecked. At 2^53
-    // `before.version + 1 === before.version`, so the version stops rising and
-    // the property the canonical bytes rest on fails: a household tightened a
-    // ceiling at that number and its own earlier submission replayed the loose
-    // one back. Measured 2026-09-18.
-    const { engine } = makeEngine();
-    const keyOf = (k: string) => engine.publicKeyFor(k);
-    // A claim carries the version, so signing one is the route by which such a
-    // number would otherwise reach a record: the claim is what makes the case
-    // reachable at all.
+  test("record refuses an invalid version even in a claim held by an older host", () => {
+    // NOTE (mutation check, 2026-09-20): version_ceiling_unchecked fails
+    // this test and the signed-history boundary test below.
+    // The import bound now rejects these claims before record sees them. Seed
+    // historical held claims directly so the first-version check cannot mask
+    // the independent version guard. Use exactly the same terms for the claim
+    // and signature, including its lapse, so canonical matching is exercised.
     for (const version of [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1, 0, 1.5]) {
-      const fresh = makeEngine().engine;
-      fresh.mandates.importMandate(terms({ version }) as never);
-      expect(() => fresh.mandates.record({ ...signedBy(terms({ version })), keyOf: (k: string) => fresh.publicKeyFor(k) }))
+      const { engine } = makeEngine();
+      const m = terms({ version });
+      (engine.mandates as unknown as { claims: Map<string, unknown> }).claims.set(MANDATE, m);
+      expect(engine.mandates.claimFor(MANDATE)).toEqual(m);
+      expect(() => engine.mandates.record({ ...signedBy(m), keyOf: (k: string) => engine.publicKeyFor(k) }))
         .toThrow(expect.objectContaining({ code: "stale_version" }));
+      expect(engine.mandates.get(MANDATE)).toBeUndefined();
+      expect(engine.mandates.claimFor(MANDATE)).toEqual(m);
     }
-    expect(engine.mandates.get(MANDATE)).toBeUndefined();
+  });
+
+  test("the last recordable version succeeds but its successor leaves signed history intact", () => {
+    const { engine } = makeEngine();
+    const m = terms({ version: Number.MAX_SAFE_INTEGER - 1 });
+    (engine.mandates as unknown as { claims: Map<string, unknown> }).claims.set(MANDATE, m);
+    const record = (value: ReturnType<typeof terms>) => engine.mandates.record({
+      ...signedBy(value), keyOf: (k: string) => engine.publicKeyFor(k),
+    });
+    record(m);
+    expect(engine.mandates.get(MANDATE)).toMatchObject(m);
+    expect(engine.mandates.claimFor(MANDATE)).toBeUndefined();
+    expect(() => record({ ...m, version: Number.MAX_SAFE_INTEGER }))
+      .toThrow(expect.objectContaining({ code: "stale_version" }));
+    expect(engine.mandates.get(MANDATE)).toMatchObject(m);
   });
 
   test("a claim signed by anything but the household's own key is refused", () => {
