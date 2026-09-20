@@ -520,3 +520,42 @@ test('disabled snapshot candidate preserves digital withdrawal history, successo
   await postgresStore(destination,s.identity).run(store=>{const r=memberRuntime(store,s.c,now);expect(r.journal.currentIncarnation(s.offer.id)).toBe(1);expect(r.quotes.find(s.offer.id)?.carriage).toBe(550);});
  }finally{await destination.end();await pool.query(`DROP DATABASE "${db}" WITH (FORCE)`);}
 });
+
+async function permissionSetup(){
+ const s=await setup(),{PermissionLedger}=await import('../../engine/src/hub/permissions.ts');
+ const permissions=await s.unit.run(store=>{const ledger=new PermissionLedger(store),action=ledger.openAction({household:s.input.house,describes:'Synthetic action-specific request',expiresAt:now()+60000});return ['first','second'].map(grantee=>ledger.grant({household:s.input.house,grantee,scope:['offers'],purpose:'Synthetic limited permission',expires_at:now()+5000,asked_from:action.id,now:now()}));});
+ return {...s,permissions};
+}
+test('member lists only own permission history and revokes one grant idempotently across restart',async()=>{
+ const s=await permissionSetup(),list=await s.send('/member/permissions/list');expect(list.status).toBe(200);expect(list.headers.get('cache-control')).toBe('no-store');const listed=await list.json();expect(listed.permissions).toEqual(s.permissions);
+ const [a,b]=s.permissions;const revoked=await(await s.send('/member/permissions/revoke',{permission:a!.id})).json();expect(revoked.permission.revoked_at).toBe(now());
+ const restarted=await openPostgresMemberHTTP(pool,s.identity,s.c,()=>now()+1);
+ const retry=await restarted.fetch(s.request('/member/permissions/revoke',{permission:a!.id},s.grant.token),{peer:'permission-retry'});expect(await retry.json()).toEqual(revoked);
+ const latest=await(await s.send('/member/permissions/list')).json();expect(latest.permissions.find((p:any)=>p.id===b!.id)).toEqual(b);
+ if(process.env.ATARASY_PERMISSION_FIXTURE_OUTPUT)writeFileSync(process.env.ATARASY_PERMISSION_FIXTURE_OUTPUT,JSON.stringify({scope:'Synthetic PostgreSQL permission list and individual revocation; no native UI or new-grant ceremony.',environment:{name:s.c.environment,origin:s.c.origin},session:await(await s.send('/auth/session')).json(),listed,revoked,after:latest},null,2)+'\n',{flag:'wx',mode:0o600});
+ const {PermissionLedger}=await import('../../engine/src/hub/permissions.ts');await s.unit.run(store=>{const ledger=new PermissionLedger(store);expect(ledger.forHousehold(s.input.house)).toHaveLength(2);});
+});
+test('permission routes reject foreign ids caller household injection revoked credentials and malformed requests',async()=>{
+ const s=await permissionSetup(),other=await setup();
+ const outsider=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);r.authority.provisionUnclaimedPrincipal('permission-outsider',['merchant-1']);r.authority.registerCredential(other.input.credential,'permission-outsider');r.login.provisionVerifiedPasskey(other.input.credential,coseOf(other.pair),1,other.user);r.authority.markCredentialProven(other.input.credential);r.authority.adoptHousehold('permission-outsider',other.input.credential);return r.authority.createSessionAfterVerification(other.input.credential,now()+90000);});
+ expect((await(await s.send('/member/permissions/list',undefined,outsider.token)).json()).permissions).toEqual([]);
+ expect((await s.send('/member/permissions/revoke',{permission:s.permissions[0]!.id},outsider.token)).status).toBe(404);
+ for(const value of [{permission:s.permissions[0]!.id,household:s.input.house},{permission:'unknown'},{},[]])expect((await s.send('/member/permissions/revoke',value)).status).toBe(404);
+ expect((await s.send('/member/permissions/list?household=foreign')).status).toBe(404);
+ expect((await s.send('/member/permissions/list',{})).status).toBe(405);
+ await s.unit.run(store=>memberRuntime(store,s.c,now).authority.revokeCredential(s.input.credential));expect((await s.send('/member/permissions/list')).status).toBe(404);
+});
+test('expired permissions remain in history but do not permit access; revocation leaves other grants effective',async()=>{
+ const s=await permissionSetup(),{PermissionLedger}=await import('../../engine/src/hub/permissions.ts'),[first,second]=s.permissions;
+ const allowed=(grantee:string,at:number)=>s.unit.run(store=>new PermissionLedger(store).allows({household:s.input.house,grantee,field:'offers',now:at}));
+ expect(await allowed(first!.grantee,now())).toBe(true);await s.send('/member/permissions/revoke',{permission:first!.id});expect(await allowed(first!.grantee,now())).toBe(false);expect(await allowed(second!.grantee,now())).toBe(true);expect(await allowed(second!.grantee,second!.expires_at)).toBe(false);
+ const later=await openPostgresMemberHTTP(pool,s.identity,s.c,()=>now()+5000);const list=await later.fetch(s.request('/member/permissions/list',undefined,s.grant.token),{peer:'expired-permissions'});expect((await list.json()).permissions).toHaveLength(2);
+});
+test('database failure during individual revocation preserves the full ledger for a later retry',async()=>{
+ const s=await permissionSetup(),fn='fail_permission_'+randomUUID().replaceAll('-','');
+ await pool.query(`CREATE FUNCTION atarasy_member.${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.deployment = '${s.identity.id}' AND NEW.namespace = 'permissions' THEN RAISE EXCEPTION 'injected permission failure'; END IF; RETURN NEW; END $$`);
+ await pool.query(`CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON atarasy_member.engine_rows FOR EACH ROW EXECUTE FUNCTION atarasy_member.${fn}()`);
+ try{expect((await s.send('/member/permissions/revoke',{permission:s.permissions[0]!.id})).status).toBe(503);expect((await(await s.send('/member/permissions/list')).json()).permissions).toEqual(s.permissions);}
+ finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
+ expect((await s.send('/member/permissions/revoke',{permission:s.permissions[0]!.id})).status).toBe(200);
+});

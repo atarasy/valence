@@ -1,0 +1,11 @@
+# Authenticated permission history and revocation
+
+`GET /member/permissions/list` uses the bearer session's verified household. It returns `{household, checkedAt, permissions}` including active, expired and revoked records. A client must derive current status from expiry and revocation, not infer that every listed row permits access. The existing permission ledger enforces expiry at the point of access.
+
+`POST /member/permissions/revoke` accepts exactly `{permission: <UUID>}`. It revokes only that household's matching row. Repeated requests return the original revoked record and timestamp, so response loss does not require a new operation or change history. Other grants are preserved. The response is `{household, permission}`. Both routes are no-store, use the existing admission budget and transaction boundary, reject query parameters and enforce their methods. Foreign identifiers and unavailable/revoked sessions produce the existing generic refusal. The caller cannot supply a household.
+
+Revocation is an authenticated reduction of access; it creates no grant and invokes no payment provider. The reference ledger's full history remains exportable. A database failure rolls back revocation and allows an exact later retry. Clients should read the list after an uncertain response and require a separate explicit action before another request.
+
+This does not expose the reference engine's unauthenticated permission mutation routes. New grants still require action-specific review, narrow fields, purpose, requesting party, expiry and cancellation that grants nothing. That authenticated action/review flow and the native permission screen remain to be implemented. UI copy must use meaningful labels and not model identifiers as its primary explanation.
+
+Synthetic HTTP tests cover two valid households, one-grant revocation, exact retry after independent composition, malformed requests, credential revocation, expiry enforcement and a database-trigger failure. `ATARASY_PERMISSION_FIXTURE_OUTPUT`, when explicitly set for the test, writes only public synthetic response shapes for native integration, with exclusive creation and mode 0600. It contains no bearer token or private key.
