@@ -15,6 +15,7 @@ import { createApp } from '../../engine/src/http.ts';
 import { Registry } from '../../engine/src/shared/registry.ts';
 import { RecoveryRegister } from '../../engine/src/hub/node.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
+import { openPermissionRequests } from './permission-requests.ts';
 import { PermissionLedger } from '../../engine/src/hub/permissions.ts';
 import type { PreparedAssertion } from './login.ts';
 import { presenterRequest } from './presenter-http.ts';
@@ -33,7 +34,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||!!permission,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||!!permission||!!permissionRequest,presenter=/^\/presenter\/(self|configs|disclosures|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -64,6 +65,16 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
      if(presenter)return presenterRequest(r,{quotes:r.quotes,deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
      if(member){
       if(url.search)return {status:404,body:JSON.stringify({error:'operation_unavailable'})};
+      if(permissionRequest){
+       const [,id,decision]=permissionRequest;
+       if(request.method!==(decision?'POST':'GET'))return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
+       const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];
+       if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
+       const api=openPermissionRequests(r);
+       if(decision&&(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).join(',')!=='digest'||typeof (inputBody as {digest:unknown}).digest!=='string'))throw new Error('Permission request unavailable');
+       const value=decision?api.decide(token,id!,(inputBody as {digest:string}).digest,decision as 'grant'|'cancel'):id?api.read(token,id):api.list(token);
+       return {status:200,body:JSON.stringify(value)};
+      }
       if(permission){
        const listing=permission[1]==='list';
        if(request.method!==(listing?'GET':'POST'))return {status:405,body:JSON.stringify({error:'method_not_allowed'})};

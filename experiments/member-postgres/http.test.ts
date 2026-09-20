@@ -559,3 +559,41 @@ test('database failure during individual revocation preserves the full ledger fo
  finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
  expect((await s.send('/member/permissions/revoke',{permission:s.permissions[0]!.id})).status).toBe(200);
 });
+
+async function requestPermission(s:Awaited<ReturnType<typeof setup>>){
+ const {openPermissionRequests}=await import('./permission-requests.ts');
+ return s.unit.run(store=>openPermissionRequests(memberRuntime(store,s.c,now)).issueDuplicateCheck({household:s.input.house,action:'Check for a duplicate before proposing a gift',requester:{id:'giver-one',name:'Example giver'},purpose:'Avoid proposing a product you already have',reviewExpiresAt:now()+5000,accessExpiresAt:now()+10000}));
+}
+test('permission review freezes terms and grants exactly once across concurrent retries and restart',async()=>{
+ const s=await setup(),review=await requestPermission(s),path='/member/permissions/requests/'+review.terms.requestID;
+ expect((await(await s.send('/member/permissions/requests')).json()).requests).toEqual([review]);expect(await(await s.send(path)).json()).toEqual(review);
+ for(const body of [{digest:'0'.repeat(64)},{digest:review.digest,scope:['offers']},{digest:review.digest,household:'foreign'},{}])expect((await s.send(path+'/grant',body)).status).toBe(404);
+ expect((await(await s.send('/member/permissions/list')).json()).permissions).toEqual([]);
+ const second=await openPostgresMemberHTTP(pool,s.identity,s.c,now),replies=await Promise.all([s.send(path+'/grant',{digest:review.digest}),second.fetch(s.request(path+'/grant',{digest:review.digest},s.grant.token),{peer:'retry'})]);
+ expect(replies.map(r=>r.status)).toEqual([200,200]);const granted=await replies[0]!.json();expect(await replies[1]!.json()).toEqual(granted);
+ expect(granted.state).toBe('granted');expect(granted.terms).toEqual(review.terms);expect(granted.permission.scope).toEqual(['duplicate_check']);expect(granted.permission.grantee).toBe(review.terms.requester.id);
+ expect((await(await s.send('/member/permissions/list')).json()).permissions).toHaveLength(1);expect((await s.send(path+'/cancel',{digest:review.digest})).status).toBe(404);
+ await s.send('/member/permissions/revoke',{permission:granted.permission.id});const retry=await(await s.send(path+'/grant',{digest:review.digest})).json();expect(retry.permission.revoked_at).toBe(now());expect(retry.permission.id).toBe(granted.permission.id);
+ if(process.env.ATARASY_PERMISSION_REQUEST_FIXTURE_OUTPUT)writeFileSync(process.env.ATARASY_PERMISSION_REQUEST_FIXTURE_OUTPUT,JSON.stringify({environment:{name:s.c.environment,origin:s.c.origin},session:await(await s.send('/auth/session')).json(),review,granted,revoked:retry},null,2)+'\n',{flag:'wx',mode:0o600});
+});
+test('permission cancellation is terminal and expiry grants nothing',async()=>{
+ const s=await setup(),review=await requestPermission(s),path='/member/permissions/requests/'+review.terms.requestID;
+ const cancelled=await(await s.send(path+'/cancel',{digest:review.digest})).json();expect(cancelled.state).toBe('cancelled');expect(cancelled.permission).toBeNull();expect(await(await s.send(path+'/cancel',{digest:review.digest})).json()).toEqual(cancelled);expect((await s.send(path+'/grant',{digest:review.digest})).status).toBe(404);
+ const laterReview=await requestPermission(s),laterPath='/member/permissions/requests/'+laterReview.terms.requestID,late=await openPostgresMemberHTTP(pool,s.identity,s.c,()=>now()+5000);
+ expect((await(await late.fetch(s.request(laterPath,undefined,s.grant.token),{peer:'late'})).json()).state).toBe('expired');expect((await late.fetch(s.request(laterPath+'/grant',{digest:laterReview.digest},s.grant.token),{peer:'late'})).status).toBe(404);expect((await(await s.send('/member/permissions/list')).json()).permissions).toEqual([]);
+});
+test('permission requests refuse foreign sessions invalidated credentials and unsupported methods',async()=>{
+ const s=await setup(),review=await requestPermission(s),other=await setup(),path='/member/permissions/requests/'+review.terms.requestID;
+ const outsider=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);r.authority.provisionUnclaimedPrincipal('request-outsider',['merchant-1']);r.authority.registerCredential(other.input.credential,'request-outsider');r.login.provisionVerifiedPasskey(other.input.credential,coseOf(other.pair),1,other.user);r.authority.markCredentialProven(other.input.credential);r.authority.adoptHousehold('request-outsider',other.input.credential);return r.authority.createSessionAfterVerification(other.input.credential,now()+90000);});
+ expect((await(await s.send('/member/permissions/requests',undefined,outsider.token)).json()).requests).toEqual([]);expect((await s.send(path,undefined,outsider.token)).status).toBe(404);expect((await s.send(path+'/grant',{digest:review.digest},outsider.token)).status).toBe(404);
+ expect((await s.send(path,{})).status).toBe(405);expect((await s.send(path+'/grant')).status).toBe(405);expect((await s.send(path+'?household=other')).status).toBe(404);
+ await s.unit.run(store=>memberRuntime(store,s.c,now).authority.revokeCredential(s.input.credential));expect((await s.send(path+'/grant',{digest:review.digest})).status).toBe(404);
+});
+test('permission grant and request outcome roll back together after database failure',async()=>{
+ const s=await setup(),review=await requestPermission(s),path='/member/permissions/requests/'+review.terms.requestID,fn='fail_request_'+randomUUID().replaceAll('-','');
+ await pool.query(`CREATE FUNCTION atarasy_member.${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.deployment = '${s.identity.id}' AND NEW.namespace = 'member_permission_requests' THEN RAISE EXCEPTION 'injected request failure'; END IF; RETURN NEW; END $$`);
+ await pool.query(`CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON atarasy_member.engine_rows FOR EACH ROW EXECUTE FUNCTION atarasy_member.${fn}()`);
+ try{expect((await s.send(path+'/grant',{digest:review.digest})).status).toBe(503);expect((await(await s.send('/member/permissions/list')).json()).permissions).toEqual([]);expect(await(await s.send(path)).json()).toEqual(review);}
+ finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
+ expect((await s.send(path+'/grant',{digest:review.digest})).status).toBe(200);
+});
