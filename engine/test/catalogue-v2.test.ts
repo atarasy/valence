@@ -72,10 +72,10 @@ test('HTTP publication rejects altered eligibility legacy signatures and caller 
  const c=config(),signature=signConfig(c);
  const request=async(body:unknown)=>handle(new Request('https://unit.example/_presenter/configs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}));
  for(const patch of [{ambient:false},{keeps_for_days:364},{fits_ten_per_container:false},{regulated:true}]){
-  const altered=structuredClone(c);Object.assign(altered.products.tea!.physical!,patch);const r=await request({...altered,signature});expect(r.status).toBe(422);expect((await r.json()).error).toBe('bad_signature');
+  const altered=structuredClone(c);Object.assign(altered.products.tea!.physical!,patch);const r=await request({...altered,signature});expect(r.status).toBe(422);expect(await r.json()).toMatchObject({error:'bad_signature'});
  }
- const old=sign(null,legacy(c),PRESENTER_PAIR.privateKey).toString('base64');const legacyResult=await request({...c,signature:old});expect(legacyResult.status).toBe(422);expect((await legacyResult.json()).error).toBe('bad_signature');
- const injected=await request({...c,signature,__catalogueSignatureFormat:2});expect(injected.status).toBe(400);expect((await injected.json()).error).toBe('malformed');
+ const old=sign(null,legacy(c),PRESENTER_PAIR.privateKey).toString('base64');const legacyResult=await request({...c,signature:old});expect(legacyResult.status).toBe(422);expect(await legacyResult.json()).toMatchObject({error:'bad_signature'});
+ const injected=await request({...c,signature,__catalogueSignatureFormat:2});expect(injected.status).toBe(400);expect(await injected.json()).toMatchObject({error:'malformed'});
  const good=await request({...c,signature});expect(good.status).toBe(201);expect(await good.json()).toEqual(c);
 });
 
