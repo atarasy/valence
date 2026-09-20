@@ -76,7 +76,7 @@ async function presentBox(r:ReturnType<typeof memberRuntime>,household:string,ma
  const offer=r.engine.createOffer({binding:'physical',household,purpose:'replenish',config_version:config.version,expires_at:at+DAY_MS,mandate,price_band:null,giver:null,candidates:[{product:ids.product,quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
  await r.engine.present(offer.id,at);
  r.deliveries.record({offer:offer.id,carriage:ACCEPTANCE_CARRIAGE,code:'dev-acceptance',status:'delivered',now:at});
- r.engine.collect({offer:offer.id,consumed:offer.candidates.map(v=>v.id),returned:[],at});
+ await r.engine.collect({offer:offer.id,consumed:offer.candidates.map(v=>v.id),returned:[],at});
  r.engine.applyRecoveryTo(offer.id,at);
  return {presenter:ids.presenter,merchant:ids.merchant,offer:offer.id};
 }

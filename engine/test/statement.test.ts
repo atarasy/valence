@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { tightestDailyCeiling } from "../src/engine/mandate-source.js";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MANDATE_PAIR, MERCHANT_PAIR, PHYSICAL, decideSigned, disclosureFor, makeEngine, settleSigned, signConfig, GIFT_GIVER, presentGift, withdrawSigned} from "./helpers.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { canonicalConfig } from "../src/engine/offers.js";
 import { canonicalDecisions } from "../src/shared/decisions.js";
@@ -52,7 +52,7 @@ async function collected(
   // price includes carriage records 0; `null` is an implementation that never
   // recorded what it did, and `settle` refuses it.
   deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
-  engine.collect({
+  await engine.collect({
     offer: offer.id,
     returned: [offer.candidates[2]!.id],
     consumed: [offer.candidates[0]!.id, offer.candidates[1]!.id],
@@ -123,7 +123,7 @@ describe("§6.5: a physical box with goods used settles on the household's signa
     const { engine } = makeEngine();
     const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
     await engine.present(offer.id);
-    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    await engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
     engine.applyRecoveryTo(offer.id);
     const settlement = await engine.settle(offer.id);
     expect(settlement.charged).toBe(0);
@@ -208,10 +208,23 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
         version: 1,
       } as never;
     },
-    async outOfNetworkCeilingOf() { return null; },
-    async dailyCeilingOf() {
-      // Question 60. Read only for a gift's giver, which these stubs never are.
-      return null;
+    async dailyCeilingOf(h: string) {
+      // Question 60 read this for a gift's giver alone, which these stubs
+      // never are. Question 68 reads it for a household's own offers too, so
+      // the stub answers from the one mandate it holds.
+      const m = (await this.get("")) as { household?: string; ceiling_daily?: number | null } | undefined;
+      return m?.household === h ? m.ceiling_daily ?? null : null;
+    },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
     },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
@@ -237,7 +250,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     engine.readMandatesFrom(cooling(3600));
     const offer = await collected(made);
     const [coffee, tea, nori] = offer.candidates;
-    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await expect(withdrawSigned(engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     // The box is as it was, so the household can still sign its statement.
     const after = engine.mustGet(offer.id);
     expect(after.state).toBe("decided");
@@ -257,7 +270,7 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }, { product: "miso-a" }]));
     await engine.present(offer.id);
     await decideSigned(engine, offer.id, offer.candidates.map((c) => ({ candidate: c.id, valence: "kept" as const, kept_as: "self" as const })));
-    const taken = await engine.withdrawDecisions(offer.id);
+    const taken = await withdrawSigned(engine, offer.id);
     for (const c of taken.candidates) expect(c.valence).toBe("offered");
   });
 
@@ -277,8 +290,8 @@ describe("§16.5 and §11.2: the cooling window takes back what the person signe
     deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
     const [used, returned, kept] = offer.candidates;
     await decideSigned(engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
-    engine.collect({ offer: offer.id, consumed: [used!.id], returned: [returned!.id], at: Date.now() });
-    await expect(engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await engine.collect({ offer: offer.id, consumed: [used!.id], returned: [returned!.id], at: Date.now() });
+    await expect(withdrawSigned(engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     // The box stays decided and settleable, so the consumed line is charged.
     expect(engine.mustGet(offer.id).state).toBe("decided");
     const settlement = await settleSigned(engine, offer.id);
@@ -401,10 +414,23 @@ describe("§6, §16.3: nothing is written on refusal, at the ledger as well", ()
         version: 1,
       } as never;
     },
-    async outOfNetworkCeilingOf() { return null; },
-    async dailyCeilingOf() {
-      // Question 60. Read only for a gift's giver, which these stubs never are.
-      return null;
+    async dailyCeilingOf(h: string) {
+      // Question 60 read this for a gift's giver alone, which these stubs
+      // never are. Question 68 reads it for a household's own offers too, so
+      // the stub answers from the one mandate it holds.
+      const m = (await this.get("")) as { household?: string; ceiling_daily?: number | null } | undefined;
+      return m?.household === h ? m.ceiling_daily ?? null : null;
+    },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
     },
     async holdsAny(h: string) {
       // §16.2, question 56. A stub that answers with a mandate must also say
@@ -689,9 +715,21 @@ describe("§12, §16.3, question 60: a gift is held to the daily ceiling of whoe
         cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
       } as never;
     },
-    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf(h: string) {
-      return h === GIVER ? giver : null;
+      // Question 68: the recipient's own offers read the recipient's tightest,
+      // which here is the one mandate this stub holds.
+      return h === GIVER ? giver : h === HOUSEHOLD ? recipient : null;
+    },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
     },
     async holdsAny(h: string) {
       return h === HOUSEHOLD;
@@ -752,8 +790,18 @@ describe("§6.4, question 62: a set that owes nothing settles at nothing, at onc
         cooling_seconds: seconds, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
       } as never;
     },
-    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() { return null; },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
+    },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   });
   const returnedSet = async (engine: ReturnType<typeof makeEngine>["engine"], valence: "returned" | "kept" = "returned") => {
@@ -814,8 +862,18 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
         cooling_seconds: null, co_signers: [], lapses_at: Date.now() + 86_400_000, version: 1,
       } as never;
     },
-    async outOfNetworkCeilingOf() { return null; },
     async dailyCeilingOf() { return null; },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
+    },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   };
 
@@ -831,7 +889,7 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
     expect(ledger.get(offer.id)!.status).toBe("held");
     expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(0);
     deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
-    engine.collect({ offer: offer.id, returned: [offer.candidates[1]!.id], consumed: [offer.candidates[0]!.id], at: Date.now() });
+    await engine.collect({ offer: offer.id, returned: [offer.candidates[1]!.id], consumed: [offer.candidates[0]!.id], at: Date.now() });
     expect(engine.mustGet(offer.id).candidates[0]!.valence).toBe("consumed");
   });
 
@@ -846,7 +904,7 @@ describe("§6.4, §11.2, question 62: a box is not finished until it is collecte
     engine.readTheDayFrom({ async totalSince() { return 1; }, async report() {}, async reportOffer() {} } as never);
     const offer = engine.createOffer(physical(HOUSEHOLD, [{ product: "coffee-a" }, { product: "tea-b" }]));
     await engine.present(offer.id);
-    engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
+    await engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [], at: Date.now() });
     engine.applyRecoveryTo(offer.id);
     expect(engine.mustGet(offer.id).state).toBe("decided");
     expect(await engine.settleWhatOwesNothing(HOUSEHOLD)).toBe(1);
@@ -864,7 +922,17 @@ describe("questions 60 and 62: what a second refutation pass found", () => {
       } as never;
     },
     dailyCeilingOf: over.daily ?? (async () => null),
-    async outOfNetworkCeilingOf() { return null; },
+    // Question 68, decided 2026-09-19. A household's own offers read the
+    // tightest across every mandate it holds. These stubs hold one, so the
+    // tightest is that one where it is this household's.
+    async outOfNetworkCeilingOf(h: string) {
+      const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+      return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+    },
+    async coolingSecondsOf(h: string) {
+      const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+      return m?.household === h ? m.cooling_seconds ?? null : null;
+    },
     async holdsAny(h: string) { return h === HOUSEHOLD; },
   });
 

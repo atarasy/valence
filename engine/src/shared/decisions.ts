@@ -155,6 +155,29 @@ export type Assertion = {
 };
 
 /**
+ * §16.5, decided 2026-09-20 after the third refutation pass over question 68.
+ * **What a withdrawal is signed over.** `DELETE /offers/{id}/decisions` asked
+ * for nothing at all, on the reasoning that withdrawing removes a commitment
+ * and every rule about signatures is about adding one. The pass measured what
+ * that is worth once question 68 made the window the longest across every
+ * mandate a household holds: a recipient signed `returned` on every line of a
+ * ceremonial offer, which owed nothing and was final; whoever held the offer
+ * id, the presenter included, took the decision back five days later; §12
+ * then defaulted the first line at the expiry and charged the giver 1,200 for
+ * a gift the recipient had refused **in writing**. The longer window is the
+ * interval in which that is open, so question 68 lengthened it.
+ *
+ * The moment the set was decided is inside the bytes, so a signature covers
+ * the set that stands now and not the next one: a re-decision stamps a new
+ * moment, and a withdrawal signature captured on the way is spent when it is
+ * used. It is not §15's nonce, which is what binds the request to the person
+ * for every route at once, and this does not pretend to be.
+ */
+export function canonicalWithdrawal(offerId: string, decidedAt: number): Buffer {
+  return Buffer.from(["valence.withdraw.1", offerId, String(decidedAt)].join("\n"), "utf8");
+}
+
+/**
  * §10.5. The challenge a canonical form produces: base64url of its SHA-256,
  * unpadded, which is what a browser writes into `clientDataJSON`.
  *

@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { type Mandate } from "./hub/mandates.js";
 import { challengeForGift } from "./shared/gift.js";
-import { tightestDailyCeiling, tightestOutOfNetworkCeiling } from "./engine/mandate-source.js";
+import { longestCooling, tightestDailyCeiling, tightestOutOfNetworkCeiling } from "./engine/mandate-source.js";
 import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
@@ -125,6 +125,11 @@ function offerView(o: Offer, recovery: Recovery | undefined) {
     presented_at: o.presented_at,
     expires_at: o.expires_at,
     state: o.state,
+    // §16.5, decided 2026-09-20. **The moment the set was decided**, which the
+    // window runs from and which a withdrawal is signed over. It was not on
+    // this surface, and taking a set back asked for no signature, so nothing
+    // needed it; a member's client cannot sign for a moment it cannot read.
+    decided_at: o.decided_at,
     exploration_floor_met: o.exploration_floor_met,
     mandate: o.mandate,
     candidates: o.candidates.map((c) => candidateView(c, recovery)),
@@ -651,9 +656,40 @@ async function route(
           view(await engine.decide(id, decisions, confirmation))
         );
       }
-      // §16.5. The person takes back a signed set inside its cooling window.
+      // §16.5. The person takes back a signed set inside its cooling window,
+      // **and signs for doing it** (decided 2026-09-20, after the third
+      // refutation pass over question 68). The route took no body at all, so
+      // whoever held the offer id could void a decision the household had
+      // signed; the pass turned a recipient's written refusal of a gift into
+      // a 1,200 charge to its giver that way.
       if (method === "DELETE" && action === "decisions") {
-        return json(view(await engine.withdrawDecisions(id)));
+        const raw = strict(await body(request), ["signature", "assertion"], "withdrawal");
+        const hasSignature = raw.signature !== undefined;
+        const hasAssertion = raw.assertion !== undefined;
+        if (hasSignature === hasAssertion) {
+          throw badRequest(
+            "malformed",
+            "taking a set back carries a signature or an assertion, and not both"
+          );
+        }
+        let sent: PersonalSignature;
+        if (hasSignature) {
+          sent = { signature: requireString(raw, "signature", "withdrawal") };
+        } else {
+          const a = strict(
+            raw.assertion,
+            ["authenticator_data", "client_data_json", "signature"],
+            "assertion"
+          );
+          sent = {
+            assertion: {
+              authenticator_data: requireString(a, "authenticator_data", "assertion"),
+              client_data_json: requireString(a, "client_data_json", "assertion"),
+              signature: requireString(a, "signature", "assertion"),
+            },
+          };
+        }
+        return json(view(await engine.withdrawDecisions(id, sent)));
       }
       if (method === "GET" && action === "approval") {
         // Clause 54. Data, never presentation. The hub draws the screen.
@@ -773,8 +809,14 @@ async function route(
           throw badRequest("malformed", "missing_notes must map candidate ids to notes");
         }
         // §11.2. Every rule and its order are the engine's, so an in-process
-        // caller meets the same refusals as this route.
-        const collected = engine.collect({
+        // caller meets the same refusals as this route, and fixes a box's
+        // protections where the collection is what decides it (§16.3, §16.5).
+        // **That sentence was false for a day**: the fixing lived on a
+        // `collectDeciding` only this route called, and `collect`, which the
+        // service behind api-dev.vox.delivery calls, decided a box and
+        // recorded nothing. Measured by the second refutation pass over
+        // question 68 and moved into the engine on 2026-09-20.
+        const collected = await engine.collect({
           offer: id,
           returned: raw.returned as string[],
           consumed: raw.consumed as string[],
@@ -1177,8 +1219,17 @@ async function route(
     // held to at settlement (§12, §16.3).
     // Question 65: and the tightest out-of-network ceiling, which a gift's
     // giver is held to at presentation (clause 46, §12).
+    // Question 68, decided 2026-09-19: and the longest cooling window, and
+    // the out-of-network ceiling now binds a household's own offers too,
+    // whichever of its mandates they name (clause 47, §16.2, §16.5). The
+    // route carries three protections and still not the rows.
     const held = engine.mandates.forHousehold(household);
-    return json({ has: held.length > 0, ceiling_daily: tightestDailyCeiling(held), ceiling_out_of_network: tightestOutOfNetworkCeiling(held) });
+    return json({
+      has: held.length > 0,
+      ceiling_daily: tightestDailyCeiling(held),
+      ceiling_out_of_network: tightestOutOfNetworkCeiling(held),
+      cooling_seconds: longestCooling(held),
+    });
   }
 
   if (parts[0] === "_node" && parts[1] === "mandates" && parts[2] && method === "GET") {
@@ -1277,7 +1328,7 @@ async function route(
       // /6; an offer it does not name reads as unconfirmed (question 50).
       // A /6 export predates question 61 and carries no `payments` and no
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       const moving = segment(parts[1]);
@@ -1371,6 +1422,18 @@ async function route(
           throw badRequest("malformed", "a collection's lines must be lists");
         }
       }
+      // §16.5, question 68. The same shape check as `confirmations` below,
+      // for the same reason: a store binds a key it was handed, and a value
+      // that is not a record leaves a decided set holding something no read
+      // can use.
+      const protections = body_.decided_protections;
+      if (
+        protections !== undefined &&
+        (protections === null || typeof protections !== "object" || Array.isArray(protections) ||
+          Object.values(protections).some((v) => !v || typeof v !== "object" || Array.isArray(v) || typeof (v as { at?: unknown }).at !== "number"))
+      ) {
+        throw badRequest("malformed", "decided_protections must map offer ids to what each set was decided under");
+      }
       const shaped = body_.confirmations;
       if (
         shaped !== undefined &&
@@ -1402,11 +1465,22 @@ async function route(
         body_.deliveries = (body_.deliveries ?? []).filter((r) => !behind.has(r.offer));
         body_.notes = (body_.notes ?? []).filter((r) => !behindCandidates.has(r.candidate));
         if (body_.confirmations) for (const id of leftBehind) delete body_.confirmations[id];
+        if (body_.decided_protections) for (const id of leftBehind) delete body_.decided_protections[id];
       }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
         if (!carried.has(id)) {
           throw unprocessable("unscoped_confirmation", `a confirmation names ${id}, which this import does not carry`);
+        }
+      }
+      // §14.2, question 52. Bound to the offers this body carries, exactly as
+      // the register above is: unscoped, a body of nothing but
+      // `decided_protections` would put a window on an offer the host already
+      // holds, and the window is what `DELETE /offers/{id}/decisions` is open
+      // inside.
+      for (const id of Object.keys(body_.decided_protections ?? {})) {
+        if (!carried.has(id)) {
+          throw unprocessable("unscoped_protections", `a record of what a set was decided under names ${id}, which this import does not carry`);
         }
       }
       // §14.2, question 51. Every refusal the rows below can give is decided
@@ -1458,7 +1532,12 @@ async function route(
         body_.collections = (body_.collections ?? []).filter((r) => !alreadyHere.has(r.offer));
         body_.deliveries = (body_.deliveries ?? []).filter((r) => !alreadyHere.has(r.offer));
         body_.notes = (body_.notes ?? []).filter((r) => !heldCandidates.has(r.candidate));
+        for (const id of alreadyHere) {
+          const arriving = body_.decided_protections?.[id];
+          if (arriving && !isDeepStrictEqual(engine.protectionsOf(id), arriving)) throw differs("record of what was decided for", id);
+        }
         if (body_.confirmations) for (const id of alreadyHere) delete body_.confirmations[id];
+        if (body_.decided_protections) for (const id of alreadyHere) delete body_.decided_protections[id];
       }
       // §14.2, question 52. Every row names the household on the path or an
       // offer this body carries, and none replaces a row the host holds. Only
@@ -1569,6 +1648,7 @@ async function route(
             engine.importConfirmations({ [offer.id]: register[offer.id]! });
           }
         }
+        engine.importDecidedProtections(body_.decided_protections ?? {});
         for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
         for (const n of body_.notes ?? []) engine.importNote(n);
         for (const e of body_.lineage ?? []) engine.importEdge(e, moving);

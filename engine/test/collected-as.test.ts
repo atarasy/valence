@@ -35,7 +35,7 @@ describe("§3: what a collection named each candidate (question 48)", () => {
     await made.engine.present(offer.id);
     const [back, used, gone] = offer.candidates;
     expect(collectedAs(made.engine.recoveries.for(offer.id), back!.id)).toBeNull();
-    made.engine.collect({
+    await made.engine.collect({
       offer: offer.id,
       returned: [back!.id],
       consumed: [used!.id],
@@ -60,7 +60,7 @@ describe("a recovery row stored before question 46", () => {
     const offer = made.engine.createOffer(physical(HOUSEHOLD));
     await made.engine.present(offer.id);
     made.deliveries.record({ offer: offer.id, carriage: 550, code: `dc-${offer.id.slice(0, 8)}`, status: "delivered" });
-    made.engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [] });
+    await made.engine.collect({ offer: offer.id, returned: offer.candidates.map((c) => c.id), consumed: [] });
     const rows = (made.engine.recoveries as unknown as { rows: Map<string, Record<string, unknown>> }).rows;
     const { missing: _m, missing_notes: _n, ...legacy } = rows.get(offer.id)!;
     rows.set(offer.id, legacy);

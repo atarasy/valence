@@ -9,6 +9,7 @@ import { canonicalStatement, disputable, needsStatement, owesSettlement, stateme
 import { canonicalGift, type GiftTerms } from "../shared/gift.js";
 import {
   canonicalDecisions,
+  canonicalWithdrawal,
   confirmationToken,
   verifyBy,
   verifyDecisions,
@@ -19,7 +20,7 @@ import {
 } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { claimsToBeAKey, householdOfMandate, isHouseholdName, nameOf } from "../common/names.js";
-import { LocalMandates, type MandateSource } from "./mandate-source.js";
+import { LocalMandates, boundedCeiling, boundedCooling, type MandateSource } from "./mandate-source.js";
 import type { Mandate } from "../hub/mandates.js";
 import { LocalDay, type DaySource } from "./day-source.js";
 import { type DeliverySource } from "./delivery-source.js";
@@ -102,6 +103,58 @@ function utcMidnight(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
+/**
+ * §16.3, §16.5, decided 2026-09-19 after the first refutation pass over
+ * question 68. The cooling window and the daily ceiling a decided set was
+ * decided under, read from the mandates live at that moment. `ceiling_daily`
+ * is absent where the set could owe nothing when it was decided, because a
+ * value that can never refuse is not worth a round trip.
+ *
+ * **A read that fails falls back to the last value this host read for that
+ * household**, decided 2026-09-20 after the third refutation pass over
+ * question 68. The second pass's decision was that a decision is never
+ * refused because the source could not answer, and the first build met it by
+ * recording `"unknown"` and applying nothing: the third pass measured what
+ * that is worth to the party that holds the connection. On a split
+ * deployment (§13.1) the engine is the presenter's side and the hub is the
+ * household's, and one silent read at one moment, which is a moment that
+ * party knows because the decision arrives through it, removed a day-long
+ * cooling window and a ceiling of 500 from a set that then charged 900.
+ * **The read that has to fail belonged to the party that profits from it
+ * failing.** A last reading cannot be chosen that way: it is whatever the
+ * household last set, and switching the network off leaves it in place.
+ *
+ * `stale` names the values that came from an earlier reading, because §16.5's
+ * record is what a person and a presenter are later told the set was decided
+ * under, and "this was not read at the decision" is part of that answer.
+ */
+type Fixed = number | null;
+export type FixedProtections = {
+  at: number;
+  cooling_seconds: Fixed;
+  ceiling_daily?: Fixed;
+  stale?: ("cooling_seconds" | "ceiling_daily")[];
+};
+
+/** What a record holds of a value, or null where it holds nothing usable. */
+function known(value: Fixed | undefined): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+/** The longer of two windows, where null is no window. */
+function longerWindow(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
+}
+
+/** The tighter of two ceilings, where null is no ceiling. */
+function tighterCeiling(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.min(a, b);
+}
+
 import { canonicalConfig } from "../shared/catalogue.js";
 export { canonicalConfig } from "../shared/catalogue.js";
 
@@ -133,6 +186,28 @@ export class ValenceEngine {
    * day 999,999 on a settlement a stranger had imported.
    */
   private readonly settledHere: Map<string, true>;
+  /**
+   * §16.3, §16.5, decided 2026-09-19. **What a decided set was decided under,
+   * recorded with the decision.** Question 68 read the tightest window and
+   * ceiling among the mandates live at settlement, so a lapse ended both for
+   * sets already decided: measured by the first refutation pass, a set decided
+   * inside a day's window was settled 11 seconds later, past a daily ceiling
+   * of 500, because the mandate that set both had lapsed meanwhile, whether by
+   * its own date or because the household brought the date forward. Recording
+   * rather than recomputing against the decision's moment, because a
+   * recomputation reads the rows as they stand at settlement, and a version
+   * recorded after the decision replaces the one the set was decided under.
+   */
+  private readonly decidedProtections: Map<string, FixedProtections>;
+  /**
+   * §16.3, §16.5, decided 2026-09-20. **The last answer this host had from
+   * the mandate source for each household**, one row per household and kind,
+   * which a decision falls back to where the source cannot be reached. It is
+   * on the store rather than in memory because an outage that follows a
+   * restart is the same outage, and a cache that empties with the process
+   * would hand the party holding the connection the switch again.
+   */
+  private readonly lastProtectionRead: Map<string, Fixed>;
   private readonly memberStatementConfirmations: Map<string, string>;
   /** §16.3, question 66. The tail of each payer's settlements in flight. Memory only: it orders, it records nothing. */
   private readonly settling = new Map<string, Promise<void>>();
@@ -231,6 +306,101 @@ export class ValenceEngine {
     return mandate;
   }
 
+  /**
+   * §16.1, decided 2026-09-20 after the third refutation pass over question
+   * 68. **Every protection this engine uses is read through here**, so that
+   * the bound §16 puts on what a mandate may hold is applied where the value
+   * is used and not only where it is written. The pass measured the bound in
+   * one place and the value in three: `MandateRegister.record` refused a
+   * window above 30 days, and a source that is not this register, or a row
+   * written before the bound, still fixed a set for thirty years.
+   *
+   * Out of range is read as the nearest value in range rather than refused,
+   * for the reason `boundedCooling` gives.
+   */
+  private async coolingRead(household: string, now: number): Promise<number | null> {
+    return boundedCooling(await this.mandateSource.coolingSecondsOf(household, now));
+  }
+
+  /** §16.3. The same reading for the payer's daily ceiling. */
+  private async dailyCeilingRead(household: string, now: number): Promise<number | null> {
+    return boundedCeiling(await this.mandateSource.dailyCeilingOf(household, now));
+  }
+
+  /** §16.2, clause 46. And for the out-of-network ceiling read at presentation. */
+  private async outOfNetworkRead(household: string, now: number): Promise<number | null> {
+    return boundedCeiling(await this.mandateSource.outOfNetworkCeilingOf(household, now));
+  }
+
+  /**
+   * §16.3, §16.5, decided 2026-09-19. The protections a set is decided under:
+   * the longest window among the household's live mandates, and, where the
+   * set may owe something, the tightest daily ceiling among its payer's.
+   *
+   * **A decision is never refused because this could not be read**, decided
+   * 2026-09-20 after the second refutation pass over question 68 measured
+   * what refusing cost. Against a hub built one day earlier, which answers
+   * the household route without `cooling_seconds`, a household's refusal of
+   * a gift was refused `hub_refused`; the offer then reached its expiry with
+   * every line still `offered`, §12 defaulted them, and the giver was charged
+   * 700 for goods the recipient had said no to. **A refusal must never become
+   * a purchase**, and a decision is the one place in this engine where the
+   * message is often "no". What could not be read is recorded as `"unknown"`
+   * and the set falls back to the live values at settlement and at
+   * withdrawal, which is where it stood before the record existed. The
+   * settlement's own reads still refuse (§16.5), so nothing settles under a
+   * protection that was not applied; what changes is that nothing is bought
+   * because the hub was down either.
+   */
+  private async protectionsAt(offer: Offer, now: number, mayOwe: boolean): Promise<FixedProtections> {
+    const stale: ("cooling_seconds" | "ceiling_daily")[] = [];
+    const cooling = await this.readOrLast("cooling_seconds", offer.household, () => this.coolingRead(offer.household, now));
+    if (cooling.stale) stale.push("cooling_seconds");
+    const fixed: FixedProtections = { at: now, cooling_seconds: cooling.value };
+    if (mayOwe) {
+      const payer = offer.giver ?? offer.household;
+      const ceiling = await this.readOrLast("ceiling_daily", payer, () => this.dailyCeilingRead(payer, now));
+      if (ceiling.stale) stale.push("ceiling_daily");
+      fixed.ceiling_daily = ceiling.value;
+    }
+    if (stale.length > 0) fixed.stale = stale;
+    return fixed;
+  }
+
+  /**
+   * §16.3, §16.5, decided 2026-09-20 after the third refutation pass over
+   * question 68. **One read for the record: the source's answer, or the last
+   * answer this host had from it for this household.**
+   *
+   * A read that has never succeeded here has no last answer, and **that
+   * decision is refused** rather than made under no protection at all. It is
+   * the one case the second pass's decision does not cover, and its cost is
+   * measured in `old-hub.test.ts`: against a hub that has never carried
+   * `cooling_seconds`, a recipient cannot decline a gift, so §12 defaults it
+   * at the expiry and the giver is charged. What the fallback buys is that a
+   * hub which answered once goes on protecting the household through an
+   * outage, which is the case the pass could switch on at will.
+   *
+   * Every refusal is caught and not only the hub's: the record exists to hold
+   * what was read, and a source that throws for its own reasons is still a
+   * source that did not answer.
+   */
+  private async readOrLast(
+    kind: "cooling_seconds" | "ceiling_daily",
+    household: string,
+    read: () => Promise<number | null>
+  ): Promise<{ value: Fixed; stale: boolean }> {
+    const key = `${kind}|${household}`;
+    try {
+      const value = await read();
+      this.lastProtectionRead.set(key, value);
+      return { value, stale: false };
+    } catch (err) {
+      if (!this.lastProtectionRead.has(key)) throw err;
+      return { value: this.lastProtectionRead.get(key) ?? null, stale: true };
+    }
+  }
+
   /** §13.1. Point the engine at a hub it does not share a process with. */
   readMandatesFrom(source: MandateSource): void {
     this.mandateSource = source;
@@ -276,6 +446,8 @@ export class ValenceEngine {
     this.notes = store.map("notes");
     this.settlements = store.map("settlements");
     this.settledHere = store.map("settled_here");
+    this.decidedProtections = store.map("decided_protections");
+    this.lastProtectionRead = store.map("mandate_reads");
     // §14.2, question 66. **What a store says about itself is written when
     // it is opened, not inferred later.** A store that predates the record of
     // where a settlement was made cannot say which of its settlements a move
@@ -795,9 +967,41 @@ export class ValenceEngine {
     // is read and the recipient's is not, as question 60 did for the daily
     // ceiling; the recipient's lapse above is still its own mandate's. A giver
     // that holds no mandate here sets no ceiling, as an unknown mandate does.
+    //
+    // Clause 47 and §16.2, question 68, decided the same day. **A household's
+    // own offers are held to the tightest ceiling across every mandate it
+    // holds, and not to the one the offer names.** `MandateRegister.record`
+    // asks for co-signers only where the identifier already has a row, so a
+    // household holding `.1` with a ceiling of 0 and a co-signer recorded
+    // `.2` at version 1, alone, with any ceiling it liked: measured
+    // 2026-09-19, loosening `.1` was refused `unsigned` and an offer of
+    // 1,200 entirely out of network presented under `.2`. Recording a
+    // second label is still the household's alone, which is why question
+    // 56's first attempt was refused. **A mandate naming a co-signer nobody
+    // holds does now bind every label**, which the first refutation pass over
+    // question 68 measured and this comment had denied: the household is held
+    // until that mandate lapses, which §16.1 bounds at 400 days.
+    //
+    // The named mandate is live here and is one of this household's, so the
+    // minimum is the tightest of the two views even where the source's
+    // reading of "live" differs from this one. **Which mandates are live is
+    // read against two different clocks depending on the deployment.** The
+    // local source reads its rows against this engine's `now`, as it does for
+    // a giver (question 66's fifth refutation pass). The remote source does
+    // not send `now`: each of its reads is a separate request answered at the
+    // hub's own clock, so on a split deployment the hub decides when a lapse
+    // takes effect, and two reads within one settlement can be answered at two
+    // different moments. The first refutation pass over question 68 found
+    // this comment claiming otherwise. A household with no mandate here is
+    // left alone, as before both questions.
     const ceiling = offer.giver
-      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
-      : mandate?.ceiling_out_of_network ?? null;
+      ? await this.outOfNetworkRead(offer.giver, now)
+      : mandate
+        ? Math.min(
+            mandate.ceiling_out_of_network,
+            (await this.outOfNetworkRead(offer.household, now)) ?? Infinity
+          )
+        : null;
     if (ceiling !== null) {
       // What a maker or merchant gave is never charged (clause 10), so it is
       // nothing the payer could spend outside the network either, as it is
@@ -1004,6 +1208,31 @@ export class ValenceEngine {
         );
       }
     }
+    // §16.3, §16.5, decided 2026-09-19. **A set that this decision completes
+    // keeps the window and the ceiling live at this moment**, whatever lapses
+    // afterwards. Read before anything is written, so that a decision is
+    // never half-applied, and then checked again, because the read is the one
+    // wait in this method and another decision could have reached the same
+    // lines during it. A read that fails records the last value this host
+    // read for that household and refuses nothing; one it has never read for
+    // that household refuses (`readOrLast`, decided 2026-09-20).
+    const planned = new Map(plan.map(({ candidate, d }) => [candidate.id, d.valence]));
+    const completes = offer.candidates.every((c) => c.valence !== "offered" || planned.has(c.id));
+    // A physical box can owe what its collection finds, whatever the household
+    // said of its lines, so its ceiling is always read.
+    const mayOwe = offer.binding === "physical" || offer.candidates.some((c) => {
+      const v = planned.get(c.id) ?? c.valence;
+      return (v === "kept" || v === "defaulted") && !c.given_by;
+    });
+    const fixed = completes ? await this.protectionsAt(offer, now, mayOwe) : undefined;
+    const current = this.offers.get(offerId);
+    if (
+      !current || current.state !== "presented" ||
+      current.candidates.some((c) => planned.has(c.id) && c.valence !== "offered") ||
+      (this.confirmations.get(offerId) ?? []).includes(confirmation)
+    ) {
+      throw conflict("already_decided", "another decision reached this set while it was being checked");
+    }
     for (const { candidate, d } of plan) {
       if (d.valence === "kept") {
         candidate.kept_as = d.kept_as!;
@@ -1031,6 +1260,13 @@ export class ValenceEngine {
       });
     }
     this.confirmations.set(offerId, [...used, ...spent]);
+    // §10.5: nothing is written on refusal. **The record went in before the
+    // day was told**, which is the last thing here that can fail, so a day
+    // source that threw left `decided_protections` on the disk of a set the
+    // disk still held as `presented`. Measured by the second refutation pass
+    // over question 68. It is written beside the commit instead, past every
+    // wait, so the two land together or neither does.
+    if (offer.state === "decided") this.decidedProtections.set(offer.id, fixed!);
     this.commit(offer);
     if (offer.state === "decided") await this.settleIfNothingOwed(offer, now);
     return offer;
@@ -1102,7 +1338,7 @@ export class ValenceEngine {
    * theirs alone and needs no co-signer: withdrawing removes a commitment, and
    * every rule about second signatures is about adding one.
    */
-  async withdrawDecisions(offerId: string, now = Date.now()): Promise<Offer> {
+  async withdrawDecisions(offerId: string, sent: PersonalSignature, now = Date.now()): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "decided") {
       throw conflict("bad_state", `cannot withdraw decisions on an offer in ${offer.state}`);
@@ -1140,6 +1376,33 @@ export class ValenceEngine {
         "no confirmation is recorded for this set, because a collection resolved it or it arrived without one, so there is nothing to withdraw"
       );
     }
+    // §16.5, decided 2026-09-20 after the third refutation pass over question
+    // 68. **A signed decision is taken back by a signature over taking it
+    // back.** This route asked for nothing, and the guard above is the only
+    // reason that was ever tolerable: a set nobody signed is refused there,
+    // so what reaches this line is always a set the household signed, and
+    // whoever held the offer id could void it. The pass measured a recipient
+    // signing `returned` on every line of a gift, which owed nothing and was
+    // final, and a caller holding nothing but the offer id taking that back
+    // five days later: §12 defaulted the first line at the expiry and charged
+    // the giver 1,200 for a gift refused **in writing**. `main` refuses it,
+    // because there the window came from the label the offer names and had
+    // closed; question 68 made the window the longest across every mandate
+    // the household holds, so **the change lengthened the interval in which
+    // an unsigned request can void a signed set**, and nothing in three
+    // passes had asked what the window's own length is worth to somebody
+    // holding an offer id.
+    //
+    // The moment the set was decided is inside the signed bytes, so a
+    // signature covers the set that stands and not the next one. It is not
+    // §15's nonce, which binds a request to a person for every route at once.
+    const householdKey = this.householdKeyFor(offer);
+    if (!householdKey) {
+      throw unprocessable("unsigned", `no key is registered for the household of mandate ${offer.mandate}`);
+    }
+    if (!verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId)) {
+      throw unprocessable("bad_signature", "the signature does not cover taking this set back");
+    }
     // §16.5, question 47, decided 2026-09-15. **A box past its expiry cannot
     // have its signed set taken back.** The reset returns every line the
     // collection did not name to `offered`, and on a box past its expiry the
@@ -1155,8 +1418,23 @@ export class ValenceEngine {
         "this box is past its expiry, so the signed set stands; what was kept is settled as kept"
       );
     }
-    const mandate = await this.mandateFor(offer);
-    const cooling = mandate?.cooling_seconds ?? null;
+    // §16.5, question 68, decided 2026-09-19. **The window is the tightest,
+    // which is the longest, across every mandate this household holds**, and
+    // not the one the offer's mandate names. `mandateFor` is still called, and
+    // called first, because §16.2's `mandate_unknown` belongs wherever the
+    // mandate is read: an offer naming a label this household never recorded
+    // is refused here as it is at presentation. Its result is not read: the
+    // window below comes from every mandate and not from that one.
+    await this.mandateFor(offer);
+    // §16.5, decided 2026-09-19. **And never shorter than the window the set
+    // was decided under.** A lapse since the decision does not end it: the
+    // first refutation pass over question 68 measured a take-back 11 seconds
+    // into a day's window refused `no_cooling`, because the one mandate that
+    // set the window had lapsed.
+    const cooling = longerWindow(
+      await this.coolingRead(offer.household, now),
+      known(this.decidedProtections.get(offer.id)?.cooling_seconds)
+    );
     if (cooling === null) {
       throw unprocessable(
         "no_cooling",
@@ -1454,7 +1732,11 @@ export class ValenceEngine {
     // §16.5 and §16.3. Both refusals name themselves: four refusals in this
     // section share a status code, and a `422` that says only "unprocessable"
     // is one a person cannot act on and a probe cannot tell from another.
-    const mandate = await this.mandateFor(offer);
+    //
+    // Question 68: the call stands for §16.2's `mandate_unknown`, which
+    // belongs wherever the mandate is read, and its result is not read; both
+    // protections below come from every mandate this household holds.
+    await this.mandateFor(offer);
     // §16.5, question 42, decided 2026-09-13. **A cooling window belongs to a
     // set the household signed and to nothing else.** §11 moves a box out of
     // `presented` when a collection resolves its last line, stamping
@@ -1469,13 +1751,41 @@ export class ValenceEngine {
     // **The message no longer promises a settle.** It read "this set settles
     // at N", and nothing in this engine settles on a timer: `sweep` applies
     // expiry and the only settle is the route.
-    if (!needsStatement(offer, missing) && mandate?.cooling_seconds != null && offer.decided_at !== null) {
-      const opens = offer.decided_at + mandate.cooling_seconds * 1000;
-      if (now < opens) {
-        throw unprocessable(
-          "mandate_cooling",
-          `this set cannot settle before ${opens}, the cooling window the person set`
-        );
+    //
+    // §16.5, question 68, decided 2026-09-19. **The window is the tightest,
+    // which is the longest, across every mandate this household holds.** A
+    // household that had set one on the label its offers named settled at
+    // once under a second label it recorded alone.
+    //
+    // §16.5, decided 2026-09-19. **Never shorter than the window the set was
+    // decided under**, which a lapse since the decision does not end.
+    //
+    // §16.5, decided 2026-09-20 after the third refutation pass over question
+    // 68. **The window is asked for only where it can bar the settlement.**
+    // It was read before this test and not inside it, on the reasoning that a
+    // rule with nothing to disturb rests on nothing a break could catch. What
+    // that bought instead: a hub predating question 68 answers the household
+    // route without `cooling_seconds`, so the read refuses `hub_refused`, and
+    // on a statement settlement that refusal leaves the statement unsigned
+    // and §6.5 blocks that presenter's next box. Measured by the pass on a
+    // household holding **no mandate at all**: its weekly boxes stop until
+    // its host is upgraded, over a protection it has not set. The rule that
+    // a window never bars a statement is proven by
+    // `statement_ignores_the_window` instead, which is a break of this test.
+    const fixed = this.decidedProtections.get(offer.id);
+    if (!needsStatement(offer, missing) && offer.decided_at !== null) {
+      const coolingSeconds = longerWindow(
+        await this.coolingRead(offer.household, now),
+        known(fixed?.cooling_seconds)
+      );
+      if (coolingSeconds != null) {
+        const opens = offer.decided_at + coolingSeconds * 1000;
+        if (now < opens) {
+          throw unprocessable(
+            "mandate_cooling",
+            `this set cannot settle before ${opens}, the cooling window the person set`
+          );
+        }
       }
     }
 
@@ -1577,11 +1887,22 @@ export class ValenceEngine {
     // zero-settle for a household that had tightened its ceiling, and the set
     // stayed behind its reserve. Nor is the giver's ceiling asked for, so a
     // hub that predates question 60 cannot refuse a declined gift.
+    // §16.3, question 68, decided 2026-09-19. **A household's own settlement
+    // reads the tightest ceiling across every mandate it holds**, which is
+    // what the giver's branch already does, and for the same reason: a
+    // household that had tightened one label settled freely under a second it
+    // recorded alone. The payer of an offer with no giver is the household.
+    //
+    // §16.3, decided 2026-09-19. **And never looser than the ceiling the set
+    // was decided under.** Measured by the first refutation pass over question
+    // 68: a set decided under a daily ceiling of 500 was charged 900 once the
+    // mandate that set it had lapsed, with nobody acting at all.
     const ceilingDaily = charged === 0
       ? null
-      : offer.giver
-        ? await this.mandateSource.dailyCeilingOf(offer.giver, now)
-        : mandate?.ceiling_daily ?? null;
+      : tighterCeiling(
+          await this.dailyCeilingRead(offer.giver ?? offer.household, now),
+          known(fixed?.ceiling_daily)
+        );
     if (ceilingDaily != null && charged > 0) {
       const dayStart = (this.config.dayStart ?? utcMidnight)(now);
       // §16.3. The sum comes from the person's own copy, not from this
@@ -1726,15 +2047,30 @@ export class ValenceEngine {
    * at `at`, and folds it in. The offer is read at that time first, so a
    * deadline already passed has made its `lost` before the rules are read
    * rather than depending on whether some earlier read passed a time.
+   *
+   * §16.3, §16.5, decided 2026-09-19 and moved here on 2026-09-20. **A
+   * collection that decides a box fixes the protections live at its own
+   * moment**, as a household's signature does. A collection resolves every
+   * line, so a box still `presented` is decided by it, and the result is kept
+   * only where this collection is the one that decided the box.
+   *
+   * **It lived on a `collectDeciding` the route called, and that was wrong.**
+   * The second refutation pass over question 68 measured it: `collect` decided
+   * a box and recorded nothing, and two callers outside the tests call
+   * `collect`, one of them the service behind `api-dev.vox.delivery`
+   * (`experiments/member-postgres/device-acceptance.ts`). §11.2 exists because
+   * every rule of a collection is the engine's, so a rule reachable only
+   * through the route is not one. Making this `async` is what it cost, and
+   * every caller now awaits it.
    */
-  collect(input: {
+  async collect(input: {
     offer: string;
     returned: string[];
     consumed: string[];
     missing?: string[];
     missing_notes?: Record<string, string>;
     at?: number;
-  }): Recovery {
+  }): Promise<Recovery> {
     const at = input.at ?? Date.now();
     const offer = this.mustGet(input.offer, at);
     // §11.2, question 46. A collection resolves open lines, so it belongs to a
@@ -1747,8 +2083,18 @@ export class ValenceEngine {
     if (offer.state !== "presented" && !(offer.state === "decided" && !this.settlements.has(offer.id))) {
       throw conflict("bad_state", `cannot record a collection for an offer in ${offer.state}`);
     }
+    // The read comes before anything is written, and refuses nothing
+    // (`protectionsAt`), so a hub that cannot answer leaves the collection
+    // recorded with nothing fixed rather than unrecorded: a courier's
+    // collection is not a place to fail closed, since a line the deadline
+    // resolves is `lost` and §3.2 never bills a household for `lost`, so the
+    // loss would fall on the merchant for goods the household did use.
+    const mayOwe = input.consumed.length > 0 ||
+      offer.candidates.some((c) => (c.valence === "kept" || c.valence === "defaulted") && !c.given_by);
+    const fixed = offer.state === "presented" ? await this.protectionsAt(offer, at, mayOwe) : undefined;
     const row = this.recoveries.collect({ ...input, candidates: offer.candidates, at });
-    this.applyRecoveryTo(input.offer, at);
+    const after = this.applyRecoveryTo(input.offer, at);
+    if (fixed && after.state === "decided" && after.decided_at === at) this.decidedProtections.set(after.id, fixed);
     return row;
   }
 
@@ -1957,6 +2303,46 @@ export class ValenceEngine {
    * signatures rather than being them, and a receiving host compares them
    * without reading them.
    */
+  /**
+   * §16.5. **What a decided set was decided under**, and which of those values
+   * came from an earlier reading because the source did not answer at the
+   * decision. The third refutation pass over question 68 named the silence as
+   * unreadable anywhere: the record was the only holder of it and no route
+   * exposed it, so a household saw `no_cooling` and could not tell it from a
+   * mandate that set no window.
+   */
+  protectionsOf(offerId: string): FixedProtections | undefined {
+    return this.decidedProtections.get(offerId);
+  }
+
+  /**
+   * §14.2, §16.5, decided 2026-09-20 after the third refutation pass over
+   * question 68. **What each of these sets was decided under, for a move.**
+   * §16.5 makes recording the window a MUST and reading the recorded one a
+   * MUST, and nothing carried the record across §14, so a household lost both
+   * by exercising clause 43: at the receiving host its mandates arrive as
+   * claims (question 56), so the live reads answer null, and with no record
+   * either the set has neither a window nor a fixed ceiling. **That is the
+   * shape of question 50's `confirmations`**, a register that lived only in
+   * what a host remembered, dropped on the way, and it cost four refutation
+   * rounds.
+   */
+  decidedProtectionsFor(offerIds: string[]): Record<string, FixedProtections> {
+    const out: Record<string, FixedProtections> = {};
+    for (const id of offerIds) {
+      const held = this.decidedProtections.get(id);
+      if (held) out[id] = held;
+    }
+    return out;
+  }
+
+  /** §14.2. The receiving end, one offer at a time, never replacing a row. */
+  importDecidedProtections(rows: Record<string, FixedProtections>): void {
+    for (const [id, fixed] of Object.entries(rows)) {
+      if (!this.decidedProtections.has(id)) this.decidedProtections.set(id, fixed);
+    }
+  }
+
   confirmationsFor(offerIds: string[]): Record<string, string[]> {
     const out: Record<string, string[]> = {};
     for (const id of offerIds) {

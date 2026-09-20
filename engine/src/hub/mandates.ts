@@ -89,6 +89,15 @@ export function canonicalMandate(m: Omit<Mandate, "version"> & { version: number
 export function loosens(before: Mandate, after: Mandate): boolean {
   if (after.ceiling_out_of_network > before.ceiling_out_of_network) return true;
   if (after.lapses_at > before.lapses_at) return true;
+  // §16.1, decided 2026-09-19 after the first refutation pass over question
+  // 68. **Bringing the lapse forward loosens a mandate that names co-signers**,
+  // because it takes their protection away sooner. It counted as a tightening,
+  // so the household did it alone: measured, a household holding `.1` with a
+  // ceiling of 0, a daily ceiling of 0, a day's window and a co-signer moved
+  // `.1`'s lapse to a second away, and once it had lapsed an offer of 1,200
+  // presented and settled at once under a loose `.2` it had recorded alone.
+  // A mandate that names nobody is the household's alone either way.
+  if (before.co_signers.length > 0 && after.lapses_at < before.lapses_at) return true;
   if (before.co_signers.some((k) => !after.co_signers.includes(k))) return true;
   // §16.1. Widening a ceiling and shortening cooling loosen for the same
   // reason raising the out-of-network ceiling does: each takes away a
@@ -111,6 +120,44 @@ function shortens(before: number | null, after: number | null): boolean {
   if (before === null) return false;
   return after < before;
 }
+
+/**
+ * §16.1, clause 58, decided 2026-09-19 after the first refutation pass over
+ * question 68, and widened on 2026-09-20 after the second. **The furthest a
+ * version's lapse may be from the moment it is recorded: 400 days.**
+ *
+ * It was 366, a year plus the minutes between two clocks. The second pass
+ * measured what that day of slack is spent on: the reference hub computes
+ * the lapse on the member's own device (`Date.now() + 365` days), so a phone
+ * two days fast had every button on its protections screen refused
+ * `lapse_too_far`, tightenings included, because each writes a whole version.
+ * This bound exists to bound the freeze a lost co-signer puts a household
+ * under, and 34 days more of a freeze that already runs a year costs nothing
+ * next to a member who can set no protection at all.
+ */
+export const MAX_LAPSE_MS = 400 * 86_400_000;
+
+/**
+ * §16.5, decided 2026-09-20 after the second refutation pass over question
+ * 68. **The longest cooling window a version may record: 30 days.**
+ *
+ * `cooling_seconds` was bounded below at the HTTP route and nowhere else, and
+ * this comment said "bounded below and not above" until the third refutation
+ * pass measured the register taking -1 and 0.5 from every caller that is not
+ * that route. Both ends are here now, and `boundedCooling` is the reading end.
+ * A decided set keeps
+ * the window it was decided under (§16.5), so the pass measured a household
+ * recording a window of thirty years, deciding a set, dropping the window a
+ * second later, alone, and leaving that set unsettleable until 2056 while its
+ * own mandate showed no window at all. The presenter sees no cause, and the
+ * reserve expires under it. Nothing here is theft, since the money held up is
+ * the household's own, but a hold nothing bounds is not a protection either.
+ *
+ * **What it costs** is the household that wanted a longer window than a
+ * month; a window is time to change one's mind about a set just signed, and a
+ * month is already far past that.
+ */
+export const MAX_COOLING_SECONDS = 30 * 86_400;
 
 /** A claim above this cannot be one a household reached, and signing it would leave no room to follow. */
 const MAX_CLAIMED_VERSION = 2 ** 20;
@@ -313,6 +360,58 @@ export class MandateRegister {
     }
     if (mandate.lapses_at <= now) {
       throw unprocessable("lapsed", "a mandate that has already lapsed cannot be recorded");
+    }
+    // §16.1, clause 58. **A lapse at most 400 days out.** Question 68 made
+    // every mandate a household holds bind every offer it makes, and bringing
+    // a co-signed lapse forward now needs the co-signers, so a mandate naming
+    // a co-signer nobody holds (a typo, or a key the person lost) holds the
+    // household until it lapses. Nothing bounded that: the first refutation
+    // pass over question 68 recorded a lapse in the year 9999.
+    //
+    // **The message names this host's clock**, because the party whose date
+    // is wrong is usually the member's device: the reference hub computes the
+    // lapse there, and a member reading "400 days" against their own calendar
+    // has nothing to act on. Named after the second refutation pass.
+    if (mandate.lapses_at > now + MAX_LAPSE_MS) {
+      throw unprocessable(
+        "lapse_too_far",
+        `a mandate lapses at most 400 days after it is recorded, and ${mandate.lapses_at} is further out than that from ${now}, which is this host's clock`
+      );
+    }
+    // §16.5. **A cooling window of at most 30 days.** The window a set was
+    // decided under outlives the mandate that set it, by design, and nothing
+    // bounded it: the second refutation pass over question 68 recorded thirty
+    // years, decided a set, dropped the window a second later alone, and left
+    // that set unable to settle until 2056 under a mandate showing no window.
+    // A tightening is the household's alone (§16.1), so this needs no
+    // co-signer to reach and no attacker at all.
+    if (mandate.cooling_seconds != null && mandate.cooling_seconds > MAX_COOLING_SECONDS) {
+      throw unprocessable(
+        "cooling_too_long",
+        `a cooling window is at most ${MAX_COOLING_SECONDS} seconds, which is 30 days, and ${mandate.cooling_seconds} is longer`
+      );
+    }
+    // §16.1. **And a whole number, and not below zero.** The comment above
+    // `MAX_COOLING_SECONDS` said `cooling_seconds` "was bounded below and not
+    // above", and the third refutation pass over question 68 measured that it
+    // was bounded below **at the HTTP route** and never here: the register
+    // took -1, 0.5 and a ceiling of -5, and the route is not the only caller.
+    // `device-acceptance.ts`, the service behind `api-dev.vox.delivery`, and
+    // every test call `record` directly. A negative window is not null, so
+    // §16.5's longest selects it wherever it is the household's only one, and
+    // the screen then shows a window this engine can never honour.
+    for (const [field, value] of [
+      ["ceiling_out_of_network", mandate.ceiling_out_of_network],
+      ["ceiling_daily", mandate.ceiling_daily],
+      ["cooling_seconds", mandate.cooling_seconds],
+    ] as const) {
+      if (value == null) continue;
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw unprocessable(
+          "not_a_protection",
+          `${field} is a whole number of currency units or seconds and never below zero, and ${value} is neither`
+        );
+      }
     }
 
     const required = new Set<string>([mandate.household]);

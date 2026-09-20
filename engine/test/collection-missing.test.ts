@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, settleSigned } from "./helpers.js";
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, decideSigned, makeEngine, settleSigned, withdrawSigned} from "./helpers.js";
 import { needsStatement, statementLines } from "../src/shared/statement.js";
 import { renderStatement } from "../src/hub/statement.js";
 import { MISSING_NOTE_LIMIT } from "../src/engine/physical.js";
@@ -38,9 +38,9 @@ async function box(made: ReturnType<typeof makeEngine>, household: string) {
   return offer;
 }
 
-const code = (fn: () => unknown) => {
+const code = async (fn: () => unknown) => {
   try {
-    fn();
+    await fn();
   } catch (err) {
     return (err as { code?: string }).code;
   }
@@ -52,7 +52,7 @@ describe("§11.2: the collection's rules are the engine's", () => {
     const made = makeEngine();
     const offer = await box(made, HOUSEHOLD);
     const [a] = offer.candidates;
-    expect(code(() => made.engine.collect({ offer: offer.id, returned: [], consumed: [a!.id] }))).toBe("collection_incomplete");
+    expect(await code(() => made.engine.collect({ offer: offer.id, returned: [], consumed: [a!.id] }))).toBe("collection_incomplete");
     expect(made.engine.recoveries.for(offer.id)!.collected_at).toBeNull();
     expect(made.engine.mustGet(offer.id).candidates.every((c) => c.valence === "offered")).toBe(true);
   });
@@ -63,12 +63,13 @@ describe("§11.2: the collection's rules are the engine's", () => {
     const [a, b] = offer.candidates;
     const collect = (body: { returned: string[]; consumed: string[]; missing?: string[]; missing_notes?: Record<string, string> }) =>
       code(() => made.engine.collect({ offer: offer.id, ...body }));
+    // `code` awaits, so each assertion below awaits it.
     // stranger, overlap, unexplained missing, incomplete
-    expect(collect({ returned: [a!.id, "zz"], consumed: [a!.id], missing: [b!.id] })).toBe("unknown_candidate");
+    expect(await collect({ returned: [a!.id, "zz"], consumed: [a!.id], missing: [b!.id] })).toBe("unknown_candidate");
     // overlap, unexplained missing, incomplete
-    expect(collect({ returned: [a!.id], consumed: [], missing: [a!.id] })).toBe("returned_and_consumed");
+    expect(await collect({ returned: [a!.id], consumed: [], missing: [a!.id] })).toBe("returned_and_consumed");
     // unexplained missing, incomplete
-    expect(collect({ returned: [], consumed: [], missing: [b!.id] })).toBe("missing_note_required");
+    expect(await collect({ returned: [], consumed: [], missing: [b!.id] })).toBe("missing_note_required");
     expect(made.engine.recoveries.for(offer.id)!.collected_at).toBeNull();
   });
 
@@ -76,7 +77,7 @@ describe("§11.2: the collection's rules are the engine's", () => {
     const made = makeEngine();
     const offer = await box(made, HOUSEHOLD);
     const ids = offer.candidates.map((c) => c.id);
-    expect(code(() => made.engine.collect({ offer: offer.id, returned: [...ids, ids[0]!], consumed: [] }))).toBe("returned_and_consumed");
+    expect(await code(() => made.engine.collect({ offer: offer.id, returned: [...ids, ids[0]!], consumed: [] }))).toBe("returned_and_consumed");
   });
 
   test("a missing item needs a note of bounded length, and the note is kept", async () => {
@@ -90,9 +91,9 @@ describe("§11.2: the collection's rules are the engine's", () => {
       missing: [gone!.id],
       missing_notes: { [gone!.id]: note },
     });
-    expect(code(() => made.engine.collect(body("   ")))).toBe("missing_note_required");
-    expect(code(() => made.engine.collect(body("x".repeat(MISSING_NOTE_LIMIT + 1))))).toBe("missing_note_required");
-    const row = made.engine.collect(body("not in the box at collection"));
+    expect(await code(() => made.engine.collect(body("   ")))).toBe("missing_note_required");
+    expect(await code(() => made.engine.collect(body("x".repeat(MISSING_NOTE_LIMIT + 1))))).toBe("missing_note_required");
+    const row = await made.engine.collect(body("not in the box at collection"));
     expect(row.missing_notes).toEqual({ [gone!.id]: "not in the box at collection" });
     expect(made.engine.mustGet(offer.id).candidates.find((c) => c.id === gone!.id)!.valence).toBe("lost");
   });
@@ -104,7 +105,7 @@ describe("§11.2: the collection's rules are the engine's", () => {
     await decideSigned(made.engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
     let message = "";
     try {
-      made.engine.collect({ offer: offer.id, returned: [], consumed: [kept!.id, ...rest.map((c) => c.id)] });
+      await made.engine.collect({ offer: offer.id, returned: [], consumed: [kept!.id, ...rest.map((c) => c.id)] });
     } catch (err) {
       expect((err as { code?: string }).code).toBe("candidate_decided");
       message = (err as Error).message;
@@ -120,7 +121,7 @@ describe("§11.2: the collection's rules are the engine's", () => {
       { candidate: used!.id, valence: "returned" },
       { candidate: gone!.id, valence: "returned" },
     ]);
-    made.engine.collect({
+    await made.engine.collect({
       offer: offer.id,
       returned: [back!.id],
       consumed: [used!.id],
@@ -151,7 +152,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     expect(made.engine.mustGet(offer.id).state).toBe("settled");
     let code = "accepted";
     try {
-      made.engine.collect({ offer: offer.id, returned: [], consumed: [offer.candidates[0]!.id], missing: [], at: Date.now() });
+      await made.engine.collect({ offer: offer.id, returned: [], consumed: [offer.candidates[0]!.id], missing: [], at: Date.now() });
     } catch (err) { code = (err as { code?: string }).code ?? "?"; }
     expect(code).toBe("bad_state");
   });
@@ -166,7 +167,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     expect(made.engine.mustGet(offer.id).state).toBe("withdrawn");
     let code = "accepted";
     try {
-      made.engine.collect({ offer: offer.id, returned: [], consumed: [offer.candidates[0]!.id], missing: [], at: Date.now() });
+      await made.engine.collect({ offer: offer.id, returned: [], consumed: [offer.candidates[0]!.id], missing: [], at: Date.now() });
     } catch (err) { code = (err as { code?: string }).code ?? "?"; }
     expect(code).toBe("bad_state");
   });
@@ -175,7 +176,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
   async function missingOnly(made: ReturnType<typeof makeEngine>, household: string) {
     const offer = await box(made, household);
     const [gone, ...rest] = offer.candidates;
-    made.engine.collect({
+    await made.engine.collect({
       offer: offer.id,
       returned: rest.map((c) => c.id),
       consumed: [],
@@ -247,10 +248,23 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
           version: 1,
         } as never;
       },
-      async outOfNetworkCeilingOf() { return null; },
-      async dailyCeilingOf() {
-        // Question 60. Read only for a gift's giver, which these stubs never are.
-        return null;
+      async dailyCeilingOf(h: string) {
+        // Question 60 read this for a gift's giver alone, which these stubs
+        // never are. Question 68 reads it for a household's own offers too, so
+        // the stub answers from the one mandate it holds.
+        const m = (await this.get("")) as { household?: string; ceiling_daily?: number | null } | undefined;
+        return m?.household === h ? m.ceiling_daily ?? null : null;
+      },
+      // Question 68, decided 2026-09-19. A household's own offers read the
+      // tightest across every mandate it holds. These stubs hold one, so the
+      // tightest is that one where it is this household's.
+      async outOfNetworkCeilingOf(h: string) {
+        const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+        return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+      },
+      async coolingSecondsOf(h: string) {
+        const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+        return m?.household === h ? m.cooling_seconds ?? null : null;
       },
       async holdsAny(h: string) {
         // §16.2, question 56. A stub that answers with a mandate must also say
@@ -263,7 +277,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     const offer = await box(made, HOUSEHOLD);
     const [gone, back, kept] = offer.candidates;
     await decideSigned(made.engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
-    made.engine.collect({
+    await made.engine.collect({
       offer: offer.id,
       returned: [back!.id],
       consumed: [],
@@ -272,7 +286,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     });
     // A collection fixes what is in the home; the missing line and the kept
     // line stay as the collection left them, and the recourse is the statement.
-    await expect(made.engine.withdrawDecisions(offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
+    await expect(withdrawSigned(made.engine, offer.id)).rejects.toMatchObject({ code: "not_withdrawable" });
     expect(made.engine.mustGet(offer.id).candidates.map((c) => c.valence)).toEqual(["lost", "returned", "kept"]);
   });
 
@@ -298,10 +312,20 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
             version: 1,
           } as never;
         },
-        async outOfNetworkCeilingOf() { return null; },
         async dailyCeilingOf() {
           // Question 60. Read only for a gift's giver, which these stubs never are.
           return null;
+        },
+        // Question 68, decided 2026-09-19. A household's own offers read the
+        // tightest across every mandate it holds. These stubs hold one, so the
+        // tightest is that one where it is this household's.
+        async outOfNetworkCeilingOf(h: string) {
+          const m = (await this.get("")) as { household?: string; ceiling_out_of_network?: number } | undefined;
+          return m?.household === h ? m.ceiling_out_of_network ?? null : null;
+        },
+        async coolingSecondsOf(h: string) {
+          const m = (await this.get("")) as { household?: string; cooling_seconds?: number | null } | undefined;
+          return m?.household === h ? m.cooling_seconds ?? null : null;
         },
         async holdsAny(h: string) {
           // §16.2, question 56. A stub that answers with a mandate must also say
@@ -321,11 +345,11 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     };
     // Before the expiry the window means what it says.
     const early = await signedBox(HOUSEHOLD);
-    await expect(early.made.engine.withdrawDecisions(early.offer.id)).resolves.toMatchObject({ state: "presented" });
+    await expect(withdrawSigned(early.made.engine, early.offer.id)).resolves.toMatchObject({ state: "presented" });
     // At the expiry, inside the grace and after it, the set stands.
     const { made, offer: late } = await signedBox(HOUSEHOLD);
     for (const at of [late.expires_at, late.expires_at + DAY, late.expires_at + 10 * DAY]) {
-      await expect(made.engine.withdrawDecisions(late.id, at)).rejects.toMatchObject({ code: "not_withdrawable" });
+      await expect(withdrawSigned(made.engine, late.id, at)).rejects.toMatchObject({ code: "not_withdrawable" });
     }
     const after = made.engine.mustGet(late.id, late.expires_at + 10 * DAY);
     expect(after.state).toBe("decided");
@@ -339,7 +363,7 @@ describe("§6.5: a missing line is on the statement, may be disputed, and moves 
     const offer = await box(made, HOUSEHOLD);
     const [gone, back, kept] = offer.candidates;
     await decideSigned(made.engine, offer.id, [{ candidate: kept!.id, valence: "kept", kept_as: "self" }]);
-    made.engine.collect({
+    await made.engine.collect({
       offer: offer.id,
       returned: [back!.id],
       consumed: [],
