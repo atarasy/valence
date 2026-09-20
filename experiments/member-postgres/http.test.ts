@@ -1,7 +1,7 @@
 import { signConfig } from '../../engine/test/helpers.ts';
 import {beforeAll,afterAll,expect,test} from 'bun:test';
 import {createPublicKey,randomUUID} from 'node:crypto';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Database} from 'bun:sqlite';
@@ -195,7 +195,7 @@ async function digitalSetup(){
  return {...s,offer,decisions,prepare};
 }
 test('digital decision commits once across independent HTTP runtimes and retains the original result',async()=>{
- const s=await digitalSetup(),reply=await s.prepare();expect(reply.status).toBe(200);const p=await reply.json();
+ const s=await digitalSetup(),detail=await (await s.send('/offers/'+s.offer.id)).json(),reply=await s.prepare();expect(reply.status).toBe(200);const p=await reply.json();
  expect(p.profile).toBe('atarasy.member-decision-authorisation.1');expect(p.review.goods).toBe(1200);expect(p.review.carriage).toBe(550);expect(p.review.total).toBe(1750);
  const repeated=await (await s.prepare()).json();expect(repeated.operationID).toBe(p.operationID);
  const assertion=loginResponse(s.pair,s.input.credential,s.user,p.publicKey.challenge,3),path='/member/operations/'+p.operationID;
@@ -204,6 +204,9 @@ test('digital decision commits once across independent HTTP runtimes and retains
  expect(replies.map(r=>r.status)).toEqual([200,200]);const result=await replies[0]!.json();expect(await replies[1]!.json()).toEqual(result);
  expect(result.operationState).toBe('committed');expect(result.decision.state).toBe('decided');expect(result.decision.candidates[0].valence).toBe('kept');
  expect(result.receipt).toBeUndefined();
+ if(process.env.ATARASY_DIGITAL_FIXTURE_OUTPUT){
+  writeFileSync(process.env.ATARASY_DIGITAL_FIXTURE_OUTPUT,JSON.stringify({serviceBase:'25d8ca7',scope:'Synthetic PostgreSQL HTTP prepare and decision result; no provider or native authenticator.',environment:{name:s.c.environment,origin:s.c.origin},session:await(await s.send('/auth/session')).json(),detail,prepared:p,committed:result},null,2)+'\n',{flag:'wx',mode:0o600});
+ }
  // Advance the offer independently; recovery still returns exactly what this decision recorded.
  await s.unit.run(store=>memberRuntime(store,s.c,now).engine.settle(s.offer.id,now()));
  // Another composition reads the saved result without sending a signature again.
