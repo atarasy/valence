@@ -141,7 +141,11 @@ export const MAX_LAPSE_MS = 400 * 86_400_000;
  * §16.5, decided 2026-09-20 after the second refutation pass over question
  * 68. **The longest cooling window a version may record: 30 days.**
  *
- * `cooling_seconds` was bounded below and not above, and a decided set keeps
+ * `cooling_seconds` was bounded below at the HTTP route and nowhere else, and
+ * this comment said "bounded below and not above" until the third refutation
+ * pass measured the register taking -1 and 0.5 from every caller that is not
+ * that route. Both ends are here now, and `boundedCooling` is the reading end.
+ * A decided set keeps
  * the window it was decided under (§16.5), so the pass measured a household
  * recording a window of thirty years, deciding a set, dropping the window a
  * second later, alone, and leaving that set unsettleable until 2056 while its
@@ -386,6 +390,28 @@ export class MandateRegister {
         "cooling_too_long",
         `a cooling window is at most ${MAX_COOLING_SECONDS} seconds, which is 30 days, and ${mandate.cooling_seconds} is longer`
       );
+    }
+    // §16.1. **And a whole number, and not below zero.** The comment above
+    // `MAX_COOLING_SECONDS` said `cooling_seconds` "was bounded below and not
+    // above", and the third refutation pass over question 68 measured that it
+    // was bounded below **at the HTTP route** and never here: the register
+    // took -1, 0.5 and a ceiling of -5, and the route is not the only caller.
+    // `device-acceptance.ts`, the service behind `api-dev.vox.delivery`, and
+    // every test call `record` directly. A negative window is not null, so
+    // §16.5's longest selects it wherever it is the household's only one, and
+    // the screen then shows a window this engine can never honour.
+    for (const [field, value] of [
+      ["ceiling_out_of_network", mandate.ceiling_out_of_network],
+      ["ceiling_daily", mandate.ceiling_daily],
+      ["cooling_seconds", mandate.cooling_seconds],
+    ] as const) {
+      if (value == null) continue;
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw unprocessable(
+          "not_a_protection",
+          `${field} is a whole number of currency units or seconds and never below zero, and ${value} is neither`
+        );
+      }
     }
 
     const required = new Set<string>([mandate.household]);

@@ -1,5 +1,5 @@
 import { unprocessable } from "../common/errors.js";
-import type { Mandate } from "../hub/mandates.js";
+import { MAX_COOLING_SECONDS, type Mandate } from "../hub/mandates.js";
 
 /**
  * §13.1. Where the engine reads a person's protections from.
@@ -134,6 +134,41 @@ export function longestCooling(rows: Mandate[], now = Date.now()): number | null
  */
 function readableNonNegative(value: unknown): boolean {
   return value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+}
+
+/**
+ * §16.1, decided 2026-09-20 after the third refutation pass over question 68.
+ * **A protection outside what a mandate may hold is read as the nearest value
+ * inside it**, and this is the reading end of a bound `MandateRegister.record`
+ * enforces at the writing end.
+ *
+ * The pass found the bound in one place and the value used in three: the
+ * register refused a window above 30 days from the day it was written, and
+ * the engine went on fixing a set under whatever a source answered, so a hub
+ * that is not this reference, or a row recorded before the bound existed,
+ * could hold a set for thirty years. **The asymmetry ran the wrong way in one
+ * step**: an absent field was refused and an unbounded value accepted.
+ *
+ * **Read and not refused**, which is the lesson of the same pass's finding 3.
+ * Refusing would turn every row recorded before 2026-09-20 into a settlement
+ * that can never be made, and a settlement that can never be made blocks that
+ * presenter's next box under §6.5; a household would lose its deliveries over
+ * a protection it set and this specification later narrowed. So an existing
+ * out-of-range row goes on protecting, at the most this section allows.
+ *
+ * A fraction is read toward the protective side, up for a window and down for
+ * a ceiling, because a source answering one is a source this engine cannot
+ * ask again.
+ */
+export function boundedCooling(value: number | null): number | null {
+  if (value === null) return null;
+  return Math.min(MAX_COOLING_SECONDS, Math.max(0, Math.ceil(value)));
+}
+
+/** The same reading for a ceiling, which §16 bounds below and not above. */
+export function boundedCeiling(value: number | null): number | null {
+  if (value === null) return null;
+  return Math.max(0, Math.floor(value));
 }
 
 /** The register in this process. What the reference runs when it presents both roles. */

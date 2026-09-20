@@ -388,3 +388,56 @@ describe("§10.5: a decision that fails writes nothing, on the disk too", () => 
     expect(rows).toEqual([]);
   });
 });
+
+describe("§16.1: a protection is a whole number and never below zero", () => {
+  test("the register refuses what only the HTTP route refused", () => {
+    // NOTE (mutation check, 2026-09-20): protection_has_no_floor. Every
+    // assertion below read "accepted".
+    //
+    // The third refutation pass over question 68 measured the register taking
+    // `cooling_seconds: -1`, `0.5` and a ceiling of -5. The floor was at the
+    // route (`requireInteger(..., 0)`) and the register is what the deployment
+    // acceptance flow and every test call directly.
+    const T = Date.now();
+    const { engine } = makeEngine();
+    const bad = (over: Partial<Mandate>) => refusal(() => record(engine, mandate("1", over, T), T));
+    expect(bad({ cooling_seconds: -1 })).toBe("not_a_protection");
+    expect(bad({ cooling_seconds: 0.5 })).toBe("not_a_protection");
+    expect(bad({ ceiling_daily: -5 })).toBe("not_a_protection");
+    expect(bad({ ceiling_out_of_network: -5 })).toBe("not_a_protection");
+    // Zero is a protection and the tightest of them, not an absent one.
+    expect(record(engine, mandate("1", { cooling_seconds: 0, ceiling_daily: 0 }, T), T).version).toBe(1);
+  });
+
+  test("a source answering outside the bounds is read at the nearest value inside them", async () => {
+    // NOTE (mutation check, 2026-09-20): engine_reads_any_window. The
+    // settlement a month on was refused `mandate_cooling` instead of
+    // charging, which is the thirty-year hold the bound exists to stop,
+    // reached through a source rather than through the register.
+    //
+    // The bound was in `MandateRegister.record` alone, so a hub that is not
+    // this register, and a row written before the bound, still fixed a set
+    // for thirty years. Measured by the third refutation pass over question 68.
+    const T = Date.now();
+    const THIRTY_YEARS = 30 * 365 * 86_400;
+    const { engine } = makeEngine({ isInNetwork: () => false });
+    const one = record(engine, mandate("1", { ceiling_out_of_network: 10_000_000 }, T), T);
+    // A source outside this register: the shape §13.1 defines, answering what
+    // §16 does not allow a mandate to hold.
+    engine.readMandatesFrom({
+      get: async (id: string) => engine.mandates.get(id),
+      holdsAny: async () => true,
+      dailyCeilingOf: async () => -5,
+      outOfNetworkCeilingOf: async () => 10_000_000,
+      coolingSecondsOf: async () => THIRTY_YEARS,
+    });
+    const o = offer(engine, one.id, T);
+    await engine.present(o.id, T);
+    await keep(engine, o.id, T);
+    const window = MAX_COOLING_SECONDS * 1_000;
+    await expect(engine.settle(o.id, T + window - 1)).rejects.toMatchObject({ code: "mandate_cooling" });
+    // Past the bound the window is over, and the negative ceiling is read as
+    // zero, which is the tightest protection and not the absence of one.
+    await expect(engine.settle(o.id, T + window + 1)).rejects.toMatchObject({ code: "mandate_ceiling_daily" });
+  });
+});

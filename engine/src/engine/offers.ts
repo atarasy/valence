@@ -19,7 +19,7 @@ import {
 } from "../shared/decisions.js";
 import { MandateRegister } from "../hub/mandates.js";
 import { claimsToBeAKey, householdOfMandate, isHouseholdName, nameOf } from "../common/names.js";
-import { LocalMandates, type MandateSource } from "./mandate-source.js";
+import { LocalMandates, boundedCeiling, boundedCooling, type MandateSource } from "./mandate-source.js";
 import type { Mandate } from "../hub/mandates.js";
 import { LocalDay, type DaySource } from "./day-source.js";
 import { type DeliverySource } from "./delivery-source.js";
@@ -294,6 +294,32 @@ export class ValenceEngine {
   }
 
   /**
+   * §16.1, decided 2026-09-20 after the third refutation pass over question
+   * 68. **Every protection this engine uses is read through here**, so that
+   * the bound §16 puts on what a mandate may hold is applied where the value
+   * is used and not only where it is written. The pass measured the bound in
+   * one place and the value in three: `MandateRegister.record` refused a
+   * window above 30 days, and a source that is not this register, or a row
+   * written before the bound, still fixed a set for thirty years.
+   *
+   * Out of range is read as the nearest value in range rather than refused,
+   * for the reason `boundedCooling` gives.
+   */
+  private async coolingRead(household: string, now: number): Promise<number | null> {
+    return boundedCooling(await this.mandateSource.coolingSecondsOf(household, now));
+  }
+
+  /** §16.3. The same reading for the payer's daily ceiling. */
+  private async dailyCeilingRead(household: string, now: number): Promise<number | null> {
+    return boundedCeiling(await this.mandateSource.dailyCeilingOf(household, now));
+  }
+
+  /** §16.2, clause 46. And for the out-of-network ceiling read at presentation. */
+  private async outOfNetworkRead(household: string, now: number): Promise<number | null> {
+    return boundedCeiling(await this.mandateSource.outOfNetworkCeilingOf(household, now));
+  }
+
+  /**
    * §16.3, §16.5, decided 2026-09-19. The protections a set is decided under:
    * the longest window among the household's live mandates, and, where the
    * set may owe something, the tightest daily ceiling among its payer's.
@@ -314,9 +340,9 @@ export class ValenceEngine {
    * because the hub was down either.
    */
   private async protectionsAt(offer: Offer, now: number, mayOwe: boolean): Promise<FixedProtections> {
-    const cooling_seconds = await readOrUnknown(() => this.mandateSource.coolingSecondsOf(offer.household, now));
+    const cooling_seconds = await readOrUnknown(() => this.coolingRead(offer.household, now));
     if (!mayOwe) return { at: now, cooling_seconds };
-    const ceiling_daily = await readOrUnknown(() => this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now));
+    const ceiling_daily = await readOrUnknown(() => this.dailyCeilingRead(offer.giver ?? offer.household, now));
     return { at: now, cooling_seconds, ceiling_daily };
   }
 
@@ -913,11 +939,11 @@ export class ValenceEngine {
     // this comment claiming otherwise. A household with no mandate here is
     // left alone, as before both questions.
     const ceiling = offer.giver
-      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
+      ? await this.outOfNetworkRead(offer.giver, now)
       : mandate
         ? Math.min(
             mandate.ceiling_out_of_network,
-            (await this.mandateSource.outOfNetworkCeilingOf(offer.household, now)) ?? Infinity
+            (await this.outOfNetworkRead(offer.household, now)) ?? Infinity
           )
         : null;
     if (ceiling !== null) {
@@ -1322,7 +1348,7 @@ export class ValenceEngine {
     // into a day's window refused `no_cooling`, because the one mandate that
     // set the window had lapsed.
     const cooling = longerWindow(
-      await this.mandateSource.coolingSecondsOf(offer.household, now),
+      await this.coolingRead(offer.household, now),
       known(this.decidedProtections.get(offer.id)?.cooling_seconds)
     );
     if (cooling === null) {
@@ -1651,7 +1677,7 @@ export class ValenceEngine {
     // decided under**, which a lapse since the decision does not end.
     const fixed = this.decidedProtections.get(offer.id);
     const coolingSeconds = longerWindow(
-      await this.mandateSource.coolingSecondsOf(offer.household, now),
+      await this.coolingRead(offer.household, now),
       known(fixed?.cooling_seconds)
     );
     if (!needsStatement(offer, missing) && coolingSeconds != null && offer.decided_at !== null) {
@@ -1775,7 +1801,7 @@ export class ValenceEngine {
     const ceilingDaily = charged === 0
       ? null
       : tighterCeiling(
-          await this.mandateSource.dailyCeilingOf(offer.giver ?? offer.household, now),
+          await this.dailyCeilingRead(offer.giver ?? offer.household, now),
           known(fixed?.ceiling_daily)
         );
     if (ceilingDaily != null && charged > 0) {
