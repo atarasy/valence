@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { StoreError, type Identity } from './store.ts';
 
@@ -59,7 +59,10 @@ export async function captureDeployment(pool: Pool, input: Identity): Promise<De
 }
 /** Restore into an absent deployment only. The result cannot serve requests until a separate cutover. */
 export async function restoreDeploymentCandidate(pool: Pool, input: DeploymentSnapshot, expected: Identity): Promise<{ verified: true; enabled: false; digest: string }> {
- const s = validate(input,expected), c = await pool.connect(); let broken = false;
+ const s = validate(input,expected);
+ // A destination identity must be minted locally, never cloned from an activated host.
+ if (s.rows.some(r => r.namespace === 'member_writer_target')) fail();
+ const c = await pool.connect(); let broken = false;
  try {
   await c.query('BEGIN');
   if (await schemaDigest(c) !== s.schema) fail();
@@ -96,4 +99,71 @@ export async function freezeDeployment(pool: Pool, input: Identity, ticket: stri
   const final = await captureLocked(c,p);
   await c.query('COMMIT'); return final;
  } catch(error) { await c.query('ROLLBACK').catch(()=>{broken=true;}); throw error; } finally { c.release(broken); }
+}
+
+const targetNamespace = 'member_writer_target';
+type TargetWriter = { instance: string; ticket: string; runtime: string; content: string; schema: string; phase: 'ready' | 'active' };
+function migration(snapshot: DeploymentSnapshot, ticket: string, runtime: string, checkContent = true): Omit<FrozenWriter,'phase'> & { phase: 'frozen' | 'retired'; target?: string } {
+ const rows = snapshot.rows.filter(r => r.namespace === freezeNamespace);
+ if (rows.length !== 1 || rows[0]!.key !== 'current') fail();
+ const f = JSON.parse(rows[0]!.value);
+ const keys = f?.phase === 'retired' ? 'content,phase,profile,runtime,schema,target,ticket' : 'content,phase,profile,runtime,schema,ticket';
+ if (!f || Object.keys(f).sort().join(',') !== keys || f.profile !== 'atarasy.postgres-writer-freeze.1' || !['frozen','retired'].includes(f.phase) || f.ticket !== ticket || f.runtime !== runtime || f.schema !== snapshot.schema || !/^[a-f0-9]{64}$/.test(f.content) || (f.phase === 'retired' && !uuid(f.target))) fail();
+ if (checkContent && f.content !== sha(snapshot.rows.filter(r => ![freezeNamespace,targetNamespace].includes(r.namespace)))) fail();
+ return f;
+}
+function uuid(value: unknown): value is string { return typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value); }
+function targetRecord(snapshot: DeploymentSnapshot): TargetWriter | null {
+ const rows = snapshot.rows.filter(r => r.namespace === targetNamespace); if (!rows.length) return null;
+ if (rows.length !== 1 || rows[0]!.key !== 'current') fail();
+ const t = JSON.parse(rows[0]!.value);
+ if (!t || Object.keys(t).sort().join(',') !== 'content,instance,phase,runtime,schema,ticket' || !uuid(t.instance) || !uuid(t.ticket) || !['ready','active'].includes(t.phase) || ![t.content,t.runtime,t.schema].every(v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v))) fail();
+ return t;
+}
+/** Mint one local candidate identity before retiring the source; response loss is recoverable. */
+async function registerDeploymentCandidate(pool: Pool, input: Identity, ticket: string, runtime: string): Promise<string> {
+ const p = structuredClone(input); validIdentity(p); if (!uuid(ticket) || !/^[a-f0-9]{64}$/.test(runtime)) fail();
+ const c = await pool.connect(); let broken = false;
+ try {
+  await c.query('BEGIN'); const snapshot = await captureLocked(c,p), held = targetRecord(snapshot), f = migration(snapshot,ticket,runtime,!snapshot.sourceEnabled);
+  if (f.phase !== 'frozen') fail();
+  if (held) {
+   if (held.ticket !== ticket || held.runtime !== runtime || held.content !== f.content || held.schema !== f.schema || (snapshot.sourceEnabled ? held.phase !== 'active' : held.phase !== 'ready')) fail();
+   await c.query('COMMIT'); return held.instance;
+  }
+  if (snapshot.sourceEnabled) fail();
+  const record: TargetWriter = {instance:randomUUID(),ticket,runtime,content:f.content,schema:f.schema,phase:'ready'};
+  await c.query('INSERT INTO atarasy_member.engine_rows (deployment,namespace,key,value) VALUES ($1,$2,$3,$4)',[p.id,targetNamespace,'current',JSON.stringify(record)]);
+  await captureLocked(c,p);
+  await c.query('COMMIT'); return record.instance;
+ } catch(error) { await c.query('ROLLBACK').catch(()=>{broken=true;}); throw error; } finally { c.release(broken); }
+}
+/** Durable source retirement precedes target enablement. Never enables the old source. */
+export async function activateDeploymentCandidate(source: Pool, target: Pool, input: Identity, ticket: string, runtime: string): Promise<{instance:string;activated:true}> {
+ const p = structuredClone(input); validIdentity(p);
+ const a = await source.connect(); let b: PoolClient | undefined, brokenA = false, brokenB = false;
+ try {
+  await a.query('BEGIN'); const origin = await captureLocked(a,p), f = migration(origin,ticket,runtime);
+  if (origin.sourceEnabled || targetRecord(origin)) fail();
+  const instance = await registerDeploymentCandidate(target,p,ticket,runtime);
+  if (f.phase === 'retired' && f.target !== instance) fail();
+  b = await target.connect(); await b.query('BEGIN');
+  const destination = await captureLocked(b,p), t = targetRecord(destination) ?? fail(), g = migration(destination,ticket,runtime,!destination.sourceEnabled);
+  if (t.instance !== instance || t.ticket !== ticket || t.runtime !== runtime || t.content !== f.content || t.schema !== f.schema || g.content !== f.content || g.phase !== 'frozen') fail();
+  if (destination.sourceEnabled) {
+   if (f.phase !== 'retired' || t.phase !== 'active') fail();
+  } else {
+   if (t.phase !== 'ready') fail();
+   if (f.phase === 'frozen') await a.query('UPDATE atarasy_member.engine_rows SET value=$1 WHERE deployment=$2 AND namespace=$3 AND key=$4',[JSON.stringify({...f,phase:'retired',target:instance}),p.id,freezeNamespace,'current']);
+  }
+  // If this acknowledgement is lost, target stays disabled and exact retry reads retirement.
+  await a.query('COMMIT');
+  if (!destination.sourceEnabled) {
+   await b.query('UPDATE atarasy_member.engine_rows SET value=$1 WHERE deployment=$2 AND namespace=$3 AND key=$4',[JSON.stringify({...t,phase:'active'}),p.id,targetNamespace,'current']);
+   await b.query('UPDATE atarasy_member.control SET enabled=true WHERE id=$1',[p.id]);
+  }
+  await b.query('COMMIT'); return {instance,activated:true};
+ } catch(error) {
+  await a.query('ROLLBACK').catch(()=>{brokenA=true;}); if (b) await b.query('ROLLBACK').catch(()=>{brokenB=true;}); throw error;
+ } finally { a.release(brokenA); b?.release(brokenB); }
 }

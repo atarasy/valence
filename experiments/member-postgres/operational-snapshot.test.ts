@@ -65,3 +65,51 @@ test('simultaneous different freeze tickets have exactly one durable winner',asy
  const held=JSON.parse(snapshot.rows.find(r=>r.namespace==='member_writer_migration')!.value);
  expect(results[tickets.indexOf(held.ticket)]!.status).toBe('fulfilled');
 });
+test('activation retires the old writer and repeats safely after destination writes',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='1'.repeat(64);
+ const frozen=await freezeDeployment(source,s.identity,ticket,runtime);await restoreDeploymentCandidate(target,frozen,s.identity);
+ const first=await activateDeploymentCandidate(source,target,s.identity,ticket,runtime);expect(first.activated).toBe(true);
+ await expect(s.unit.run(()=>null)).rejects.toThrow('fenced');
+ const unit=postgresStore(target,s.identity);await unit.run(store=>{store.map('after_migration').set('new',1);});
+ expect(await activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).toEqual(first);
+ expect(await unit.run(store=>store.map('after_migration').get('new'))).toBe(1);
+ await expect(restoreDeploymentCandidate(source,await captureDeployment(target,s.identity),s.identity)).rejects.toThrow();
+});
+test('activation failure after durable source retirement leaves both disabled and exact retry recovers',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='2'.repeat(64);
+ await restoreDeploymentCandidate(target,await freezeDeployment(source,s.identity,ticket,runtime),s.identity);
+ const failing={async connect(){const c=await target.connect();return new Proxy(c,{get(client,key){if(key==='query')return async(...args:any[])=>{if(typeof args[0]==='string'&&args[0].startsWith('UPDATE atarasy_member.control SET enabled=true'))throw new Error('injected activation failure');return(client.query as any)(...args);};const value=Reflect.get(client,key);return typeof value==='function'?value.bind(client):value;}});}} as typeof target;
+ await expect(activateDeploymentCandidate(source,failing,s.identity,ticket,runtime)).rejects.toThrow('injected activation failure');
+ const frozen=await captureDeployment(source,s.identity);expect(frozen.sourceEnabled).toBe(false);expect(JSON.parse(frozen.rows.find(r=>r.namespace==='member_writer_migration')!.value).phase).toBe('retired');
+ expect((await captureDeployment(target,s.identity)).sourceEnabled).toBe(false);
+ expect((await activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).activated).toBe(true);
+});
+test('changed destination is never enabled and cannot retire its source',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='3'.repeat(64);
+ await restoreDeploymentCandidate(target,await freezeDeployment(source,s.identity,ticket,runtime),s.identity);
+ await target.query("UPDATE atarasy_member.engine_rows SET value='{}' WHERE deployment=$1 AND namespace='snapshot_probe'",[s.identity.id]);
+ await expect(activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).rejects.toThrow();
+ const frozen=await captureDeployment(source,s.identity);expect(JSON.parse(frozen.rows.find(r=>r.namespace==='member_writer_migration')!.value).phase).toBe('frozen');expect((await captureDeployment(target,s.identity)).sourceEnabled).toBe(false);
+});
+test('a second independently restored destination cannot activate the retired ticket',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate}=await import('./operational-snapshot.ts'),s=await setup(),ticket=randomUUID(),runtime='4'.repeat(64),frozen=await freezeDeployment(source,s.identity,ticket,runtime);
+ const otherDB='other_'+randomUUID().replaceAll('-',''),otherURL=new URL(url!);otherURL.pathname='/'+otherDB;
+ await source.query(`CREATE DATABASE "${otherDB}"`);const other=createPool(otherURL.toString());
+ try{await migrateDatabase(otherURL.toString());await restoreDeploymentCandidate(target,frozen,s.identity);await restoreDeploymentCandidate(other,frozen,s.identity);
+ const results=await Promise.allSettled([activateDeploymentCandidate(source,target,s.identity,ticket,runtime),activateDeploymentCandidate(source,other,s.identity,ticket,runtime)]);
+ expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);
+ const states=await Promise.all([captureDeployment(target,s.identity),captureDeployment(other,s.identity)]);expect(states.filter(s=>s.sourceEnabled)).toHaveLength(1);
+ }finally{await other.end();await source.query(`DROP DATABASE "${otherDB}" WITH (FORCE)`);}
+});
+test('lost source-retirement and target-activation acknowledgements resume from durable state',async()=>{
+ const {freezeDeployment,activateDeploymentCandidate}=await import('./operational-snapshot.ts');
+ for(const side of ['source','target']){
+  const s=await setup(),ticket=randomUUID(),runtime='5'.repeat(64);await restoreDeploymentCandidate(target,await freezeDeployment(source,s.identity,ticket,runtime),s.identity);
+  let commits=0;const underlying=side==='source'?source:target;
+  const lost={async connect(){const c=await underlying.connect();return new Proxy(c,{get(client,key){if(key==='query')return async(...args:any[])=>{const result=await(client.query as any)(...args);if(args[0]==='COMMIT'&&++commits===(side==='source'?1:2))throw new Error('lost commit acknowledgement');return result;};const value=Reflect.get(client,key);return typeof value==='function'?value.bind(client):value;}});}} as typeof source;
+  await expect(activateDeploymentCandidate(side==='source'?lost:source,side==='target'?lost:target,s.identity,ticket,runtime)).rejects.toThrow('lost commit acknowledgement');
+  expect((await captureDeployment(source,s.identity)).sourceEnabled).toBe(false);
+  expect((await captureDeployment(target,s.identity)).sourceEnabled).toBe(side==='target');
+  expect((await activateDeploymentCandidate(source,target,s.identity,ticket,runtime)).activated).toBe(true);
+ }
+});

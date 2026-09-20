@@ -494,7 +494,7 @@ test('historical decision without generation metadata still reads but cannot inv
 });
 
 test('disabled snapshot candidate preserves digital withdrawal history, successor review and passkey counter',async()=>{
- const {captureDeployment,restoreDeploymentCandidate,freezeDeployment}=await import('./operational-snapshot.ts');
+ const {captureDeployment,restoreDeploymentCandidate,freezeDeployment,activateDeploymentCandidate}=await import('./operational-snapshot.ts');
  const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json();
  const withdrawal=await(await s.send('/member/operations/'+w.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).json();
  expect(withdrawal.operationState).toBe('committed');
@@ -505,9 +505,10 @@ test('disabled snapshot candidate preserves digital withdrawal history, successo
   await migrateDatabase(destinationURL.toString());await restoreDeploymentCandidate(destination,snapshot,s.identity);
   expect((await captureDeployment(destination,s.identity)).rows).toEqual(snapshot.rows);
   await expect(postgresStore(destination,s.identity).run(()=>null)).rejects.toThrow('fenced');
-  // Source was frozen by the implementation; destination activation remains test-only.
+  // Rehearse the implemented retire-before-enable protocol on synthetic databases.
   await expect(s.unit.run(()=>null)).rejects.toThrow('fenced');
-  await destination.query('UPDATE atarasy_member.control SET enabled=true WHERE id=$1',[s.identity.id]);
+  const ticket=JSON.parse(snapshot.rows.find(r=>r.namespace==='member_writer_migration')!.value).ticket;
+  await activateDeploymentCandidate(pool,destination,s.identity,ticket,'f'.repeat(64));
   const app=await openPostgresMemberHTTP(destination,s.identity,s.c,now);
   const send=(path:string,body?:unknown)=>app.fetch(s.request(path,body,s.grant.token),{peer:'snapshot-target'});
   expect(await(await send('/member/operations/'+s.decision.operationID+'/outcome')).json()).toEqual(s.decided);
