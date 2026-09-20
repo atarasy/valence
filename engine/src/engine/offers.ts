@@ -337,20 +337,12 @@ export class ValenceEngine {
    * the longest window among the household's live mandates, and, where the
    * set may owe something, the tightest daily ceiling among its payer's.
    *
-   * **A decision is never refused because this could not be read**, decided
-   * 2026-09-20 after the second refutation pass over question 68 measured
-   * what refusing cost. Against a hub built one day earlier, which answers
-   * the household route without `cooling_seconds`, a household's refusal of
-   * a gift was refused `hub_refused`; the offer then reached its expiry with
-   * every line still `offered`, §12 defaulted them, and the giver was charged
-   * 700 for goods the recipient had said no to. **A refusal must never become
-   * a purchase**, and a decision is the one place in this engine where the
-   * message is often "no". What could not be read is recorded as `"unknown"`
-   * and the set falls back to the live values at settlement and at
-   * withdrawal, which is where it stood before the record existed. The
-   * settlement's own reads still refuse (§16.5), so nothing settles under a
-   * protection that was not applied; what changes is that nothing is bought
-   * because the hub was down either.
+   * A failed read uses the last successful reading for that household on
+   * this host, and records which values were stale. If this host has never
+   * read the value, the decision is refused. This is the correction decided
+   * after the third pass on 2026-09-20: the earlier fallback to `"unknown"`
+   * silently removed a fixed protection during one failed round trip.
+   * `readOrLast` below records the remaining cost of having no earlier read.
    */
   private async protectionsAt(offer: Offer, now: number, mayOwe: boolean): Promise<FixedProtections> {
     const stale: ("cooling_seconds" | "ceiling_daily")[] = [];

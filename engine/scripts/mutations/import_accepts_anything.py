@@ -3,7 +3,7 @@ import pathlib
 # Accept any body. Re-anchored 2026-09-14 when /4 exports stayed readable
 # beside /5.
 p = pathlib.Path('src/http.ts'); s = p.read_text()
-old = '      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {'
+old = '      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {'
 assert s.count(old) == 1, "anchor drifted"
 s = s.replace(old, '      if (false) {', 1)
 p.write_text(s)

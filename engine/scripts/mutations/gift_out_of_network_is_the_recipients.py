@@ -5,7 +5,7 @@ import pathlib
 # Re-anchored when question 68 was rebased onto questions 65 to 67.
 p = pathlib.Path('src/engine/offers.ts'); s = p.read_text()
 old = '''    const ceiling = offer.giver
-      ? await this.mandateSource.outOfNetworkCeilingOf(offer.giver, now)
+      ? await this.outOfNetworkRead(offer.giver, now)
 '''
 assert s.count(old) == 1, "anchor drifted"
 s = s.replace(old, '''    const ceiling = offer.giver
