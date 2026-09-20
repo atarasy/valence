@@ -1398,6 +1398,17 @@ export class ValenceEngine {
     return { offer: offer.id, decidedAt: offer.decided_at, decisionRevision, canonical };
   }
 
+  /** Read eligibility before asking for a ceremony; withdrawMember checks it again at dispatch. */
+  async memberWithdrawalEligibility(offerId: string, now = Date.now()) {
+    const review = this.memberWithdrawalReview(offerId, now), offer = this.mustGet(offerId, now);
+    await this.mandateFor(offer);
+    const cooling = longerWindow(await this.coolingRead(offer.household, now), known(this.decidedProtections.get(offer.id)?.cooling_seconds));
+    if (cooling === null) throw unprocessable('no_cooling', 'this decision has no cooling window');
+    const coolingEndsAt = review.decidedAt + cooling * 1000;
+    if (!Number.isSafeInteger(coolingEndsAt) || now >= coolingEndsAt) throw unprocessable('cooling_over', 'the cooling window has closed');
+    return { ...review, coolingEndsAt };
+  }
+
   /** The deployment adapter supplies the complete envelope, never a verification boolean. */
   async withdrawMember(envelope: MemberWithdrawalEnvelope, assertion: Assertion, now = Date.now()): Promise<Offer> {
     const fixed = structuredClone(envelope), proof = structuredClone(assertion);

@@ -73,10 +73,11 @@ export function openDecisionAuthorisations(r:ReturnType<typeof memberRuntime>, o
     if(Buffer.byteLength(stable(sealed))>262144)throw new Error('Decision snapshot too large');
     return {sealed,canonical:canonicalDecisions(offer.id,decisions).toString(),revision:hash(sealed),bound};
   }
-  type Review={profile:typeof MEMBER_DECISION_PROFILE;sealed:ReturnType<typeof snapshot>['sealed'];canonical:string;revision:string;challenge:string;verified:null|{fingerprint:string;counter:number;at:number};result:Offer|null};
+  type Review={decisionGeneration?:string|null;profile:typeof MEMBER_DECISION_PROFILE;sealed:ReturnType<typeof snapshot>['sealed'];canonical:string;revision:string;challenge:string;verified:null|{fingerprint:string;counter:number;at:number};result:Offer|null};
   function saved(o:JournalOperation):Review{
     const value=r.reviews.get(o.id) as Review|null;
-    if(o.kind!=='digital_decision'||!value||value.profile!==MEMBER_DECISION_PROFILE||Object.keys(value).sort().join(',')!=='canonical,challenge,profile,result,revision,sealed,verified'||hash(value.sealed)!==o.reviewedRevision||value.revision!==o.reviewedRevision||value.canonical!==o.canonical||value.challenge!==challenge(o))throw new Error('Prepared decision inconsistent');
+    if(o.kind!=='digital_decision'||!value||value.profile!==MEMBER_DECISION_PROFILE||!['canonical,challenge,profile,result,revision,sealed,verified','canonical,challenge,decisionGeneration,profile,result,revision,sealed,verified'].includes(Object.keys(value).sort().join(','))||hash(value.sealed)!==o.reviewedRevision||value.revision!==o.reviewedRevision||value.canonical!==o.canonical||value.challenge!==challenge(o))throw new Error('Prepared decision inconsistent');
+    if(value.decisionGeneration!==undefined&&value.decisionGeneration!==null&&!/^[a-f0-9]{64}$/.test(value.decisionGeneration))throw new Error('Invalid decision generation');
     if(value.verified!==null){const proof=value.verified;if(Object.keys(proof).sort().join(',')!=='at,counter,fingerprint'||!/^[a-f0-9]{64}$/.test(proof.fingerprint))throw new Error('Invalid decision proof');integer(proof.at);integer(proof.counter);if(proof.counter>0xffffffff||proof.at<o.createdAt||proof.at>=o.expiresAt)throw new Error('Invalid decision proof');}
     if(o.state==='committed'){
       if(!value.result||value.result.id!==o.offer||hash(value.result)!==o.receiptDigest||value.verified?.fingerprint!==o.assertionFingerprint)throw new Error('Decision outcome conflict');
@@ -101,6 +102,7 @@ export function openDecisionAuthorisations(r:ReturnType<typeof memberRuntime>, o
     },
     async read(token:string,id:string){identifier(id);const o=await r.journal.read(token,id);return response(o,saved(o));},
     async outcome(token:string,id:string){identifier(id);const o=await r.journal.read(token,id);return outcome(o,saved(o));},
+    async withdrawalReference(token:string,id:string){const o=await r.journal.read(token,id),v=saved(o);if(o.state!=='committed'||!v.decisionGeneration)throw new Error('No retained decision generation');return v.decisionGeneration;},
     async cancel(token:string,id:string){identifier(id);const o=await r.journal.read(token,id);saved(o);await r.journal.cancel(token,id);return {cancelled:true};},
     async submit(token:string,id:string,assertion:PreparedAssertion){
       identifier(id);const fixed=structuredClone(assertion),o=await r.journal.read(token,id),v=saved(o),fingerprint=hash(fixed);
@@ -115,7 +117,9 @@ export function openDecisionAuthorisations(r:ReturnType<typeof memberRuntime>, o
       if(!claimed.acquired)throw new Error('Decision outcome unavailable');
       const result=await r.engine.decideMember(envelope(o),v.sealed.view.decisions,{authenticator_data:fixed.response.authenticatorData,client_data_json:fixed.response.clientDataJSON,signature:fixed.response.signature},clock());
       r.bindings.resolve(token,o.mandate);if(o.expiresAt<=clock())throw new Error('Authorisation expired');
-      v.result=structuredClone(result);r.reviews.put(id,v);
+      v.result=structuredClone(result);
+      v.decisionGeneration=result.state==='decided'?r.engine.memberWithdrawalReview(result.id,clock()).decisionRevision:null;
+      r.reviews.put(id,v);
       const committed=r.journal.recordCommitted(id,fingerprint,hash(v.result));
       return outcome(committed,v);
     },

@@ -13,7 +13,7 @@ import { openOperationJournal,type JournalOperation } from './operation-journal.
 import type { MemberRuntimeConfig } from './config.ts';
 export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const path=memberRecords(store,{environment:c.environment,audience:c.origin});
- const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin},memberDecisionScope:{environment:c.environment,origin:c.origin}},store);
+ const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin},memberDecisionScope:{environment:c.environment,origin:c.origin},memberWithdrawalScope:{environment:c.environment,origin:c.origin}},store);
  const deliveries=new DeliveryRegister(store);engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
  const quotes=new CarriageQuotes(store);
  const approvalCarriage=(id:string)=>engine.mustGet(id,now()).binding==='digital'?quotes.find(id):deliveries.find(id);

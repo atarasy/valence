@@ -1,6 +1,8 @@
 import { signConfig } from '../../engine/test/helpers.ts';
 import {beforeAll,afterAll,expect,test} from 'bun:test';
-import {createPublicKey,randomUUID} from 'node:crypto';
+import {canonicalWithdrawal,canonicalDecisions} from '../../engine/src/shared/decisions.ts';
+import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
+import {createPublicKey,randomUUID,sign} from 'node:crypto';
 import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -371,4 +373,122 @@ test('advancing a decision incarnation rolls back with the enclosing unit and re
  await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);expect(r.journal.currentIncarnation(s.offer.id)).toBe(0);expect(r.operations.find(o=>o.kind==='digital_withdrawal')).toBeNull();});
  await s.unit.run(store=>{store.map('member_decision_heads').set(s.offer.id,{offer:s.offer.id,incarnation:1,decision:p.operationID,withdrawal:'absent'});});
  await expect(s.unit.run(store=>memberRuntime(store,s.c,now).journal.currentIncarnation(s.offer.id))).rejects.toThrow('unavailable');
+});
+
+
+async function withdrawalSetup(cooling:number|null=3600,lifetime?:number){
+ const s=await digitalSetup();
+ await s.unit.run(store=>{
+  const r=memberRuntime(store,s.c,now),old=r.engine.mandates.mustGet(s.input.mandate,now()),mandate={...old,cooling_seconds:cooling,version:old.version+1,...(lifetime===undefined?{}:{lapses_at:now()+lifetime})};
+  r.engine.mandates.record({mandate,signatures:{[s.input.house]:sign('sha256',canonicalMandate(mandate,s.c.rpID),s.pair.privateKey).toString('base64')},assertions:{},keyOf:k=>r.engine.publicKeyFor(k),relyingPartyId:s.c.rpID,now:now()});
+ });
+ const decision=await(await s.prepare()).json();
+ const decided=await(await s.send('/member/operations/'+decision.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,decision.publicKey.challenge,3)})).json();
+ expect(decided.operationState).toBe('committed');
+ const prepareWithdrawal=()=>s.send('/member/withdrawals/prepare',{decisionOperationID:decision.operationID});
+ return {...s,decision,decided,prepareWithdrawal};
+}
+test('authenticated withdrawal commits once, permits redecision and preserves both historical outcomes',async()=>{
+ const s=await withdrawalSetup(),prepared=await s.prepareWithdrawal();expect(prepared.status).toBe(200);const w=await prepared.json(),path='/member/operations/'+w.operationID;
+ expect(w.profile).toBe('atarasy.member-withdrawal-authorisation.1');expect(w.review.decisionOperationID).toBe(s.decision.operationID);expect(w.review.incarnation).toBe(0);
+ expect((await(await s.prepareWithdrawal()).json()).operationID).toBe(w.operationID);
+ const assertion=loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4),other=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ const replies=await Promise.all([s.send(path+'/submit',{assertion}),other.fetch(s.request(path+'/submit',{assertion},s.grant.token),{peer:'second-withdrawal'})]);
+ expect(replies.map(r=>r.status)).toEqual([200,200]);const first=await replies[0]!.json();expect(await replies[1]!.json()).toEqual(first);
+ expect(first.withdrawal.nextIncarnation).toBe(1);expect(first.withdrawal.offer.state).toBe('presented');expect(first.withdrawal.offer.candidates[0].valence).toBe('offered');
+ const next=await(await s.prepare()).json();expect(next.operationID).not.toBe(s.decision.operationID);
+ const redecisionReply=await s.send('/member/operations/'+next.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,next.publicKey.challenge,5)});expect(redecisionReply.status).toBe(200);const redecision=await redecisionReply.json();
+ if(process.env.ATARASY_WITHDRAWAL_FIXTURE_OUTPUT)writeFileSync(process.env.ATARASY_WITHDRAWAL_FIXTURE_OUTPUT,JSON.stringify({contract:'atarasy.member-withdrawal-authorisation.1',scope:'Synthetic PostgreSQL HTTP decision, withdrawal and redecision; no native authenticator or provider.',environment:{name:s.c.environment,origin:s.c.origin},session:await(await s.send('/auth/session')).json(),decisionPrepared:s.decision,decisionOutcome:s.decided,withdrawalPrepared:w,withdrawalOutcome:first,redecisionPrepared:next,redecisionOutcome:redecision},null,2)+'\n',{flag:'wx',mode:0o600});
+ // Both generations have exactly the fixture clock's timestamp; old withdrawal still reads its original result.
+ const restarted=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
+ expect(await(await restarted.fetch(s.request(path+'/outcome',undefined,s.grant.token),{peer:'restarted-withdrawal'})).json()).toEqual(first);
+ expect(await(await s.send('/member/operations/'+s.decision.operationID+'/outcome')).json()).toEqual(s.decided);
+ expect(await(await s.send(path+'/submit',{assertion})).json()).toEqual(first);
+ expect((await s.prepareWithdrawal()).status).toBe(404);
+ const second=await s.send('/member/withdrawals/prepare',{decisionOperationID:next.operationID});expect(second.status).toBe(200);const w2=await second.json();expect(w2.review.incarnation).toBe(1);expect(w2.canonical).not.toBe(w.canonical);
+ expect((await s.send('/member/operations/'+w2.operationID+'/submit',{assertion})).status).toBe(404);
+ expect((await s.send(path+'/cancel',{})).status).toBe(404);
+});
+
+test('withdrawal cancellation, expiry, missing cooling and foreign authority refuse without effect',async()=>{
+ const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json(),path='/member/operations/'+w.operationID;
+ expect((await s.send(path+'/cancel',{})).status).toBe(200);
+ expect((await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).status).toBe(404);
+ const next=await(await s.prepareWithdrawal()).json();expect(next.operationID).not.toBe(w.operationID);
+ const later=()=>now()+60001,app=await openPostgresMemberHTTP(pool,s.identity,s.c,later);
+ expect((await app.fetch(s.request('/member/operations/'+next.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,next.publicKey.challenge,4)},s.grant.token),{peer:'expired-withdrawal'})).status).toBe(404);
+ const replacement=await app.fetch(s.request('/member/withdrawals/prepare',{decisionOperationID:s.decision.operationID},s.grant.token),{peer:'replace-withdrawal'});expect(replacement.status).toBe(200);
+ const noCooling=await withdrawalSetup(null);expect((await noCooling.prepareWithdrawal()).status).toBe(404);
+ const closed=await withdrawalSetup(1),closedApp=await openPostgresMemberHTTP(pool,closed.identity,closed.c,()=>now()+1000);
+ expect((await closedApp.fetch(closed.request('/member/withdrawals/prepare',{decisionOperationID:closed.decision.operationID},closed.grant.token),{peer:'closed-cooling'})).status).toBe(404);
+ for(const suffix of ['', '/outcome'])expect((await s.send(path+suffix,undefined,noCooling.grant.token)).status).toBe(404);
+ expect((await s.send('/member/withdrawals/prepare',{decisionOperationID:s.decision.operationID,offer:s.offer.id})).status).toBe(404);
+ expect(await s.unit.run(store=>memberRuntime(store,s.c,now).engine.mustGet(s.offer.id,now()).state)).toBe('decided');
+});
+
+test('withdrawal late database failure rolls back engine, passkey counter, result and successor head',async()=>{
+ const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json(),path='/member/operations/'+w.operationID,assertion=loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4);
+ const fn='fail_withdrawal_'+randomUUID().replaceAll('-','');
+ await pool.query(`CREATE FUNCTION atarasy_member.${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.deployment = '${s.identity.id}' AND NEW.namespace = 'member_decision_heads' THEN RAISE EXCEPTION 'injected withdrawal write failure'; END IF; RETURN NEW; END $$`);
+ await pool.query(`CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON atarasy_member.engine_rows FOR EACH ROW EXECUTE FUNCTION atarasy_member.${fn}()`);
+ try{
+  expect((await s.send(path+'/submit',{assertion})).status).toBe(503);
+  expect(await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return {state:r.engine.mustGet(s.offer.id,now()).state,incarnation:r.journal.currentIncarnation(s.offer.id),operation:r.operations.find(o=>o.id===w.operationID)?.state};})).toEqual({state:'decided',incarnation:0,operation:'prepared'});
+  expect((await(await s.send(path+'/outcome')).json()).withdrawal).toBeNull();
+ }finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
+ // Reusing the same counter works only because the entire failed transaction rolled back.
+ expect((await s.send(path+'/submit',{assertion})).status).toBe(200);
+});
+
+
+test('withdrawal retains the cooling right after the named mandate lapses',async()=>{
+ const s=await withdrawalSetup(3600,100),later=()=>now()+101,app=await openPostgresMemberHTTP(pool,s.identity,s.c,later);
+ const send=(path:string,body?:unknown)=>app.fetch(s.request(path,body,s.grant.token),{peer:'lapsed-mandate'});
+ const prepared=await send('/member/withdrawals/prepare',{decisionOperationID:s.decision.operationID});expect(prepared.status).toBe(200);const w=await prepared.json();
+ expect(w.review.mandate.lapses_at).toBeLessThan(later());expect(w.expiresAt).toBeGreaterThan(later());
+ expect((await send('/member/operations/'+w.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).status).toBe(200);
+});
+
+test('changed withdrawal review and revoked credential cannot advance the decision',async()=>{
+ const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json(),path='/member/operations/'+w.operationID;
+ await s.unit.run(store=>{const r=memberRuntime(store,s.c,now),old=r.engine.mandates.get(s.input.mandate)!,mandate={...old,cooling_seconds:7200,version:old.version+1};r.engine.mandates.record({mandate,signatures:{[s.input.house]:sign('sha256',canonicalMandate(mandate,s.c.rpID),s.pair.privateKey).toString('base64')},assertions:{},keyOf:k=>r.engine.publicKeyFor(k),relyingPartyId:s.c.rpID,now:now()});});
+ expect((await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).status).toBe(404);
+ await s.send(path+'/cancel',{});const next=await(await s.prepareWithdrawal()).json();expect(next.operationID).not.toBe(w.operationID);
+ await s.unit.run(store=>memberRuntime(store,s.c,now).authority.revokeCredential(s.input.credential));
+ expect((await s.send('/member/operations/'+next.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,next.publicKey.challenge,4)})).status).toBe(404);
+ expect(await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return {state:r.engine.mustGet(s.offer.id,now()).state,incarnation:r.journal.currentIncarnation(s.offer.id)};})).toEqual({state:'decided',incarnation:0});
+});
+
+test('discarded withdrawal response recovers by GET while a valid other-household session cannot read it',async()=>{
+ const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json(),path='/member/operations/'+w.operationID;
+ // Discard the body after dispatch and reopen with no assertion replay.
+ await s.send(path+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)});
+ const app=await openPostgresMemberHTTP(pool,s.identity,s.c,now),recovered=await app.fetch(s.request(path+'/outcome',undefined,s.grant.token),{peer:'lost-withdrawal'});
+ expect(recovered.status).toBe(200);expect((await recovered.json()).withdrawal.nextIncarnation).toBe(1);
+ const outsider=await setup(),other=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);r.authority.provisionUnclaimedPrincipal('withdrawal-outsider',['merchant-1']);r.authority.registerCredential(outsider.input.credential,'withdrawal-outsider');r.login.provisionVerifiedPasskey(outsider.input.credential,coseOf(outsider.pair),1,outsider.user);r.authority.markCredentialProven(outsider.input.credential);r.authority.adoptHousehold('withdrawal-outsider',outsider.input.credential);return r.authority.createSessionAfterVerification(outsider.input.credential,now()+90000);});
+ expect((await s.send('/auth/session',undefined,other.token)).status).toBe(200);
+ for(const suffix of ['', '/outcome'])expect((await s.send(path+suffix,undefined,other.token)).status).toBe(404);
+ expect((await s.send('/member/withdrawals/prepare',{decisionOperationID:s.decision.operationID},other.token)).status).toBe(404);
+});
+
+
+test('same-time same-content redecision outside the journal cannot substitute for the original decision',async()=>{
+ const s=await withdrawalSetup(),w=await(await s.prepareWithdrawal()).json();
+ await s.unit.run(async store=>{
+  const r=memberRuntime(store,s.c,now),o=r.engine.mustGet(s.offer.id,now());
+  await r.engine.withdrawDecisions(o.id,{signature:sign('sha256',canonicalWithdrawal(o.id,o.decided_at!),s.pair.privateKey).toString('base64')},now());
+  await r.engine.decide(o.id,s.decisions as Parameters<typeof r.engine.decide>[1],sign('sha256',canonicalDecisions(o.id,s.decisions as Parameters<typeof r.engine.decide>[1]),s.pair.privateKey).toString('base64'),now());
+  expect(r.engine.mustGet(o.id,now())).toEqual(s.decided.decision);
+ });
+ expect((await s.send('/member/operations/'+w.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,w.publicKey.challenge,4)})).status).toBe(404);
+ await s.send('/member/operations/'+w.operationID+'/cancel',{});
+ expect((await s.prepareWithdrawal()).status).toBe(404);
+ expect(await s.unit.run(store=>memberRuntime(store,s.c,now).journal.currentIncarnation(s.offer.id))).toBe(0);
+});
+
+test('historical decision without generation metadata still reads but cannot invent a withdrawal association',async()=>{
+ const s=await withdrawalSetup();
+ await s.unit.run(store=>{const rows=store.map<any>('member_reviews'),old=rows.get(s.decision.operationID);delete old.decisionGeneration;rows.set(s.decision.operationID,old);});
+ expect(await(await s.send('/member/operations/'+s.decision.operationID+'/outcome')).json()).toEqual(s.decided);
+ expect((await s.prepareWithdrawal()).status).toBe(404);
 });
