@@ -192,7 +192,7 @@ async function digitalSetup(quote=true){
   r.authority.bindResource({kind:'offer',id:o.id},{household:s.input.house,presenter:'merchant-1'});
   return o;
  });
- const presenterToken=await s.unit.run(store=>presenterCredentials(memberRuntime(store,s.c,now)).issue('merchant-1',now()).token);
+ const presenterToken=await s.unit.run(store=>presenterCredentials(memberRuntime(store,s.c,now)).issue('merchant-1','Synthetic merchant',now()).token);
  if(quote)expect((await s.send('/presenter/offers/'+offer.id+'/carriage-quote',{carriage:550},presenterToken)).status).toBe(201);
  expect(await s.unit.run(store=>memberRuntime(store,s.c,now).deliveries.find(offer.id))).toBeUndefined();
  const decisions=offer.candidates.map(c=>({candidate:c.id,valence:'kept',kept_as:'self'}));
@@ -562,7 +562,7 @@ test('database failure during individual revocation preserves the full ledger fo
 
 async function requestPermission(s:Awaited<ReturnType<typeof setup>>){
  const {openPermissionRequests}=await import('./permission-requests.ts');
- return s.unit.run(store=>openPermissionRequests(memberRuntime(store,s.c,now)).issueDuplicateCheck({household:s.input.house,action:'Check for a duplicate before proposing a gift',requester:{id:'giver-one',name:'Example giver'},purpose:'Avoid proposing a product you already have',reviewExpiresAt:now()+5000,accessExpiresAt:now()+10000}));
+ return s.unit.run(store=>openPermissionRequests(memberRuntime(store,s.c,now)).issueDuplicateCheck({household:s.input.house,product:'synthetic-product',productName:'synthetic tea',requester:{id:'giver-one',name:'Example giver'},reviewExpiresAt:now()+5000,accessExpiresAt:now()+10000}));
 }
 test('permission review freezes terms and grants exactly once across concurrent retries and restart',async()=>{
  const s=await setup(),review=await requestPermission(s),path='/member/permissions/requests/'+review.terms.requestID;

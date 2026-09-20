@@ -9,6 +9,7 @@ import {canonicalConfig} from '../../engine/src/engine/offers.ts';
 import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
 import {houseOf,mandateOf} from '../member-transactions/atomic-fixture.ts';
 import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
+import {PermissionLedger} from '../../engine/src/hub/permissions.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
@@ -43,7 +44,7 @@ async function setup(){
   const mandate={id:MANDATE,household:HOUSE,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:Date.now()+86_400_000*7,version:1};
   e.mandates.record({mandate,signatures:{[HOUSE]:sign(null,canonicalMandate(mandate,config.rpID),HOUSEHOLD_PAIR.privateKey).toString('base64')},assertions:{},keyOf:(k:string)=>e.publicKeyFor(k),relyingPartyId:config.rpID});});
  // One registration per unit, as the operator command does: a unit opens each record namespace once.
- const register=(s:ReturnType<typeof shop>)=>unit.run(store=>registerPresenter(memberRuntime(store,config),{presenter:s.presenter.id,presenterKey:pem(s.presenter.pair),merchant:s.merchant.id,merchantKey:pem(s.merchant.pair),at:Date.now()}).token);
+ const register=(s:ReturnType<typeof shop>)=>unit.run(store=>registerPresenter(memberRuntime(store,config),{presenter:s.presenter.id,presenterName:'Shop '+s.presenter.id.slice(-1).toUpperCase(),presenterKey:pem(s.presenter.pair),merchant:s.merchant.id,merchantKey:pem(s.merchant.pair),at:Date.now()}).token);
  const tokenA=await register(a),tokenB=await register(b);
  const send=(token:string,path:string,body?:unknown)=>app.fetch(new Request(config.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',authorization:'Bearer '+token},...(body===undefined?{}:{body:JSON.stringify(body)})}),{peer:'presenter-test'});
  const offerBody=(version:string,product:string)=>({binding:'physical',household:HOUSE,purpose:'replenish',config_version:version,expires_at:Date.now()+86_400_000,mandate:MANDATE,price_band:null,giver:null,candidates:[{product,quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
@@ -51,7 +52,7 @@ async function setup(){
 }
 test('a presenter credential publishes, presents, delivers and collects only its own box',async()=>{
  const s=await setup();
- expect(await (await s.send(s.tokenA,'/presenter/self')).json()).toEqual({presenter:s.a.presenter.id});
+ expect(await (await s.send(s.tokenA,'/presenter/self')).json()).toEqual({presenter:s.a.presenter.id,displayName:'Shop A'});
  expect((await s.send('apr1_'+'x'.repeat(43),'/presenter/self')).status).toBe(401);
  expect((await s.send(s.tokenB,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(403);
  expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(201);
@@ -112,6 +113,23 @@ test('presenter routes refuse member tokens and member routes refuse presenter t
  expect((await s.send('amr1_'+'x'.repeat(43),'/presenter/self')).status).toBe(401);
  expect((await s.send(s.tokenA,'/auth/session')).status).toBe(401);
  expect((await s.send(s.tokenA,'/presenter/identities',{})).status).toBe(404);
+});
+
+test('presenter opens a product-bound request and can read one bit only after the member grant',async()=>{
+ const s=await setup(),at=Date.now(),create='/presenter/permission-requests';
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('permission-1'))).status).toBe(201);
+ const input={household:HOUSE,product:'tea-a',product_name:'Tea A',review_expires_at:at+10_000,access_expires_at:at+20_000};
+ for(const changed of [{...input,presenter:s.b.presenter.id},{...input,scope:['offers']},{...input,product_name:''},{...input,review_expires_at:1}])expect((await s.send(s.tokenA,create,changed)).status).not.toBe(201);
+ const opened=await s.send(s.tokenA,create,input);expect(opened.status).toBe(201);const review=await opened.json() as any;
+ expect(review).toMatchObject({state:'pending',terms:{household:HOUSE,requester:{id:s.a.presenter.id,name:'Shop A'},action:'Check whether you already have Tea A',purpose:'Avoid proposing a gift you already have',fields:[{id:'duplicate_check'}]}});
+ expect(JSON.stringify(review)).not.toContain('tea-a');expect(Object.keys(review).sort()).toEqual(['decidedAt','digest','permission','state','terms']);
+ const query='/presenter/permission-requests/'+review.terms.requestID+'/duplicate-check';
+ expect((await s.send(s.tokenA,query,{})).status).toBe(404);expect((await s.send(s.tokenB,query,{})).status).toBe(404);
+ const granted=await s.unit.run(store=>{const rows=store.map<any>('member_permission_requests'),row=rows.get(review.terms.requestID),ledger=new PermissionLedger(store),permission=ledger.grant({household:HOUSE,grantee:s.a.presenter.id,scope:['duplicate_check'],purpose:review.terms.purpose,expires_at:review.terms.accessExpiresAt,asked_from:row.actionID,now:at});row.state='granted';row.permissionID=permission.id;row.decidedAt=at;rows.set(review.terms.requestID,row);return permission;});
+ expect(await(await s.send(s.tokenA,query,{})).json()).toEqual({already_received:false});
+ expect(await s.unit.run(store=>new PermissionLedger(store).queriesFor(HOUSE))).toEqual([expect.objectContaining({asked_by:s.a.presenter.id,product:'tea-a',answered:false})]);
+ await s.unit.run(store=>new PermissionLedger(store).revoke(HOUSE,granted.id,at+1));
+ expect((await s.send(s.tokenA,query,{})).status).toBe(404);
 });
 
 test('digital quotation is scoped, immutable, replayable and never a delivery',async()=>{

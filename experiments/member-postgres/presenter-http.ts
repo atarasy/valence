@@ -3,7 +3,7 @@ import {createApp,type Hub} from '../../engine/src/http.ts';
 import {records} from './records.ts';
 import type {memberRuntime} from './runtime.ts';
 type Runtime=ReturnType<typeof memberRuntime>;
-type Credential={presenter:string;revoked:number;issuedAt:number};
+type Credential={presenter:string;displayName?:string;revoked:number;issuedAt:number};
 type Reply={status:number;body:string};
 const TOKEN=/^apr1_[A-Za-z0-9_-]{43}$/;
 const reply=(status:number,body:unknown):Reply=>({status,body:JSON.stringify(body)});
@@ -20,14 +20,14 @@ export function presenterCredentials(r:Runtime){
  const rows=records<Credential>(r.path,'member_presenter_credentials'),scope=r.path.scope;
  const digest=(token:string)=>createHash('sha256').update(JSON.stringify(['atarasy.presenter-credential.1',scope.environment,scope.audience,token])).digest('hex');
  return {
-  resolve(token:string){if(!TOKEN.test(token))return;const row=rows.get(digest(token));return row&&row.revoked===0?row.presenter:undefined;},
-  issue(presenter:string,at:number){
-   identifier(presenter,'presenter');
+  resolve(token:string){if(!TOKEN.test(token))return;const row=rows.get(digest(token));return row&&row.revoked===0?row:undefined;},
+  issue(presenter:string,displayName:string,at:number){
+   identifier(presenter,'presenter');identifier(displayName,'presenter display name');
    // The key must already be an identity: a credential for a presenter nobody can verify would publish catalogues that never register.
    if(!r.engine.publicKeyFor(presenter))throw new Error('Presenter identity not registered');
    const token='apr1_'+randomBytes(32).toString('base64url');
-   rows.insert(digest(token),{presenter,revoked:0,issuedAt:at});
-   return {presenter,token};
+   rows.insert(digest(token),{presenter,displayName,revoked:0,issuedAt:at});
+   return {presenter,displayName,token};
   },
  };
 }
@@ -37,11 +37,11 @@ export function presenterCredentials(r:Runtime){
  * presenter surface. Re-registering the same key is accepted; another key for
  * the same name is refused by the engine.
  */
-export function registerPresenter(r:Runtime,input:{presenter:string;presenterKey:string;merchant:string;merchantKey:string;at:number}){
+export function registerPresenter(r:Runtime,input:{presenter:string;presenterName:string;presenterKey:string;merchant:string;merchantKey:string;at:number}){
  identifier(input.merchant,'merchant');
  r.engine.registerIdentity(input.presenter,input.presenterKey);
  r.engine.registerIdentity(input.merchant,input.merchantKey);
- return presenterCredentials(r).issue(input.presenter,input.at);
+ return presenterCredentials(r).issue(input.presenter,input.presenterName,input.at);
 }
 function object(value:unknown):Record<string,unknown>{return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};}
 /**
@@ -53,15 +53,32 @@ function object(value:unknown):Record<string,unknown>{return value!==null&&typeo
  */
 export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:unknown):Promise<Reply>{
  const token=request.headers.get('authorization')?.match(/^Bearer (apr1_[A-Za-z0-9_-]{43})$/)?.[1];
- const presenter=token?presenterCredentials(r).resolve(token):undefined;
- if(!presenter)return reply(401,{error:'unauthorised',message:'a valid presenter credential is required'});
+ const credential=token?presenterCredentials(r).resolve(token):undefined;
+ if(!credential)return reply(401,{error:'unauthorised',message:'a valid presenter credential is required'});
+ const presenter=credential.presenter;
  const url=new URL(request.url),parts=url.pathname.split('/').filter(Boolean).slice(1),method=request.method,app=createApp(r.engine,hub);
  const forward=async(path:string,body?:unknown,verb=method):Promise<Reply>=>{
   const res=await app(new Request(url.origin+path,{method:verb,headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}));
   return {status:res.status,body:await res.text()};
  };
  const b=object(input);
- if(parts.length===1&&parts[0]==='self'&&method==='GET')return reply(200,{presenter});
+ if(parts.length===1&&parts[0]==='self'&&method==='GET')return reply(200,{presenter,...(credential.displayName?{displayName:credential.displayName}:{})});
+ if(parts.length===1&&parts[0]==='permission-requests'&&method==='POST'){
+  if(url.search||Object.keys(b).sort().join(',')!=='access_expires_at,household,product,product_name,review_expires_at')return reply(400,{error:'malformed',message:'a duplicate-check request has exact household, product, product_name and expiries'});
+  if(!credential.displayName)return reply(409,{error:'presenter_name_required',message:'rotate this presenter credential with an operator-registered display name'});
+  for(const key of ['household','product','product_name'])identifier(b[key],key);
+  if(!Number.isSafeInteger(b.review_expires_at)||!Number.isSafeInteger(b.access_expires_at))return reply(400,{error:'malformed',message:'request expiries must be safe whole numbers'});
+  if(!r.engine.configsForPresenter(presenter).some(c=>Object.hasOwn(c.products,b.product as string)))return reply(422,{error:'unknown_product',message:'the requested product is not in this presenter\'s catalogue'});
+  const {openPermissionRequests}=await import('./permission-requests.ts');
+  try{return reply(201,openPermissionRequests(r,hub.permissions).issueDuplicateCheck({household:b.household as string,product:b.product as string,productName:b.product_name as string,requester:{id:presenter,name:credential.displayName},reviewExpiresAt:b.review_expires_at as number,accessExpiresAt:b.access_expires_at as number}));}
+  catch{return reply(422,{error:'request_unavailable',message:'the permission request could not be opened'});}
+ }
+ if(parts.length===3&&parts[0]==='permission-requests'&&parts[2]==='duplicate-check'&&method==='POST'){
+  if(url.search||Object.keys(b).length)return reply(400,{error:'malformed',message:'duplicate check takes no body fields'});
+  const {openPermissionRequests}=await import('./permission-requests.ts');
+  try{return reply(200,openPermissionRequests(r,hub.permissions).duplicateCheck(presenter,parts[1]!));}
+  catch{return reply(404,{error:'request_unavailable',message:'no granted live request is available'});}
+ }
  // A shop needs its published catalogues back to compose a box after a restart; only its own are listed.
  if(parts.length===1&&parts[0]==='configs'&&method==='GET'){
   if(url.search)return reply(400,{error:'malformed',message:'this route takes no query'});
