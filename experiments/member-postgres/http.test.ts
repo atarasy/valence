@@ -23,6 +23,7 @@ const pool=createPool(url),ids:string[]=[];
 const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
 const now=()=>fixtureTime+1;
 const coseOf=(pair:{publicKey:{export:(o:any)=>any}})=>{const jwk=pair.publicKey.export({format:'jwk'});return Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);};
+const engineAssertion=(response:{response:{clientDataJSON:string;authenticatorData:string;signature:string}})=>{const value=response.response,b64=(input:string)=>Buffer.from(input,'base64url').toString('base64');return {client_data_json:b64(value.clientDataJSON),authenticator_data:b64(value.authenticatorData),signature:b64(value.signature)};};
 // The invited member is a second household, so its identifier is a second key (§13.2, question 55).
 // The invited member has not registered a passkey, so it has no household yet
 // (§13.2, question 55): a household that is a key is adopted, not assigned.
@@ -69,6 +70,49 @@ test('PostgreSQL HTTP signs in reads approves reconciles identical retries and l
  expect(responses.map(r=>r.status)).toEqual([200,200]);const receipt=await responses[0]!.json();expect(await responses[1]!.json()).toEqual(receipt);
  expect(await (await s.send(path+'/outcome',undefined,grant.token)).json()).toEqual(receipt);
  expect((await s.send('/auth/logout',{},grant.token)).status).toBe(204);expect((await s.send(path+'/outcome',undefined,grant.token)).status).toBe(404);
+});
+test('member mandate changes read the effective version and wait for every prior co-signer',async()=>{
+ const s=await setup(),co=syntheticAuthenticator();
+ await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);r.authority.provisionUnclaimedPrincipal('mandate-cosigner',[]);});
+ const invitation=await s.unit.run(store=>memberRuntime(store,s.c,now).enrollment.issueInvitation('mandate-cosigner'));
+ const enrollment=await (await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();
+ expect((await s.send('/auth/enrollment/verify',{id:enrollment.id,response:co.register(enrollment.publicKey.challenge,s.c.origin,s.c.rpID)})).status).toBe(201);
+ const login=await (await s.send('/auth/login/options',{})).json(),user=enrollment.publicKey.user.id;
+ const signedIn=await s.send('/auth/login/verify',{id:login.id,response:co.authenticate(login.publicKey.challenge,s.c.origin,s.c.rpID,user,1)});
+ expect(signedIn.status).toBe(200);const coToken=(await signedIn.json()).token as string;
+ const coSigner=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now),name=r.authority.adoptHousehold('mandate-cosigner',co.id),key=r.login.verifiedPublicKey(co.id)!;
+  r.engine.registerIdentity(name,createPublicKey({key:credentialSPKI(key),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());return name;});
+ const effective=await (await s.send('/member/mandates/effective',undefined)).json();
+ expect(effective.mandates).toHaveLength(1);const first=effective.mandates[0];
+ const addSigner={...first,co_signers:[coSigner],version:first.version+1,lapses_at:first.lapses_at-1};
+ const prepared=await (await s.send('/member/mandates/changes',{mandate:addSigner})).json();
+ expect(prepared).toMatchObject({before:first,mandate:addSigner,requiredSigners:[s.input.house],signedBy:[],state:'pending'});
+ const memberProof=engineAssertion(loginResponse(s.pair,s.input.credential,s.user,prepared.publicKey.challenge,10));
+ const tightened=await (await s.send('/member/mandates/changes/'+prepared.id+'/submit',{assertion:memberProof})).json();
+ expect(tightened).toMatchObject({state:'effective',signedBy:[s.input.house]});
+ const loosened={...addSigner,ceiling_out_of_network:addSigner.ceiling_out_of_network+1,version:addSigner.version+1};
+ const joint=await (await s.send('/member/mandates/changes',{mandate:loosened})).json();
+ expect(joint.requiredSigners).toEqual([coSigner,s.input.house].sort());
+ const memberJoint=engineAssertion(loginResponse(s.pair,s.input.credential,s.user,joint.publicKey.challenge,11));
+ const waiting=await (await s.send('/member/mandates/changes/'+joint.id+'/submit',{assertion:memberJoint})).json();
+ expect(waiting.state).toBe('pending');expect(waiting.signedBy).toEqual([s.input.house]);
+ const competing=await s.send('/member/mandates/changes',{mandate:{...loosened,ceiling_out_of_network:loosened.ceiling_out_of_network+1}});
+ expect(competing.status).toBe(409);expect(await competing.json()).toEqual({error:'change_pending'});
+ const coList=await (await s.send('/member/mandates/changes',undefined,coToken)).json();
+ expect(coList.changes.map((value:{id:string})=>value.id)).toContain(joint.id);
+ const coPrepared=await (await s.send('/member/mandates/changes/'+joint.id+'/prepare',undefined,coToken)).json();
+ const coProof=engineAssertion(co.authenticate(coPrepared.publicKey.challenge,s.c.origin,s.c.rpID,user,2));
+ const completed=await (await s.send('/member/mandates/changes/'+joint.id+'/submit',{assertion:coProof},coToken)).json();
+ expect(completed).toMatchObject({state:'effective',mandate:loosened});expect(completed.signedBy.sort()).toEqual([coSigner,s.input.house].sort());
+ const readback=await (await s.send('/member/mandates/effective',undefined)).json();
+ expect(readback.mandates).toEqual([loosened]);
+ const stale=await s.send('/member/mandates/changes',{mandate:loosened});expect(stale.status).toBe(409);expect(await stale.json()).toEqual({error:'stale_version'});
+ const invalid=await s.send('/member/mandates/changes',{mandate:{...loosened,version:loosened.version+1,cooling_seconds:2_592_001}});
+ expect(invalid.status).toBe(422);expect(await invalid.json()).toEqual({error:'invalid_cooling'});
+ const unchanged=await s.send('/member/mandates/changes',{mandate:{...loosened,version:loosened.version+1}});
+ expect(unchanged.status).toBe(422);expect(await unchanged.json()).toEqual({error:'no_change'});
+ const malformed=await s.send('/member/mandates/changes',{mandate:{id:loosened.id}});
+ expect(malformed.status).toBe(400);expect(await malformed.json()).toEqual({error:'invalid_mandate'});
 });
 test('PostgreSQL registration persists login across independent composition and rejects replay',async()=>{
  const s=await setup(),key=syntheticAuthenticator(),invitation=await s.invite(),flow=await (await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();

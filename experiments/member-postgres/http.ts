@@ -8,6 +8,7 @@ import { openDecisionAuthorisations } from './decision-authorisation.ts';
 import type { DecisionInput } from '../../engine/src/shared/decisions.ts';
 import { openStatementAuthorisations } from './statement-authorisation.ts';
 import { openMandateCeremony } from './mandate-ceremony.ts';
+import { openMandateChanges } from './mandate-changes.ts';
 import type { Assertion } from '../../engine/src/shared/decisions.ts';
 import { memberTransport } from '../member-login/transport.ts';
 import { memberReadBoundary } from '../member-read/gate.ts';
@@ -19,6 +20,7 @@ import { openPermissionRequests } from './permission-requests.ts';
 import { PermissionLedger } from '../../engine/src/hub/permissions.ts';
 import type { PreparedAssertion } from './login.ts';
 import { presenterRequest } from './presenter-http.ts';
+import { badRequest, ValenceError } from '../../engine/src/common/errors.ts';
 const json=(status:number,error:string)=>Response.json({error},{status,headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}});
 const authPaths=['/auth/enrollment/options','/auth/enrollment/verify','/auth/login/options','/auth/login/verify','/auth/session','/auth/logout'];
 async function body(request:Request,max:number,timeout:number){
@@ -34,7 +36,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||!!permission||!!permissionRequest,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -91,9 +93,34 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
        const revoked=held.revoked_at===null?ledger.revoke(session.household,id,at):held;
        return {status:200,body:JSON.stringify({household:session.household,permission:revoked})};
       }
+      const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
+      if(mandateEffective || mandateChanges){
+       const api=openMandateChanges(r,{rpID:c.rpID});
+       if(mandateEffective){if(request.method!=='GET')return {status:405,body:JSON.stringify({error:'method_not_allowed'})};return {status:200,body:JSON.stringify(api.effective(token))};}
+       const [,id,action]=mandateChanges!;
+       const expected=id?(action===undefined||action==='prepare'?'GET':'POST'):(request.method==='GET'?'GET':'POST');
+       if(request.method!==expected)return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
+       if(!id&&request.method==='GET')return {status:200,body:JSON.stringify(api.list(token))};
+       if(id&&!action)return {status:200,body:JSON.stringify(api.read(token,id))};
+       if(id&&action==='prepare')return {status:200,body:JSON.stringify(api.prepareSignature(token,id))};
+       if(id&&action==='cancel'){
+        if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).length)throw badRequest('invalid_cancellation','Invalid mandate cancellation');
+        return {status:200,body:JSON.stringify(api.cancel(token,id))};
+       }
+       if(id&&action==='submit'){
+        if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).join(',')!=='assertion')throw badRequest('invalid_signature','Invalid mandate signature');
+        return {status:200,body:JSON.stringify(api.submit(token,id,(inputBody as {assertion:Assertion}).assertion))};
+       }
+       if(!id&&request.method==='POST'){
+        if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).join(',')!=='mandate')throw badRequest('invalid_mandate','Invalid mandate change');
+        const draft=(inputBody as {mandate:unknown}).mandate;
+        if(!draft||typeof draft!=='object'||Array.isArray(draft)||Object.keys(draft).sort().join(',')!=='ceiling_daily,ceiling_out_of_network,co_signers,cooling_seconds,household,id,lapses_at,version')throw badRequest('invalid_mandate','Invalid mandate change');
+        return {status:201,body:JSON.stringify(api.prepare(token,draft as import('../../engine/src/hub/mandates.ts').Mandate))};
+       }
+       throw new Error('Mandate change unavailable');
+      }
       const action=mandate?('mandate-'+mandate[1]):(prepare||digital||withdrawal)?'prepare':match![2]??'review',method=['review','outcome'].includes(action)?'GET':'POST';
       if(request.method!==method)return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
-      const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
       // §16.1, question 56. Signing a mandate that arrived by a move. It sits
       // beside the statement ceremony because it is the same shape: the device
       // is shown what it is agreeing to, and the engine verifies the assertion.
@@ -135,7 +162,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     });
     if(Buffer.byteLength(result.body)>1_048_576)return json(503,'response_unavailable');
     return new Response(result.status===204?null:result.body,{status:result.status,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}});
-   }catch(error){return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
+   }catch(error){if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
   }
  };
 }
