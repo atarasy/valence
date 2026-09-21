@@ -1,5 +1,6 @@
 import { createHash, createPublicKey } from 'node:crypto';
 import { verifyAssertion, type Assertion } from './decisions.js';
+import { acceptsAssertionOrigin } from './assertion-origins.js';
 
 export const MEMBER_DECISION_PROFILE = 'atarasy.member-decision-authorisation.1';
 export type MemberDecisionEnvelope = {
@@ -8,7 +9,7 @@ export type MemberDecisionEnvelope = {
   offer: string; mandate: string; presenter: string; canonical: string; reviewedRevision: string;
   expiresAt: number; requestDigest: string;
 };
-export type MemberDecisionScope = { environment: string; origin: string };
+export type MemberDecisionScope = { environment: string; origin: string; androidAppOrigins: readonly string[] };
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 export function memberDecisionBytes(e: MemberDecisionEnvelope): Buffer {
   return Buffer.from(JSON.stringify([e.profile, JSON.stringify([1, e.environment, e.origin, e.rpID]), e.id, e.requestDigest, e.reviewedRevision]));
@@ -37,7 +38,7 @@ export function verifyMemberDecision(e: MemberDecisionEnvelope, assertion: Asser
       if (typeof value !== 'string' || !value || value.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(value) || Buffer.from(value, 'base64url').toString('base64url') !== value) return false;
     }
     const client = JSON.parse(Buffer.from(assertion.client_data_json, 'base64url').toString());
-    if (client.origin !== scope.origin || (client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined) return false;
+    if (!acceptsAssertionOrigin(scope.origin, scope.androidAppOrigins, client.origin) || (client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined) return false;
     return verifyAssertion(memberDecisionBytes(e), assertion, key, rpID);
   } catch { return false; }
 }

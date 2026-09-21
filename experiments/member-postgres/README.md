@@ -14,6 +14,8 @@ Install the pinned dependencies with `bun install --frozen-lockfile`. Generate m
 
 [Protected member refresh](MEMBER_REFRESH.md) adds an authenticated APNs subscription and trusted generic-wake delivery boundary for IOS-B22. Push payloads contain no household, presenter, offer, product, state or count; actual content remains a bounded foreground read.
 
+[Android passkey origins](ANDROID_PASSKEY_ORIGINS.md) pins the exact release signing-certificate origins accepted from Credential Manager. The development allow-list is empty until a release identity and Digital Asset Links association are reviewed.
+
 For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts --timeout 30000`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
 
 ## Behaviour and limits

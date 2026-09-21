@@ -5,7 +5,8 @@ import {canonicalWithdrawal,canonicalDecisions,type DecisionInput,type Assertion
 import {canonicalMandate} from '../src/hub/mandates.js';
 import {makeEngine,HOUSEHOLD,MANDATE,MANDATE_PAIR,CONFIG_VERSION,HOUR} from './helpers.js';
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
-const scope={environment:'test',origin:'https://unit.example'};
+const androidOrigin=`android:apk-key-hash:${Buffer.alloc(32,7).toString('base64url')}`;
+const scope={environment:'test',origin:'https://unit.example',androidAppOrigins:[androidOrigin]};
 function digest(e:MemberWithdrawalEnvelope){return hash(JSON.stringify(['atarasy.member-withdrawal-operation.1',JSON.stringify([1,e.environment,e.origin]),e.principal,e.credential,e.household,e.keyFingerprint,e.offer,e.mandate,e.presenter,e.canonical,e.reviewedRevision,e.expiresAt]));}
 function assertion(e:MemberWithdrawalEnvelope,options:{origin?:string;flags?:number;bytes?:Buffer}={}):Assertion {
  const auth=Buffer.concat([createHash('sha256').update(e.rpID).digest(),Buffer.from([options.flags??5,0,0,0,1])]);
@@ -23,7 +24,7 @@ async function setup(enabled=true,cooling:number|null=3600,binding:'digital'|'ph
  await engine.present(offer.id,now);
  await decideAt(engine,offer.id,[{candidate:offer.candidates[0]!.id,valence:'kept',kept_as:'self'}],now);
  const canonical=binding==='digital'?engine.memberWithdrawalReview(offer.id,now).canonical:'invalid physical';
- const envelope:MemberWithdrawalEnvelope={profile:MEMBER_WITHDRAWAL_PROFILE,...scope,rpID:'unit.example',id:'withdrawal-1',principal:'member',credential:'credential',household:HOUSEHOLD,keyFingerprint:hash(MANDATE_PAIR.publicKey.export({type:'spki',format:'der'})),offer:offer.id,mandate:MANDATE,presenter:offer.presenter,canonical,reviewedRevision:hash('reviewed decision'),expiresAt:now+60000,requestDigest:''};envelope.requestDigest=digest(envelope);
+ const envelope:MemberWithdrawalEnvelope={profile:MEMBER_WITHDRAWAL_PROFILE,environment:scope.environment,origin:scope.origin,rpID:'unit.example',id:'withdrawal-1',principal:'member',credential:'credential',household:HOUSEHOLD,keyFingerprint:hash(MANDATE_PAIR.publicKey.export({type:'spki',format:'der'})),offer:offer.id,mandate:MANDATE,presenter:offer.presenter,canonical,reviewedRevision:hash('reviewed decision'),expiresAt:now+60000,requestDigest:''};envelope.requestDigest=digest(envelope);
  return {...made,offer,envelope,now};
 }
 test('contextual withdrawal resets only a signed digital set and cannot use the legacy route',async()=>{
@@ -73,4 +74,8 @@ test('contextual authorisation never bypasses cooling or settlement finality',as
  const closed=await setup(true,1);await expect(closed.engine.withdrawMember(closed.envelope,assertion(closed.envelope),closed.now+1000)).rejects.toThrow('closed');
  const settled=await setup(true,0);await settled.engine.settle(settled.offer.id,settled.now);
  await expect(settled.engine.withdrawMember(settled.envelope,assertion(settled.envelope),settled.now)).rejects.toThrow('cannot withdraw');
+});
+test('a pinned Android signing origin authorises withdrawal and an unlisted certificate does not',async()=>{
+ const accepted=await setup();expect((await accepted.engine.withdrawMember(accepted.envelope,assertion(accepted.envelope,{origin:androidOrigin}),accepted.now)).state).toBe('presented');
+ const rejected=await setup();await expect(rejected.engine.withdrawMember(rejected.envelope,assertion(rejected.envelope,{origin:`android:apk-key-hash:${Buffer.alloc(32,8).toString('base64url')}`}),rejected.now)).rejects.toThrow('signature');
 });

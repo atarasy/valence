@@ -5,7 +5,8 @@ import { canonicalDecisions, type Assertion, type DecisionInput } from '../src/s
 import { makeEngine, HOUSEHOLD, MANDATE, MANDATE_PAIR, CONFIG_VERSION, HOUR } from './helpers.js';
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
-const scope = { environment: 'test', origin: 'https://unit.example' };
+const androidOrigin = `android:apk-key-hash:${Buffer.alloc(32, 7).toString('base64url')}`;
+const scope = { environment: 'test', origin: 'https://unit.example', androidAppOrigins: [androidOrigin] };
 function digest(e: MemberDecisionEnvelope) {
   return hash(JSON.stringify(['atarasy.member-decision-operation.1', JSON.stringify([1,e.environment,e.origin]),e.principal,e.credential,e.household,e.keyFingerprint,e.offer,e.mandate,e.presenter,e.canonical,e.reviewedRevision,e.expiresAt]));
 }
@@ -74,4 +75,11 @@ test('legacy challenges, foreign origins, absent UV and expired signed envelopes
   }
   const s=await setup();s.envelope.expiresAt=s.now;s.envelope.requestDigest=digest(s.envelope);
   await expect(s.engine.decideMember(s.envelope,s.decisions,assertion(s.envelope),s.now)).rejects.toThrow('signature');
+});
+
+test('a pinned Android signing origin authorises a decision and an unlisted certificate does not',async()=>{
+  const accepted=await setup();
+  expect((await accepted.engine.decideMember(accepted.envelope,accepted.decisions,assertion(accepted.envelope,{origin:androidOrigin}),accepted.now)).state).toBe('decided');
+  const rejected=await setup();
+  await expect(rejected.engine.decideMember(rejected.envelope,rejected.decisions,assertion(rejected.envelope,{origin:`android:apk-key-hash:${Buffer.alloc(32,8).toString('base64url')}`}),rejected.now)).rejects.toThrow('signature');
 });

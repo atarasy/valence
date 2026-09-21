@@ -13,13 +13,14 @@ import { openOperationJournal,type JournalOperation } from './operation-journal.
 import type { MemberRuntimeConfig } from './config.ts';
 export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const path=memberRecords(store,{environment:c.environment,audience:c.origin});
- const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin},memberDecisionScope:{environment:c.environment,origin:c.origin},memberWithdrawalScope:{environment:c.environment,origin:c.origin}},store);
+ const memberScope={environment:c.environment,origin:c.origin,androidAppOrigins:c.androidAppOrigins};
+ const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:memberScope,memberDecisionScope:memberScope,memberWithdrawalScope:memberScope},store);
  const deliveries=new DeliveryRegister(store);engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
  const quotes=new CarriageQuotes(store);
  const approvalCarriage=(id:string)=>engine.mustGet(id,now()).binding==='digital'?quotes.find(id):deliveries.find(id);
  engine.readApprovalCarriageFrom({async find(id){return approvalCarriage(id);}});
  const authority=openMemberAuthority(path,{environment:c.environment,audience:c.origin,maxSessionLifetimeMs:c.maxSessionLifetimeMs,now});
- const p={environment:c.environment,origin:c.origin,rpID:c.rpID,challengeLifetimeMs:c.maximumLifetimeMs,sessionLifetimeMs:c.maxSessionLifetimeMs,now};
+ const p={environment:c.environment,origin:c.origin,rpID:c.rpID,androidAppOrigins:c.androidAppOrigins,challengeLifetimeMs:c.maximumLifetimeMs,sessionLifetimeMs:c.maxSessionLifetimeMs,now};
  const login=openVerifiedLogin(path,authority,p),enrollment=openEnrollment(path,authority,login,{...p,rpName:'Atarasy',invitationLifetimeMs:c.maximumLifetimeMs});
  const bindings=openMandateBindings(path,authority,login,engine),journal=openOperationJournal(path,authority,bindings,{maximumLifetimeMs:c.maximumLifetimeMs,now});
  const reviews=records<any>(path,'member_reviews');

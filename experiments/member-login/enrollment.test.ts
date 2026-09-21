@@ -9,10 +9,10 @@ import { openEnrollment } from './enrollment.ts';
 import { syntheticAuthenticator } from './fixtures/authenticator.ts';
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const fn of cleanups.splice(0).reverse()) fn(); });
-function setup() {
+function setup(androidAppOrigins: string[] = []) {
   const dir = mkdtempSync(join(tmpdir(), 'enrollment-')); cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const state = { at: 1000 };
-  const policy = { environment: 'test', origin: 'https://unit.example', rpID: 'unit.example', rpName: 'Atarasy test', invitationLifetimeMs: 2000, challengeLifetimeMs: 1000, sessionLifetimeMs: 4000, now: () => state.at };
+  const policy = { environment: 'test', origin: 'https://unit.example', rpID: 'unit.example', androidAppOrigins, rpName: 'Atarasy test', invitationLifetimeMs: 2000, challengeLifetimeMs: 1000, sessionLifetimeMs: 4000, now: () => state.at };
   const authority = openMemberAuthority(join(dir,'authority.sqlite'), { environment: policy.environment, audience: policy.origin, maxSessionLifetimeMs: 5000, now: policy.now }); cleanups.push(() => authority.close());
   authority.provisionPrincipal('member','household',['presenter']);
   const connectLogin = () => { const login = openVerifiedLogin(join(dir,'login.sqlite'),authority,policy); cleanups.push(() => login.close()); return login; };
@@ -30,6 +30,14 @@ test('verified registration followed by signed login binds only the invited prin
   const challenge = login.begin(); const session = await login.finish(challenge.id,key.authenticate(challenge.publicKey.challenge,policy.origin,policy.rpID,flow.publicKey.user.id));
   expect((await authority.resolveSession(session.token))!.household).toBe('household');
   expect(() => enrollment.issueInvitation('unprovisioned')).toThrow();
+});
+
+test('enrollment accepts the exact configured Android release origin and refuses another certificate', async () => {
+  const allowed = 'android:apk-key-hash:' + Buffer.alloc(32, 9).toString('base64url'), other = 'android:apk-key-hash:' + Buffer.alloc(32, 8).toString('base64url');
+  const s = setup([allowed]), key = syntheticAuthenticator(), flow = await s.enrollment.begin(s.enrollment.issueInvitation('member').token);
+  expect(await s.enrollment.finish(flow.id, key.register(flow.publicKey.challenge, allowed, s.policy.rpID))).toEqual({ registered: true });
+  const refused = setup([allowed]), otherKey = syntheticAuthenticator(), otherFlow = await refused.enrollment.begin(refused.enrollment.issueInvitation('member').token);
+  await expect(refused.enrollment.finish(otherFlow.id, otherKey.register(otherFlow.publicKey.challenge, other, refused.policy.rpID))).rejects.toThrow();
 });
 
 test('wrong challenge, origin, RP, type, flags and credential substitution consume registration attempts', async () => {

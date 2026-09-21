@@ -1,6 +1,7 @@
 import { verifyMemberWithdrawal, type MemberWithdrawalEnvelope, type MemberWithdrawalScope } from '../shared/member-withdrawal.js';
 import { verifyMemberDecision, type MemberDecisionEnvelope, type MemberDecisionScope } from '../shared/member-decision.js';
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
+import { validateAndroidAppOrigins } from '../shared/assertion-origins.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { ValenceError, badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
@@ -512,26 +513,30 @@ export class ValenceEngine {
     const memberScope = config.memberStatementScope;
     if (memberScope !== undefined) {
       const origin = new URL(memberScope.origin);
-      if (Object.keys(memberScope).sort().join(',') !== 'environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(memberScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member statement deployment scope');
       }
+      try { validateAndroidAppOrigins(memberScope.androidAppOrigins); } catch { throw new Error('Invalid member statement deployment scope'); }
     }
     const decisionScope = config.memberDecisionScope;
     if (decisionScope !== undefined) {
       const origin = new URL(decisionScope.origin);
-      if (Object.keys(decisionScope).sort().join(',') !== 'environment,origin' || typeof decisionScope.environment !== 'string' || !decisionScope.environment || origin.protocol !== 'https:' || origin.origin !== decisionScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(decisionScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof decisionScope.environment !== 'string' || !decisionScope.environment || origin.protocol !== 'https:' || origin.origin !== decisionScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member decision deployment scope');
       }
+      try { validateAndroidAppOrigins(decisionScope.androidAppOrigins); } catch { throw new Error('Invalid member decision deployment scope'); }
     }
     const withdrawalScope = config.memberWithdrawalScope;
     if (withdrawalScope !== undefined) {
       const origin = new URL(withdrawalScope.origin);
-      if (Object.keys(withdrawalScope).sort().join(',') !== 'environment,origin' || typeof withdrawalScope.environment !== 'string' || !withdrawalScope.environment || origin.protocol !== 'https:' || origin.origin !== withdrawalScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(withdrawalScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof withdrawalScope.environment !== 'string' || !withdrawalScope.environment || origin.protocol !== 'https:' || origin.origin !== withdrawalScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member withdrawal deployment scope');
       }
+      try { validateAndroidAppOrigins(withdrawalScope.androidAppOrigins); } catch { throw new Error('Invalid member withdrawal deployment scope'); }
     }
-    this.config = { ...config, ...(withdrawalScope === undefined ? {} : { memberWithdrawalScope: Object.freeze({ ...withdrawalScope }) }), ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }),
-      ...(decisionScope === undefined ? {} : { memberDecisionScope: Object.freeze({ ...decisionScope }) }) };
+    const freezeScope = <T extends { androidAppOrigins: readonly string[] }>(scope: T): T => Object.freeze({ ...scope, androidAppOrigins: Object.freeze([...scope.androidAppOrigins]) });
+    this.config = { ...config, ...(withdrawalScope === undefined ? {} : { memberWithdrawalScope: freezeScope(withdrawalScope) }), ...(memberScope === undefined ? {} : { memberStatementScope: freezeScope(memberScope) }),
+      ...(decisionScope === undefined ? {} : { memberDecisionScope: freezeScope(decisionScope) }) };
     Object.freeze(this.config);
   }
 

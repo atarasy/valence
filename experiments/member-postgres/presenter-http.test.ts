@@ -13,7 +13,7 @@ import {PermissionLedger} from '../../engine/src/hub/permissions.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
-const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:1000,maximumPending:8,budgetWindowMs:60000,maximumRequests:500,maximumTrackedTokens:100};
+const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',androidAppOrigins:[],explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:1000,maximumPending:8,budgetWindowMs:60000,maximumRequests:500,maximumTrackedTokens:100};
 beforeAll(()=>migrateDatabase(url));
 afterAll(async()=>{for(const id of ids){await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id]);}await pool.end();});
 const pem=(pair:{publicKey:KeyObject})=>pair.publicKey.export({type:'spki',format:'pem'}).toString();

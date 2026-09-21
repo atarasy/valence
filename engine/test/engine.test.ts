@@ -64,6 +64,16 @@ describe("construction", () => {
     }).toThrow();
     expect(engine.config.explorationRate).toBe(0.2);
   });
+
+  test("Android assertion origins are canonical, explicitly pinned and frozen", () => {
+    const androidOrigin = `android:apk-key-hash:${Buffer.alloc(32, 7).toString('base64url')}`;
+    const { engine } = makeEngine({ memberStatementScope: { environment: 'test', origin: 'https://unit.example', androidAppOrigins: [androidOrigin] } });
+    expect(engine.config.memberStatementScope?.androidAppOrigins).toEqual([androidOrigin]);
+    expect(() => (engine.config.memberStatementScope!.androidAppOrigins as string[]).push('changed')).toThrow();
+    for (const androidAppOrigins of [[androidOrigin, androidOrigin], ['android:apk-key-hash:not-a-digest'], Array.from({ length: 9 }, (_, i) => `android:apk-key-hash:${Buffer.alloc(32, i).toString('base64url')}`)]) {
+      expect(() => makeEngine({ memberStatementScope: { environment: 'test', origin: 'https://unit.example', androidAppOrigins } })).toThrow('Invalid member statement deployment scope');
+    }
+  });
 });
 
 describe("exploration floor", () => {

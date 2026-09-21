@@ -12,11 +12,11 @@ const offer = fixtures['digital-offer'];
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const fn of cleanups.splice(0).reverse()) fn(); });
 const hash = (data: string | Buffer) => createHash('sha256').update(data).digest();
-function setup() {
+function setup(androidAppOrigins: string[] = []) {
   const dir = mkdtempSync(join(tmpdir(), 'verified-login-')); cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const state = { at: 1000 };
   const authority = openMemberAuthority(join(dir, 'authority.sqlite'), { environment: 'test', audience: 'https://login.example', maxSessionLifetimeMs: 5000, now: () => state.at }); cleanups.push(() => authority.close());
-  const policy = { environment: 'test', origin: 'https://login.example', rpID: 'login.example', challengeLifetimeMs: 1000, sessionLifetimeMs: 4000, now: () => state.at };
+  const policy = { environment: 'test', origin: 'https://login.example', rpID: 'login.example', androidAppOrigins, challengeLifetimeMs: 1000, sessionLifetimeMs: 4000, now: () => state.at };
   const connect = () => { const login = openVerifiedLogin(join(dir, 'login.sqlite'), authority, policy); cleanups.push(() => login.close()); return login; };
   const login = connect();
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -44,6 +44,14 @@ test('real ES256 assertion issues a session that unlocks the member read gate', 
   const result = await read(new Request('https://login.example/offers/' + offer.id, { headers: { authorization: 'Bearer ' + session.token } }));
   expect(result.status).toBe(200); expect((await result.json()).id).toBe(offer.id);
   expect(flow.publicKey.userVerification).toBe('required'); expect(flow.publicKey.allowCredentials).toEqual([]);
+});
+
+test('only explicitly pinned Android signing-certificate origins can authenticate', async () => {
+  const androidOrigin = 'android:apk-key-hash:' + Buffer.alloc(32, 7).toString('base64url');
+  const accepted = setup([androidOrigin]), acceptedFlow = accepted.login.begin();
+  expect((await accepted.login.finish(acceptedFlow.id, accepted.assertion(acceptedFlow.publicKey.challenge, { origin: androidOrigin }))).token).toMatch(/^amr1_/);
+  const refused = setup(), refusedFlow = refused.login.begin();
+  await expect(refused.login.finish(refusedFlow.id, refused.assertion(refusedFlow.publicKey.challenge, { origin: androidOrigin }))).rejects.toThrow();
 });
 
 test('wrong challenge origin RP type flags user handle and signing key cannot issue sessions', async () => {

@@ -3,9 +3,10 @@ import { createPublicKey, randomBytes, randomUUID } from 'node:crypto';
 import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { openMemberAuthority } from './authority.ts';
 import { credentialSPKI } from '../member-login/credential-key.ts';
+import { acceptedAssertionOrigins, androidAssertionOrigins } from '../member-login/assertion-origins.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
-type Policy = { environment: string; origin: string; rpID: string; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
+type Policy = { environment: string; origin: string; rpID: string; androidAppOrigins?: string[]; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
 export type PreparedAssertion = AuthenticationResponseJSON;
 type Credential = { id: string; public_key: number[]; counter: number; user_handle: string; revision: number };
 function b64(value: unknown): value is string {
@@ -14,6 +15,7 @@ function b64(value: unknown): value is string {
 function integer(value: number) { if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid login time or counter'); }
 export function openVerifiedLogin(path: Records, authority: Authority, policy: Policy) {
   const { environment, origin, rpID, challengeLifetimeMs, sessionLifetimeMs } = policy;
+  const androidOrigins = androidAssertionOrigins(policy.androidAppOrigins ?? []), expectedOrigins = acceptedAssertionOrigins(origin, androidOrigins);
   const url = new URL(origin);
   if (!environment || url.origin !== origin || url.protocol !== 'https:' || url.hostname !== rpID || authority.scope.environment !== environment || authority.scope.audience !== origin) throw new Error('Explicit matching login scope required');
   for (const duration of [challengeLifetimeMs, sessionLifetimeMs]) { integer(duration); if (!duration) throw new Error('Positive login lifetime required'); }
@@ -32,7 +34,7 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
   });
   function activeKey(id:string){const v=passkeys.get(id);return v?.active===1?v:null;}
   return path.register({
-    scope: Object.freeze({ environment, origin, rpID }),
+    scope: Object.freeze({ environment, origin, rpID, androidAppOrigins: androidOrigins }),
     /** Only after verified enrollment and authority credential provisioning. No rebind API. */
     provisionVerifiedPasskey(id: string, publicKey: Uint8Array, counter: number, userHandle: string) {
       if (!b64(id) || !b64(userHandle) || !(publicKey instanceof Uint8Array) || !publicKey.length || publicKey.length > 4096) throw new Error('Invalid enrolled credential');
@@ -80,7 +82,7 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       if ((client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined) throw new Error('Cross-origin assertion refused');
       const credential = activeKey(credentialID) as Credential | null;
       if (!credential || (fixed.response.userHandle != null && fixed.response.userHandle !== credential.user_handle)) throw new Error('Prepared assertion unavailable');
-      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
+      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: expectedOrigins, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
         credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter } });
       if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credentialID) throw new Error('Prepared assertion unavailable');
       const counter = result.authenticationInfo.newCounter; integer(counter);
@@ -101,7 +103,7 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       for (const value of [fixed.response.clientDataJSON, fixed.response.authenticatorData, fixed.response.signature]) if (!b64(value)) throw new Error('Portable assertion unavailable');
       const client = JSON.parse(Buffer.from(fixed.response.clientDataJSON, 'base64url').toString('utf8'));
       if ((client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined || (fixed.response.userHandle != null && fixed.response.userHandle !== credential.user_handle)) throw new Error('Portable assertion unavailable');
-      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: receivingOrigin, expectedRPID: target.hostname, expectedType: 'webauthn.get', requireUserVerification: true,
+      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: [receivingOrigin, ...androidOrigins], expectedRPID: target.hostname, expectedType: 'webauthn.get', requireUserVerification: true,
         // This proof is bound to one import receipt and may come from a synced
         // passkey whose per-device counter is unrelated to this host's copy.
         credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: 0 } });
@@ -129,7 +131,7 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       const credential = activeKey(response.id) as Credential | null;
       if (!credential || response.response.userHandle !== credential.user_handle) throw new Error('Login unavailable');
       // A detached snapshot is used throughout the asynchronous cryptographic check.
-      const result = await verifyAuthenticationResponse({ response: structuredClone(response), expectedChallenge: flow.challenge, expectedOrigin: origin, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
+      const result = await verifyAuthenticationResponse({ response: structuredClone(response), expectedChallenge: flow.challenge, expectedOrigin: expectedOrigins, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
         credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter } });
       if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credential.id || flow.expires <= now()) throw new Error('Login unavailable');
       integer(result.authenticationInfo.newCounter);

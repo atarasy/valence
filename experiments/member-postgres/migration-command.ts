@@ -22,7 +22,7 @@ function validate(plan: MigrationPlan) {
 function checkRuntime(snapshot: DeploymentSnapshot, fingerprint: string) {
  const rows=snapshot.rows.filter(r=>r.namespace==='member_config');if(rows.length!==1||rows[0]!.key!=='current')refuse();
  const held=JSON.parse(rows[0]!.value);
- if(held.profile!=='atarasy.member-runtime.1'||held.fingerprint!==fingerprint||memberRuntimeIdentity(held.config).fingerprint!==fingerprint)refuse();
+ if(held.profile!=='atarasy.member-runtime.2'||held.fingerprint!==fingerprint||memberRuntimeIdentity(held.config).fingerprint!==fingerprint)refuse();
 }
 function summary(snapshot: DeploymentSnapshot) {
  const row=snapshot.rows.find(r=>r.namespace==='member_writer_migration'&&r.key==='current');

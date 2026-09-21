@@ -161,7 +161,7 @@ test('abort rolls back before commit and lost commit acknowledgement is idempote
 
 async function commandSetup(){
  const s=await setup(),{memberRuntimeIdentity}=await import('./config.ts');
- const config={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1 as const,recoveryGraceDays:3,dayBoundary:'UTC' as const,maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
+ const config={environment:'test',origin:'https://unit.example',rpID:'unit.example',androidAppOrigins:[],explorationRate:0.2,reminderLimit:1 as const,recoveryGraceDays:3,dayBoundary:'UTC' as const,maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
  await s.unit.run(store=>{store.map('member_config').set('current',memberRuntimeIdentity(config));store.map('private_probe').set('secret',{token:'do-not-print-household-secret'});});
  const {mkdtempSync,mkdirSync,writeFileSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{writeRuntimeManifest}=await import('./runtime-artifact.ts');
  const artifact=mkdtempSync(join(tmpdir(),'migration-artifact-'));artifactDirectories.push(artifact);mkdirSync(join(artifact,'api'));mkdirSync(join(artifact,'public'));

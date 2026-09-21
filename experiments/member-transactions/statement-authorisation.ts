@@ -39,7 +39,7 @@ export function openStatementAuthorisations(path: string, options: Policy) {
     return unit.run((store, database) => work(runtime(store, database)));
   }
   function runtime(store: Parameters<Parameters<typeof unit.run>[0]>[0], database: Parameters<Parameters<typeof unit.run>[0]>[1]) {
-    const engine = new ValenceEngine(new InMemoryLedger(store), { ...policy.engine, memberStatementScope: { environment: policy.environment, origin: policy.origin } }, store), deliveries = new DeliveryRegister(store);
+    const engine = new ValenceEngine(new InMemoryLedger(store), { ...policy.engine, memberStatementScope: { environment: policy.environment, origin: policy.origin, androidAppOrigins: [] } }, store), deliveries = new DeliveryRegister(store);
     engine.readDeliveriesFrom(new LocalDeliveries(deliveries));
     const authority = openMemberAuthority(database, { ...scope, maxSessionLifetimeMs: policy.maxSessionLifetimeMs, now: clock });
     const login = openVerifiedLogin(database, authority, { environment: policy.environment, origin: policy.origin, rpID: policy.rpID, challengeLifetimeMs: policy.maximumLifetimeMs, sessionLifetimeMs: policy.maxSessionLifetimeMs, now: clock });

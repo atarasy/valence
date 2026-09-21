@@ -20,7 +20,7 @@ import {fixtureTime} from '../member-transactions/atomic-fixture.ts';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
-const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
+const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',androidAppOrigins:[],explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
 const now=()=>fixtureTime+1;
 const coseOf=(pair:{publicKey:{export:(o:any)=>any}})=>{const jwk=pair.publicKey.export({format:'jwk'});return Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);};
 const engineAssertion=(response:{response:{clientDataJSON:string;authenticatorData:string;signature:string}})=>{const value=response.response,b64=(input:string)=>Buffer.from(input,'base64url').toString('base64');return {client_data_json:b64(value.clientDataJSON),authenticator_data:b64(value.authenticatorData),signature:b64(value.signature)};};
@@ -71,6 +71,17 @@ test('PostgreSQL HTTP signs in reads approves reconciles identical retries and l
  expect(responses.map(r=>r.status)).toEqual([200,200]);const receipt=await responses[0]!.json();expect(await responses[1]!.json()).toEqual(receipt);
  expect(await (await s.send(path+'/outcome',undefined,grant.token)).json()).toEqual(receipt);
  expect((await s.send('/auth/logout',{},grant.token)).status).toBe(204);expect((await s.send(path+'/outcome',undefined,grant.token)).status).toBe(404);
+});
+test('configured Android release origin enrolls logs in and signs while an unlisted certificate is refused',async()=>{
+ const androidOrigin='android:apk-key-hash:'+Buffer.alloc(32,7).toString('base64url'),s=await setup({androidAppOrigins:[androidOrigin]});
+ const enrolledKey=syntheticAuthenticator(),invitation=await s.invite(),enrollment=await(await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();
+ expect((await s.send('/auth/enrollment/verify',{id:enrollment.id,response:enrolledKey.register(enrollment.publicKey.challenge,androidOrigin,s.c.rpID)})).status).toBe(201);
+ const flow=await(await s.send('/auth/login/options',{})).json(),signed=loginResponseAt(s.pair,s.input.credential,s.user,flow.publicKey.challenge,2,androidOrigin,s.c.rpID),login=await s.send('/auth/login/verify',{id:flow.id,response:signed});
+ expect(login.status).toBe(200);const token=(await login.json()).token as string,prepared=await(await s.send('/member/statements/prepare',{offer:s.input.statement.offer,disputed:[]},token)).json();
+ const assertion=loginResponseAt(s.pair,s.input.credential,s.user,prepared.publicKey.challenge,3,androidOrigin,s.c.rpID);
+ expect((await s.send('/member/operations/'+prepared.operationID+'/submit',{assertion},token)).status).toBe(200);
+ const foreign='android:apk-key-hash:'+Buffer.alloc(32,8).toString('base64url'),next=await(await s.send('/auth/login/options',{})).json();
+ expect((await s.send('/auth/login/verify',{id:next.id,response:loginResponseAt(s.pair,s.input.credential,s.user,next.publicKey.challenge,4,foreign,s.c.rpID)})).status).toBe(401);
 });
 test('member mandate changes read the effective version and wait for every prior co-signer',async()=>{
  const s=await setup(),co=syntheticAuthenticator();
