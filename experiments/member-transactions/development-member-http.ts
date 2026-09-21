@@ -57,7 +57,7 @@ export async function openDevelopmentMemberHTTP(path:string,input:MemberRuntimeC
      if(member){const reply=await operations.fetch(fixed);return {status:reply.status,headers:[...reply.headers],body:new Uint8Array(await reply.arrayBuffer())};}
      return unit.run(async(store,db)=>{
       const {authority,login,enrollment}=runtime(db);
-      const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin}},store);
+      const engine=new ValenceEngine(new InMemoryLedger(store),{explorationRate:c.explorationRate,reminderLimit:c.reminderLimit,recoveryGraceDays:c.recoveryGraceDays,relyingPartyId:c.rpID,memberStatementScope:{environment:c.environment,origin:c.origin,androidAppOrigins:[]}},store);
       const hub={registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store),deliveries:new DeliveryRegister(store)};
       engine.readDeliveriesFrom(new LocalDeliveries(hub.deliveries));
       const read=memberReadBoundary({environment:c.environment,origin:c.origin,resolveSession:authority.resolveSession,ownerOf:async resource=>{

@@ -256,9 +256,34 @@ export function openMemberAuthority(path: Records, options: Options) {
      */
     sessionPrincipal(token: string) {
       if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;
-      const row = activeSession(digest(token), now()) as { id: string; household: string | null; principal: string } | null;
+      const row = activeSession(digest(token), now()) as { id: string; household: string | null; principal: string; credential: string } | null;
       if (!row || row.household === null) return;
-      return { session: row.id, household: row.household, principal: row.principal };
+      return { session: row.id, household: row.household, principal: row.principal, credential: row.credential };
+    },
+    /** Trusted notification worker lookup. A revoked credential yields no delivery authority. */
+    notificationContext(credentialID: string, sessionID: string) {
+      name(credentialID); name(sessionID);
+      const active = sessions.get(sessionID), credential = credentials.get(credentialID), person = credential && principals.get(credential.principal);
+      if (!active || active.credential !== credentialID || active.revoked !== 0 || active.expires <= now() || !credential || credential.revoked !== 0 || !person || person.disabled !== 0 || person.household === null || credential.proven !== 1) return;
+      const presenters: unknown = JSON.parse(person.presenters);
+      if (!Array.isArray(presenters) || grants(presenters) !== person.presenters) throw new Error('Invalid stored grants');
+      return { household: person.household as string, presenters: [...presenters] as string[] };
+    },
+    /**
+     * Final member-authorised host handover. Records remain recoverable on this
+     * host, but every credential and bearer for the household loses access.
+     */
+    retireHouseholdAccess(token: string) {
+      if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('Household access unavailable');
+      const current = activeSession(digest(token), now()) as { household: string | null } | null;
+      if (!current?.household) throw new Error('Household access unavailable');
+      return db.transaction(() => {
+        const members = new Set<string>(); principals.each(p => { if (p.household === current.household) members.add(p.id); });
+        if (!members.size) throw new Error('Household access unavailable');
+        const retired = new Set<string>(); credentials.each(c => { if (members.has(c.principal)) { credentials.patch(c.id, { revoked: 1 }); retired.add(c.id); } });
+        sessions.each(s => { if (retired.has(s.credential)) sessions.patch(s.id, { revoked: 1 }); });
+        return { household: current.household, credentials: retired.size };
+      }).immediate();
     },
     /** Trusted internal lookup only. Never exposed by the member HTTP handler. */
     transactionContext(token: string, mandate: string) {

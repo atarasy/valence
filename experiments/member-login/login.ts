@@ -2,9 +2,10 @@ import { databaseFor, registerParticipant, assertParticipants, type DatabaseTarg
 import { randomBytes, randomUUID } from 'node:crypto';
 import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from '@simplewebauthn/server';
 import type { openMemberAuthority } from '../member-read/authority.ts';
+import { acceptedAssertionOrigins, androidAssertionOrigins } from './assertion-origins.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
-type Policy = { environment: string; origin: string; rpID: string; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
+type Policy = { environment: string; origin: string; rpID: string; androidAppOrigins?: string[]; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
 export type PreparedAssertion = AuthenticationResponseJSON;
 type Credential = { id: string; public_key: Uint8Array; counter: number; user_handle: string; revision: number };
 function b64(value: unknown): value is string {
@@ -13,6 +14,8 @@ function b64(value: unknown): value is string {
 function integer(value: number) { if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid login time or counter'); }
 export function openVerifiedLogin(path: DatabaseTarget, authority: Authority, policy: Policy) {
   const { environment, origin, rpID, challengeLifetimeMs, sessionLifetimeMs } = policy;
+  const androidOrigins = androidAssertionOrigins(policy.androidAppOrigins ?? []), expectedOrigins = acceptedAssertionOrigins(origin, androidOrigins);
+  const storedScope = JSON.stringify(androidOrigins.length ? [3, environment, origin, rpID, androidOrigins] : [2, environment, origin, rpID]);
   const url = new URL(origin);
   if (!environment || url.origin !== origin || url.protocol !== 'https:' || url.hostname !== rpID || authority.scope.environment !== environment || authority.scope.audience !== origin) throw new Error('Explicit matching login scope required');
   for (const duration of [challengeLifetimeMs, sessionLifetimeMs]) { integer(duration); if (!duration) throw new Error('Positive login lifetime required'); }
@@ -29,7 +32,7 @@ export function openVerifiedLogin(path: DatabaseTarget, authority: Authority, po
         db.run(`CREATE TABLE login_meta (scope TEXT NOT NULL);
           CREATE TABLE passkeys (id TEXT PRIMARY KEY, public_key BLOB NOT NULL, counter INTEGER NOT NULL, user_handle TEXT NOT NULL, revision INTEGER NOT NULL, active INTEGER NOT NULL CHECK(active IN (0,1)));
           CREATE TABLE challenges (id TEXT PRIMARY KEY, challenge TEXT NOT NULL, expires INTEGER NOT NULL);`);
-        db.query('INSERT INTO login_meta VALUES (?)').run(JSON.stringify([2, environment, origin, rpID]));
+        db.query('INSERT INTO login_meta VALUES (?)').run(storedScope);
       } else {
         if (tables.map(t => t.name).sort().join(',') !== 'challenges,login_meta,passkeys') throw new Error('Unknown login schema');
         const rows = db.query('SELECT scope FROM login_meta').all() as { scope: string }[];
@@ -37,13 +40,13 @@ export function openVerifiedLogin(path: DatabaseTarget, authority: Authority, po
         if (rows[0]!.scope === JSON.stringify([1, environment, origin, rpID])) {
           db.run('ALTER TABLE passkeys ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1))');
           db.query('UPDATE login_meta SET scope=?').run(JSON.stringify([2, environment, origin, rpID]));
-        } else if (rows[0]!.scope !== JSON.stringify([2, environment, origin, rpID])) throw new Error('Login scope mismatch');
+        } else if (rows[0]!.scope !== storedScope) throw new Error('Login scope mismatch');
       }
     }).immediate();
     if (!shared) db.run('PRAGMA journal_mode=WAL'); if (!shared) db.run('PRAGMA synchronous=FULL');
   } catch (error) { db.close(); throw error; }
   return registerParticipant(path, {
-    scope: Object.freeze({ environment, origin, rpID }),
+    scope: Object.freeze({ environment, origin, rpID, androidAppOrigins: androidOrigins }),
     /** Only after verified enrollment and authority credential provisioning. No rebind API. */
     provisionVerifiedPasskey(id: string, publicKey: Uint8Array, counter: number, userHandle: string) {
       if (!b64(id) || !b64(userHandle) || !(publicKey instanceof Uint8Array) || !publicKey.length || publicKey.length > 4096) throw new Error('Invalid enrolled credential');
@@ -75,7 +78,7 @@ export function openVerifiedLogin(path: DatabaseTarget, authority: Authority, po
       if ((client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined) throw new Error('Cross-origin assertion refused');
       const credential = db.query('SELECT * FROM passkeys WHERE id=? AND active=1').get(credentialID) as Credential | null;
       if (!credential || (fixed.response.userHandle != null && fixed.response.userHandle !== credential.user_handle)) throw new Error('Prepared assertion unavailable');
-      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
+      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: expectedOrigins, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
         credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter } });
       if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credentialID) throw new Error('Prepared assertion unavailable');
       const counter = result.authenticationInfo.newCounter; integer(counter);
@@ -105,7 +108,7 @@ export function openVerifiedLogin(path: DatabaseTarget, authority: Authority, po
       const credential = db.query('SELECT * FROM passkeys WHERE id=? AND active=1').get(response.id) as Credential | null;
       if (!credential || response.response.userHandle !== credential.user_handle) throw new Error('Login unavailable');
       // A detached snapshot is used throughout the asynchronous cryptographic check.
-      const result = await verifyAuthenticationResponse({ response: structuredClone(response), expectedChallenge: flow.challenge, expectedOrigin: origin, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
+      const result = await verifyAuthenticationResponse({ response: structuredClone(response), expectedChallenge: flow.challenge, expectedOrigin: expectedOrigins, expectedRPID: rpID, expectedType: 'webauthn.get', requireUserVerification: true,
         credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter } });
       if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credential.id || flow.expires <= now()) throw new Error('Login unavailable');
       integer(result.authenticationInfo.newCounter);

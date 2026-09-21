@@ -1,4 +1,7 @@
+import { verifyMemberWithdrawal, type MemberWithdrawalEnvelope, type MemberWithdrawalScope } from '../shared/member-withdrawal.js';
+import { verifyMemberDecision, type MemberDecisionEnvelope, type MemberDecisionScope } from '../shared/member-decision.js';
 import { verifyMemberStatement, memberStatementIdentity, type MemberStatementEnvelope, type MemberStatementScope } from '../shared/member-statement.js';
+import { validateAndroidAppOrigins } from '../shared/assertion-origins.js';
 import { randomUUID, createHash, createPublicKey } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { ValenceError, badRequest, conflict, notFound, unprocessable } from "../common/errors.js";
@@ -86,6 +89,9 @@ export type EngineConfig = {
   relyingPartyId: string;
   /** Appendix A: internal contextual statement opt-in; no HTTP route. */
   memberStatementScope?: MemberStatementScope;
+  /** Deployment-bound authenticated digital decisions; absent means disabled. */
+  memberDecisionScope?: MemberDecisionScope;
+  memberWithdrawalScope?: MemberWithdrawalScope;
   /**
    * §16.3. Where the deployment puts the start of a household's day, for the
    * daily ceiling. The specification does not name one: a household's day
@@ -262,6 +268,7 @@ export class ValenceEngine {
   readonly householdLedger: HouseholdLedger;
   private daySource: DaySource;
   private deliverySource: DeliverySource;
+  private approvalCarriageSource?: {find(offer:string):Promise<{carriage:number}|undefined>};
 
   /**
    * §16, question 54. The mandate an offer names, read as the offer's
@@ -412,6 +419,14 @@ export class ValenceEngine {
     return this.deliverySource.find(offerId);
   }
 
+  /** Digital approval may quote carriage before any parcel exists. Statements still require delivery. */
+  readApprovalCarriageFrom(source:{find(offer:string):Promise<{carriage:number}|undefined>}):void {
+    this.approvalCarriageSource=source;
+  }
+  async approvalCarriageFor(offerId:string):Promise<{carriage:number}|undefined> {
+    return this.approvalCarriageSource ? this.approvalCarriageSource.find(offerId) : this.deliveryFor(offerId);
+  }
+
   /** §16.3. Point the day's total at the hub that holds the person's copy. */
   readTheDayFrom(source: DaySource): void {
     this.daySource = source;
@@ -498,11 +513,30 @@ export class ValenceEngine {
     const memberScope = config.memberStatementScope;
     if (memberScope !== undefined) {
       const origin = new URL(memberScope.origin);
-      if (Object.keys(memberScope).sort().join(',') !== 'environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(memberScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member statement deployment scope');
       }
+      try { validateAndroidAppOrigins(memberScope.androidAppOrigins); } catch { throw new Error('Invalid member statement deployment scope'); }
     }
-    this.config = { ...config, ...(memberScope === undefined ? {} : { memberStatementScope: Object.freeze({ ...memberScope }) }) };
+    const decisionScope = config.memberDecisionScope;
+    if (decisionScope !== undefined) {
+      const origin = new URL(decisionScope.origin);
+      if (Object.keys(decisionScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof decisionScope.environment !== 'string' || !decisionScope.environment || origin.protocol !== 'https:' || origin.origin !== decisionScope.origin || origin.hostname !== config.relyingPartyId) {
+        throw new Error('Invalid member decision deployment scope');
+      }
+      try { validateAndroidAppOrigins(decisionScope.androidAppOrigins); } catch { throw new Error('Invalid member decision deployment scope'); }
+    }
+    const withdrawalScope = config.memberWithdrawalScope;
+    if (withdrawalScope !== undefined) {
+      const origin = new URL(withdrawalScope.origin);
+      if (Object.keys(withdrawalScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof withdrawalScope.environment !== 'string' || !withdrawalScope.environment || origin.protocol !== 'https:' || origin.origin !== withdrawalScope.origin || origin.hostname !== config.relyingPartyId) {
+        throw new Error('Invalid member withdrawal deployment scope');
+      }
+      try { validateAndroidAppOrigins(withdrawalScope.androidAppOrigins); } catch { throw new Error('Invalid member withdrawal deployment scope'); }
+    }
+    const freezeScope = <T extends { androidAppOrigins: readonly string[] }>(scope: T): T => Object.freeze({ ...scope, androidAppOrigins: Object.freeze([...scope.androidAppOrigins]) });
+    this.config = { ...config, ...(withdrawalScope === undefined ? {} : { memberWithdrawalScope: freezeScope(withdrawalScope) }), ...(memberScope === undefined ? {} : { memberStatementScope: freezeScope(memberScope) }),
+      ...(decisionScope === undefined ? {} : { memberDecisionScope: freezeScope(decisionScope) }) };
     Object.freeze(this.config);
   }
 
@@ -1058,11 +1092,27 @@ export class ValenceEngine {
     return this.commit(offer);
   }
 
+  /** A contextual assertion is never accepted through the legacy decision API. */
+  async decideMember(envelope: MemberDecisionEnvelope, decisions: Parameters<ValenceEngine['decide']>[1], assertion: Assertion, now = Date.now()): Promise<Offer> {
+    const fixed = structuredClone(envelope), lines = structuredClone(decisions), proof = structuredClone(assertion);
+    return this.decideInternal(fixed.offer, lines, proof, now, fixed);
+  }
+
   async decide(
     offerId: string,
     decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
     signature: string | Assertion,
     now = Date.now()
+  ): Promise<Offer> {
+    return this.decideInternal(offerId, structuredClone(decisions), structuredClone(signature), now);
+  }
+
+  private async decideInternal(
+    offerId: string,
+    decisions: { candidate: string; valence: Valence; kept_as?: KeptAs; lineage?: string }[],
+    signature: string | Assertion,
+    now: number,
+    memberEnvelope?: MemberDecisionEnvelope
   ): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "presented") {
@@ -1079,8 +1129,16 @@ export class ValenceEngine {
     // §10.5. Two shapes, and the canonical form is what is signed in both:
     // once directly, and once as the challenge inside an authenticator's own
     // client data. A passkey cannot sign bytes a caller hands it.
-    const covered =
-      typeof signature === "string"
+    if (memberEnvelope && (offer.binding !== "digital" || decisions.length !== offer.candidates.length ||
+        new Set(decisions.map(d => d.candidate)).size !== offer.candidates.length ||
+        decisions.some(d => !offer.candidates.some(c => c.id === d.candidate) ||
+          !["kept", "returned"].includes(d.valence) || (d.valence === "kept" && d.kept_as !== "self") || d.lineage !== undefined))) {
+      throw badRequest("malformed", "member decisions require an explicit self-keep or refusal for every digital candidate");
+    }
+    const covered = memberEnvelope
+      ? typeof signature !== "string" && verifyMemberDecision(memberEnvelope, signature, mandateKey,
+          this.config.memberDecisionScope, this.config.relyingPartyId, canonicalDecisions(offerId, decisions).toString(), offer, now)
+      : typeof signature === "string"
         ? verifyDecisions(offerId, decisions, signature, mandateKey)
         : verifyDecisionAssertion(offerId, decisions, signature, mandateKey, this.config.relyingPartyId);
     if (!covered) {
@@ -1330,7 +1388,43 @@ export class ValenceEngine {
    * theirs alone and needs no co-signer: withdrawing removes a commitment, and
    * every rule about second signatures is about adding one.
    */
+  memberWithdrawalReview(offerId: string, now = Date.now()): { offer: string; decidedAt: number; decisionRevision: string; canonical: string } {
+    const offer = this.mustGet(offerId, now), confirmations = this.confirmations.get(offerId) ?? [];
+    if (offer.binding !== 'digital' || offer.state !== 'decided' || offer.decided_at === null || !confirmations.length || this.settlements.has(offerId)) {
+      throw conflict('not_withdrawable', 'a signed unsettled digital decision is required');
+    }
+    // A new assertion appends to the retained confirmation register even if
+    // the same choices are decided again in the very same millisecond.
+    const decisionRevision = createHash('sha256').update(JSON.stringify([
+      'valence.member-decision-generation.1', offer.id, offer.decided_at,
+      offer.candidates.map(c => [c.id, c.valence, c.kept_as, c.lineage, c.decided_at]), confirmations
+    ])).digest('hex');
+    const canonical = ['valence.member-withdrawal.1', offer.id, String(offer.decided_at), decisionRevision].join('\n');
+    return { offer: offer.id, decidedAt: offer.decided_at, decisionRevision, canonical };
+  }
+
+  /** Read eligibility before asking for a ceremony; withdrawMember checks it again at dispatch. */
+  async memberWithdrawalEligibility(offerId: string, now = Date.now()) {
+    const review = this.memberWithdrawalReview(offerId, now), offer = this.mustGet(offerId, now);
+    await this.mandateFor(offer);
+    const cooling = longerWindow(await this.coolingRead(offer.household, now), known(this.decidedProtections.get(offer.id)?.cooling_seconds));
+    if (cooling === null) throw unprocessable('no_cooling', 'this decision has no cooling window');
+    const coolingEndsAt = review.decidedAt + cooling * 1000;
+    if (!Number.isSafeInteger(coolingEndsAt) || now >= coolingEndsAt) throw unprocessable('cooling_over', 'the cooling window has closed');
+    return { ...review, coolingEndsAt };
+  }
+
+  /** The deployment adapter supplies the complete envelope, never a verification boolean. */
+  async withdrawMember(envelope: MemberWithdrawalEnvelope, assertion: Assertion, now = Date.now()): Promise<Offer> {
+    const fixed = structuredClone(envelope), proof = structuredClone(assertion);
+    return this.withdrawDecisionsInternal(fixed.offer, { assertion: proof }, now, fixed);
+  }
+
   async withdrawDecisions(offerId: string, sent: PersonalSignature, now = Date.now()): Promise<Offer> {
+    return this.withdrawDecisionsInternal(offerId, structuredClone(sent), now);
+  }
+
+  private async withdrawDecisionsInternal(offerId: string, sent: PersonalSignature, now: number, memberEnvelope?: MemberWithdrawalEnvelope): Promise<Offer> {
     const offer = this.mustGet(offerId, now);
     if (offer.state !== "decided") {
       throw conflict("bad_state", `cannot withdraw decisions on an offer in ${offer.state}`);
@@ -1392,7 +1486,11 @@ export class ValenceEngine {
     if (!householdKey) {
       throw unprocessable("unsigned", `no key is registered for the household of mandate ${offer.mandate}`);
     }
-    if (!verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId)) {
+    const withdrawalCovered = memberEnvelope
+      ? 'assertion' in sent && verifyMemberWithdrawal(memberEnvelope, sent.assertion, householdKey,
+          this.config.memberWithdrawalScope, this.config.relyingPartyId, this.memberWithdrawalReview(offerId, now).canonical, offer, now)
+      : verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId);
+    if (!withdrawalCovered) {
       throw unprocessable("bad_signature", "the signature does not cover taking this set back");
     }
     // §16.5, question 47, decided 2026-09-15. **A box past its expiry cannot

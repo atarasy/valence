@@ -1,5 +1,5 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { ValenceEngine, canonicalConfig } from "../src/engine/offers.js";
+import { ValenceEngine, canonicalConfig, type EngineConfig } from "../src/engine/offers.js";
 import type { Store } from "../src/common/store.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
@@ -136,6 +136,9 @@ export function makeEngine(overrides: Partial<{
   reminderLimit: 0 | 1;
   relyingPartyId: string;
   isInNetwork: (merchant: string) => boolean;
+  memberStatementScope: NonNullable<EngineConfig['memberStatementScope']>;
+  memberDecisionScope: NonNullable<EngineConfig['memberDecisionScope']>;
+  memberWithdrawalScope: NonNullable<EngineConfig['memberWithdrawalScope']>;
 }> = {}, store?: Store) {
   // A store may be passed so that a test can reopen what an engine wrote, or
   // make one of its writes fail (question 66's write order).

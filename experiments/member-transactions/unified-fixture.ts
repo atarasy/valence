@@ -1,5 +1,5 @@
 // Internal test fixture: real login verifier and local engine; trusted transaction proof.
-import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import type { Store } from '../../engine/src/common/store.ts';
 import { canonicalStatement, statementLines } from '../../engine/src/shared/statement.ts';
 import { openMemberAuthority } from '../member-read/authority.ts';
@@ -18,7 +18,7 @@ export function unifiedRuntime(store: Store, database: SharedDatabase, at = fixt
   const journal = openOperationJournal(database, authority, bindings, { maximumLifetimeMs: 5000, now: () => at });
   return { ...runtime, authority, login, bindings, journal };
 }
-export function loginResponse(pair: ReturnType<typeof generateKeyPairSync>, credential: string, user: string, challenge: string, counter = 1) {
+export function loginResponse(pair: { privateKey: KeyObject }, credential: string, user: string, challenge: string, counter = 1) {
   const digest = (input: string | Buffer) => createHash('sha256').update(input).digest();
   const client = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge, origin: atomicScope.audience }));
   const count = Buffer.alloc(4); count.writeUInt32BE(counter);

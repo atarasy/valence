@@ -6,6 +6,16 @@ First implementation stage of Vault decision 58, following the confirmed Vercel 
 
 Install the pinned dependencies with `bun install --frozen-lockfile`. Generate migrations with `bun run generate`. Run `DATABASE_URL_UNPOOLED=... bun migrate.ts` against a dedicated development database using a direct connection. Provisioning identity is an explicit trusted call to `initialiseDeployment`, separate from HTTP and migration execution. Application traffic can use a pooled URL. Neither migration nor bootstrap runs at module import.
 
+[Blind private-node records](PRIVATE_NODE.md) add authenticated, revisioned ciphertext storage for the native IOS-B19 boundary. The database never receives the native envelope key or record plaintext; recovery and host move remain separate ceremonies.
+
+[Member recovery](MEMBER_RECOVERY.md) adds the authenticated two-participant recovery ceremony, durable pre-release log and trusted independent-notice delivery boundary for IOS-B20. No delivery provider is connected by the deployed entry.
+
+[Member host move](MEMBER_HOST_MOVE.md) adds exact source export, target import and read-back, native private-record re-encryption inputs, recovery-history transfer, target-origin WebAuthn attestation and signed source retirement for the local IOS-B21 boundary.
+
+[Protected member refresh](MEMBER_REFRESH.md) adds an authenticated APNs subscription and trusted generic-wake delivery boundary for IOS-B22. Push payloads contain no household, presenter, offer, product, state or count; actual content remains a bounded foreground read.
+
+[Android passkey origins](ANDROID_PASSKEY_ORIGINS.md) pins the exact release signing-certificate origins accepted from Credential Manager. The development allow-list is empty until a release identity and Digital Asset Links association are reviewed.
+
 For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts --timeout 30000`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
 
 ## Behaviour and limits
@@ -41,7 +51,7 @@ The same six tests subsequently passed on the dedicated Neon branch dev-postgres
 
 The public surface remains the six auth routes, scoped member reads and statement-operation routes. Configuration in deployment/config.json pins api-dev.vox.delivery, development environment and RP ID, a five-minute ceremony/operation lifetime, a one-hour session lifetime and 60 requests per peer per minute. Exploration rate 0.2, one reminder and three recovery grace days are explicit development defaults, not a production commercial policy. The dedicated development project uses the Vercel production environment slot.
 
-Run deployment/build.ts with an explicit isolated output directory to bundle the API and write its Vercel configuration. Vercel uses Bun 1.x, Singapore and a 60-second function limit. The entry integrates the pg pool lifecycle, rejects other origins, takes the trusted peer from x-vercel-forwarded-for, and keeps generic errors free of connection details. Documented ingress behaviour: https://vercel.com/docs/headers/request-headers. Requests bypassing Vercel are not supported by this entry. The schema/bootstrap command is separate from the deployed bundle and verifies the exact dedicated Neon project ID.
+Run deployment/build.ts with an explicit new isolated output directory (existing output is refused) to bundle the API and write its Vercel configuration. Vercel uses Bun 1.x, Singapore and a 60-second function limit. The entry integrates the pg pool lifecycle, rejects other origins, takes the trusted peer from x-vercel-forwarded-for, and keeps generic errors free of connection details. Documented ingress behaviour: https://vercel.com/docs/headers/request-headers. Requests bypassing Vercel are not supported by this entry. The schema/bootstrap command is separate from the deployed bundle and verifies the exact dedicated Neon project ID.
 
 AASA is published with status 200 and application identifier `83W4J65UE6.dev.atarasy.prototype`. The signed device build, provisioning profile and Associated Domains entitlement were checked on 2026-09-13; direct HTTPS checks confirmed JSON without redirects. Physical-device association and passkey ceremonies remain unverified. No real member principal, invitation, credential or mandate is provisioned by deployment. API availability does not constitute a successful native ceremony.
 
@@ -104,3 +114,11 @@ Measured after the deploy: `/auth/session` 401, `/auth/login/options` 200 with a
 ## Physical-device acceptance preparation
 
 [Trusted operator procedure](deployment/DEVICE_ACCEPTANCE.md) prepares a separate authentication-only test account. Its helpers are absent from the deployed HTTP entry. **Since 2026-09-16 the `statement` step does create a real household and a real mandate**, because a household's identifier is now the name of a key and the key is the device's own passkey. Preparation itself still creates neither: the principal it makes has no household until that step. The sentence that used to stand here said the flow created neither at all, and was left behind by question 55. See `device-acceptance.test.ts` for the isolated public-registration verification.
+
+## Operational snapshot candidate
+
+[Same-deployment snapshots](OPERATIONAL_SNAPSHOT.md) now preserve all PostgreSQL deployment rows and restore into an absent, disabled candidate with matching schema. They retain digital operation history, incarnation heads and passkey counters. Atomic source freeze now issues a durable ticket and final snapshot; target binding and retire-before-enable activation are implemented and tested with interruption recovery. Abort-before-retirement and subsequent moves with retained history are implemented; routing, operator transport and deployment acceptance remain open.
+
+[Operator migration commands](MIGRATION_COMMAND.md) expose inspection, freeze, in-memory restoration, activation and abort through an explicit plan and dedicated connection environment. They verify persisted runtime configuration and emit redacted summaries; routing and deployed binary attestation remain separate.
+
+The build now emits a runtime manifest. Migration mutations require `ATARASY_MIGRATION_ARTIFACT_DIR` and recompute its complete permitted file inventory against the plan before connecting. This verifies the local bundle, not a running hosted deployment.

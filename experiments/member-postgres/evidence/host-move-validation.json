@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-21",
+  "baseline_commit": "2e7738d9e4ffae6ff9a14477bd27265e1a2c64c3",
+  "scope": "Local two-deployment member host move with target receipt attestation and signed source retirement",
+  "source_hashes": {
+    "experiments/member-postgres/member-host-move.ts": "9448cf6078f3266475ab366145322bb40bde7d14e34b6dc42a1ca292da1d434f",
+    "experiments/member-postgres/http.ts": "18bf47ed2098ab9adbbe4bc002ee6971ca98e7673cfb3ab9da760d0a95d8a423",
+    "experiments/member-postgres/login.ts": "56a0038002f34fbd4f994e25bbd494c49ce4ffb093dbd4234afd51b9d4b61ce7",
+    "experiments/member-postgres/authority.ts": "3a44fda7b52da28289a175780c67289506e4091a8ce0603f8761e661e37f7c74",
+    "experiments/member-postgres/member-recovery.ts": "bbf64d477cca2c59935569aa66d6caf1a22e96b7cafe2861350507b24e02a7e9",
+    "experiments/member-postgres/private-node.ts": "2ba52f19c5796145ca8759e665de69d00de6698e6cede1f292bcf9cde75a8693",
+    "experiments/member-postgres/http.test.ts": "5d3d2cd2a4223075ae591504c012b284cd1bd5af71dfac4ecf83494e5090a394",
+    "experiments/member-postgres/MEMBER_HOST_MOVE.md": "74a1abd940f9cea88bc46c33b523dfd48e5b86d50d2827e62beebef994ebe34a"
+  },
+  "results": {
+    "member_http": {
+      "passed": 43,
+      "skipped": 1,
+      "failed": 0,
+      "assertions": 442
+    },
+    "experiment_suite": {
+      "passed": 258,
+      "skipped": 1,
+      "failed": 0,
+      "assertions": 1813,
+      "files": 26
+    },
+    "strict_typescript": "passed"
+  },
+  "logs": {
+    "valence-suite.log": {
+      "path": "/Users/yoichirohara/Documents/valence-reviews/2026-09-21-host-move/valence-suite.log",
+      "sha256": "c817899a3724c64deff971095768f4a459be081e1101d40caee4c9c1ed6ef6ea"
+    },
+    "valence-typescript.log": {
+      "path": "/Users/yoichirohara/Documents/valence-reviews/2026-09-21-host-move/valence-typescript.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limits": [
+    "The exercised move is between local deployments sharing a synthetic household credential.",
+    "Stable deployed target discovery, cross-origin passkey enrollment or migration, and physical-device acceptance remain open.",
+    "The private recovery share is carried in the authenticated move archive and is not additionally wrapped to a target-host key."
+  ]
+}

@@ -232,7 +232,7 @@ async function engineEnvelope(s: Fixture, p: Prepared): Promise<MemberStatementE
   return { profile: AUTHORISATION_PROFILE, environment: 'test', origin: atomicScope.audience, rpID: 'unit.example', id, principal, credential, household, keyFingerprint, offer, mandate, presenter, canonical, reviewedRevision, expiresAt, requestDigest };
 }
 function contextualEngine(s: Fixture, store: Parameters<Parameters<Fixture['unit']['run']>[0]>[0]) {
-  const engine = new ValenceEngine(new InMemoryLedger(store), { ...s.policy.engine, memberStatementScope: { environment: 'test', origin: atomicScope.audience } }, store);
+  const engine = new ValenceEngine(new InMemoryLedger(store), { ...s.policy.engine, memberStatementScope: { environment: 'test', origin: atomicScope.audience, androidAppOrigins: [] } }, store);
   engine.readDeliveriesFrom(new LocalDeliveries(new DeliveryRegister(store)));
   return engine;
 }

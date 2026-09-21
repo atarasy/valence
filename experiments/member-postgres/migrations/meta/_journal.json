@@ -15,6 +15,13 @@
       "when": 1789285052654,
       "tag": "0001_spicy_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789940002594,
+      "tag": "0002_powerful_shinobi_shaw",
+      "breakpoints": true
     }
   ]
 }

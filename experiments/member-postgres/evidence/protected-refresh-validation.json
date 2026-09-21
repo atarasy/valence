@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-21",
+  "baseline_commit": "3c74839",
+  "scope": "Session-bound generic APNs wake generation and durable trusted-provider delivery for IOS-B22",
+  "source_hashes": {
+    "experiments/member-postgres/member-refresh.ts": "af7c3af6b60323db2153f7a70d1a852340d0c8612065540ae85e2fc571393462",
+    "experiments/member-postgres/authority.ts": "321ab167a7abdcc2accf6935a6dd035625d311b2e3a968e40d47233c52e51a30",
+    "experiments/member-postgres/http.ts": "12cd739f93385fe247a1c3b879af6282fdaf7dbf71275324df27ccdac3944d7f",
+    "experiments/member-postgres/http.test.ts": "8b799dd00d3c9eb51a1d4d30d570834ec1cfb2316e5f6fa3523d482a22988f82",
+    "experiments/member-postgres/MEMBER_REFRESH.md": "870b291184715359b845d00e9fed6874b6c21a6b44a5aa80fde63ee1f1fc639e"
+  },
+  "results": {
+    "experiment_suite": {
+      "passed": 259,
+      "skipped": 1,
+      "failed": 0,
+      "assertions": 1832,
+      "files": 26
+    },
+    "strict_typescript": "passed"
+  },
+  "logs": {
+    "valence-suite.log": {
+      "path": "/Users/yoichirohara/Documents/valence-reviews/2026-09-21-protected-refresh/valence-suite.log",
+      "sha256": "d9820f2d8a29a3263f9d54e76654f55d2ec7e68f98248d1a97aa653bef1759e3"
+    },
+    "valence-typescript.log": {
+      "path": "/Users/yoichirohara/Documents/valence-reviews/2026-09-21-protected-refresh/valence-typescript.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "limits": [
+    "No APNs provider credential or hosted delivery adapter was used.",
+    "APNs and the member host can observe token registration and generic-wake timing.",
+    "Physical-device background delivery and OS throttling remain release gates."
+  ]
+}
