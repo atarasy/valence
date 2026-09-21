@@ -21,6 +21,7 @@ import { openPrivateNode, PrivateNodeError } from './private-node.ts';
 import { openMemberRecovery, MemberRecoveryError, type MemberRecoveryNotifier } from './member-recovery.ts';
 import { openMemberHostMove, MemberHostMoveError } from './member-host-move.ts';
 import { openMemberRefresh, MemberRefreshError, type MemberRefreshNotifier } from './member-refresh.ts';
+import { openMemberAndroidRefresh, MemberAndroidRefreshError, type MemberAndroidRefreshNotifier } from './member-android-refresh.ts';
 import { validateNodeImport, validateArchiveDependencies } from '../member-transactions/node-import.ts';
 import { PermissionLedger } from '../../engine/src/hub/permissions.ts';
 import type { PreparedAssertion } from './login.ts';
@@ -58,8 +59,15 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     for(const job of jobs){const result=await notifier.deliver(job);await unit.run(store=>{binding(store);openMemberRefresh(memberRuntime(store,c,now)).acknowledge(job.id,result.receipt);});delivered++;}
     return {delivered};
    },
+   /** Trusted FCM adapter boundary. Payloads are data-only generic wakes. */
+   async deliverAndroidRefreshHints(notifier:MemberAndroidRefreshNotifier){
+    const jobs=await unit.run(store=>{binding(store);return openMemberAndroidRefresh(memberRuntime(store,c,now)).pending();});
+    let delivered=0;
+    for(const job of jobs){const result=await notifier.deliver(job);await unit.run(store=>{binding(store);openMemberAndroidRefresh(memberRuntime(store,c,now)).acknowledge(job.id,result.receipt);});delivered++;}
+    return {delivered};
+   },
    async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),privateNode=/^\/member\/private-node\/records(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}))?$/.exec(url.pathname),recovery=/^\/member\/recovery(?:\/.*)?$/.test(url.pathname),hostMove=/^\/member\/host-move(?:\/.*)?$/.test(url.pathname),refresh=/^\/member\/refresh(?:\/(subscription|disable))?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest||!!privateNode||recovery||hostMove||!!refresh,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),privateNode=/^\/member\/private-node\/records(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}))?$/.exec(url.pathname),recovery=/^\/member\/recovery(?:\/.*)?$/.test(url.pathname),hostMove=/^\/member\/host-move(?:\/.*)?$/.test(url.pathname),refresh=/^\/member\/refresh(?:\/(subscription|disable))?$/.exec(url.pathname),androidRefresh=/^\/member\/android-refresh(?:\/(subscription|disable))?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest||!!privateNode||recovery||hostMove||!!refresh||!!androidRefresh,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -132,6 +140,14 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
       if(refresh){
        const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
        const api=openMemberRefresh(r),action=refresh[1];
+       if(!action&&request.method==='GET')return {status:200,body:JSON.stringify(api.status(token))};
+       if(action==='subscription'&&request.method==='POST')return {status:200,body:JSON.stringify(api.register(token,inputBody))};
+       if(action==='disable'&&request.method==='POST')return {status:200,body:JSON.stringify(api.disable(token,inputBody))};
+       return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
+      }
+      if(androidRefresh){
+       const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
+       const api=openMemberAndroidRefresh(r),action=androidRefresh[1];
        if(!action&&request.method==='GET')return {status:200,body:JSON.stringify(api.status(token))};
        if(action==='subscription'&&request.method==='POST')return {status:200,body:JSON.stringify(api.register(token,inputBody))};
        if(action==='disable'&&request.method==='POST')return {status:200,body:JSON.stringify(api.disable(token,inputBody))};
@@ -261,7 +277,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     });
     if(Buffer.byteLength(result.body)>(hostMove?8_000_000:1_048_576))return json(503,'response_unavailable');
     return new Response(result.status===204?null:result.body,{status:result.status,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}});
-   }catch(error){if(refresh&&error instanceof MemberRefreshError)return json(error.status,error.code);if(hostMove&&error instanceof MemberHostMoveError)return json(error.status,error.code);if((recovery||hostMove)&&error instanceof MemberRecoveryError)return json(error.status,error.code);if(privateNode&&error instanceof PrivateNodeError)return json(error.status,error.code);if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
+   }catch(error){if(androidRefresh&&error instanceof MemberAndroidRefreshError)return json(error.status,error.code);if(refresh&&error instanceof MemberRefreshError)return json(error.status,error.code);if(hostMove&&error instanceof MemberHostMoveError)return json(error.status,error.code);if((recovery||hostMove)&&error instanceof MemberRecoveryError)return json(error.status,error.code);if(privateNode&&error instanceof PrivateNodeError)return json(error.status,error.code);if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
   }
  };
 }

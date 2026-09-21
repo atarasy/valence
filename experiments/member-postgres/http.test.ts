@@ -788,6 +788,20 @@ test('refresh subscriptions emit only a generic durable wake and stop after acce
  expect((await s.send('/member/refresh')).status).toBe(404);
 });
 
+test('Android refresh uses an FCM data-only durable wake and stops after logout',async()=>{
+ const s=await setup(),installation='A'.repeat(22);
+ expect(await(await s.send('/member/android-refresh')).json()).toEqual({profile:'atarasy.member-android-refresh-subscription.1',active:false,updatedAt:null});
+ expect((await s.send('/member/android-refresh/subscription',{installation:'bad installation'})).status).toBe(400);
+ expect(await(await s.send('/member/android-refresh/subscription',{installation})).json()).toMatchObject({profile:'atarasy.member-android-refresh-subscription.1',active:true});
+ expect((await s.app.deliverAndroidRefreshHints({async deliver(){throw new Error('unchanged source must not wake');}})).delivered).toBe(0);
+ await s.unit.run(store=>{const offers=store.map<any>('offers'),offer=offers.get(s.input.statement.offer)!;offers.set(offer.id,{...offer,reminders_sent:offer.reminders_sent+1});});
+ let attempts=0;try{await s.app.deliverAndroidRefreshHints({async deliver(job){attempts++;expect(job.fid).toBe(installation);expect(job.payload).toEqual({data:{profile:'atarasy.member-refresh-hint.1'}});expect(JSON.stringify(job)).not.toContain(s.input.house);expect(JSON.stringify(job)).not.toContain(s.input.statement.offer);expect(JSON.stringify(job)).not.toContain('merchant-1');throw new Error('fcm down');}});}catch(error){expect((error as Error).message).toBe('fcm down');}
+ expect(attempts).toBe(1);let firstID='';expect((await s.app.deliverAndroidRefreshHints({async deliver(job){firstID=job.id;return {receipt:'fcm-'+job.id};}})).delivered).toBe(1);expect(firstID).toMatch(/^[a-f0-9-]{36}$/);
+ expect((await s.app.deliverAndroidRefreshHints({async deliver(){throw new Error('acknowledged hint repeated');}})).delivered).toBe(0);
+ expect((await s.send('/auth/logout',{})).status).toBe(204);await s.unit.run(store=>{const offers=store.map<any>('offers'),offer=offers.get(s.input.statement.offer)!;offers.set(offer.id,{...offer,reminders_sent:offer.reminders_sent+1});});
+ expect((await s.app.deliverAndroidRefreshHints({async deliver(){throw new Error('logged-out device received a wake');}})).delivered).toBe(0);expect((await s.send('/member/android-refresh')).status).toBe(404);
+});
+
 test('lost-device recovery releases no share until a recoverer signs and an independent notice is delivered',async()=>{
  const s=await setup(),recovererDevice=syntheticAuthenticator();
  await s.unit.run(store=>memberRuntime(store,s.c,now).authority.provisionUnclaimedPrincipal('recovery-participant',[]));
