@@ -10,6 +10,8 @@ Install the pinned dependencies with `bun install --frozen-lockfile`. Generate m
 
 [Member recovery](MEMBER_RECOVERY.md) adds the authenticated two-participant recovery ceremony, durable pre-release log and trusted independent-notice delivery boundary for IOS-B20. No delivery provider is connected by the deployed entry.
 
+[Member host move](MEMBER_HOST_MOVE.md) adds exact source export, target import and read-back, native private-record re-encryption inputs, recovery-history transfer, target-origin WebAuthn attestation and signed source retirement for the local IOS-B21 boundary.
+
 For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts --timeout 30000`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
 
 ## Behaviour and limits

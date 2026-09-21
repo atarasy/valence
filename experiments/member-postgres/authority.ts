@@ -260,6 +260,22 @@ export function openMemberAuthority(path: Records, options: Options) {
       if (!row || row.household === null) return;
       return { session: row.id, household: row.household, principal: row.principal, credential: row.credential };
     },
+    /**
+     * Final member-authorised host handover. Records remain recoverable on this
+     * host, but every credential and bearer for the household loses access.
+     */
+    retireHouseholdAccess(token: string) {
+      if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('Household access unavailable');
+      const current = activeSession(digest(token), now()) as { household: string | null } | null;
+      if (!current?.household) throw new Error('Household access unavailable');
+      return db.transaction(() => {
+        const members = new Set<string>(); principals.each(p => { if (p.household === current.household) members.add(p.id); });
+        if (!members.size) throw new Error('Household access unavailable');
+        const retired = new Set<string>(); credentials.each(c => { if (members.has(c.principal)) { credentials.patch(c.id, { revoked: 1 }); retired.add(c.id); } });
+        sessions.each(s => { if (retired.has(s.credential)) sessions.patch(s.id, { revoked: 1 }); });
+        return { household: current.household, credentials: retired.size };
+      }).immediate();
+    },
     /** Trusted internal lookup only. Never exposed by the member HTTP handler. */
     transactionContext(token: string, mandate: string) {
       if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;

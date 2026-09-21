@@ -2,7 +2,7 @@ import { signConfig } from '../../engine/test/helpers.ts';
 import {beforeAll,afterAll,expect,test} from 'bun:test';
 import {canonicalWithdrawal,canonicalDecisions} from '../../engine/src/shared/decisions.ts';
 import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
-import {createCipheriv,createPublicKey,randomBytes,randomUUID,sign} from 'node:crypto';
+import {createCipheriv,createHash,createPublicKey,randomBytes,randomUUID,sign} from 'node:crypto';
 import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -24,6 +24,7 @@ const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.exampl
 const now=()=>fixtureTime+1;
 const coseOf=(pair:{publicKey:{export:(o:any)=>any}})=>{const jwk=pair.publicKey.export({format:'jwk'});return Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);};
 const engineAssertion=(response:{response:{clientDataJSON:string;authenticatorData:string;signature:string}})=>{const value=response.response,b64=(input:string)=>Buffer.from(input,'base64url').toString('base64');return {client_data_json:b64(value.clientDataJSON),authenticator_data:b64(value.authenticatorData),signature:b64(value.signature)};};
+const loginResponseAt=(pair:{privateKey:any},credential:string,user:string,challenge:string,counter:number,origin:string,rpID:string)=>{const digest=(input:string|Buffer)=>createHash('sha256').update(input).digest(),client=Buffer.from(JSON.stringify({type:'webauthn.get',challenge,origin})),count=Buffer.alloc(4);count.writeUInt32BE(counter);const auth=Buffer.concat([digest(rpID),Buffer.from([5]),count]);return{id:credential,rawId:credential,type:'public-key' as const,clientExtensionResults:{},response:{clientDataJSON:client.toString('base64url'),authenticatorData:auth.toString('base64url'),signature:sign('sha256',Buffer.concat([auth,digest(client)]),pair.privateKey).toString('base64url'),userHandle:user}};};
 // The invited member is a second household, so its identifier is a second key (§13.2, question 55).
 // The invited member has not registered a passkey, so it has no household yet
 // (§13.2, question 55): a household that is a key is adopted, not assigned.
@@ -688,6 +689,75 @@ test('private node write rolls back on database failure and succeeds on exact re
  try{expect((await s.send(path,{expectedRevision:0,envelope:privateEnvelope(10)})).status).toBe(503);expect((await(await s.send('/member/private-node/records')).json()).records).toEqual([]);}
  finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
  expect((await s.send(path,{expectedRevision:0,envelope:privateEnvelope(10)})).status).toBe(200);
+});
+
+test('member host move imports equivalent records before a signed retirement ends old access',async()=>{
+ const source=await setup(),targetOrigin='https://target.example',targetConfig={...source.c,origin:targetOrigin,rpID:'target.example'},targetIdentity:Identity={id:'http_'+randomUUID().replaceAll('-',''),environment:'test',origin:targetOrigin,epoch:1};
+ ids.push(targetIdentity.id);await initialiseDeployment(pool,targetIdentity);
+ const targetUnit=postgresStore(pool,targetIdentity),targetApp=await openPostgresMemberHTTP(pool,targetIdentity,targetConfig,now);
+ const envelope={profile:'atarasy.private-node-record.1',nonce:randomBytes(12).toString('base64url'),ciphertext:randomBytes(48).toString('base64url')};
+ expect((await source.send('/member/private-node/records/55555555-5555-4555-8555-555555555555',{expectedRevision:0,envelope})).status).toBe(200);
+ const {PermissionLedger}=await import('../../engine/src/hub/permissions.ts');
+ await source.unit.run(store=>{const ledger=new PermissionLedger(store),action=ledger.openAction({household:source.input.house,describes:'Portable permission',expiresAt:now()+60000});ledger.grant({household:source.input.house,grantee:'portable-reader',scope:['duplicate_check'],purpose:'Portable purpose',expires_at:now()+50000,asked_from:action.id,now:now()});});
+ const recoverer=(await setup()).input.house,recoveryPublicKey=Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url'),recoveryKeyDigest=createHash('sha256').update(JSON.stringify(['atarasy.member-recovery-key.1',recoveryPublicKey])).digest('base64url'),recoveryID=randomUUID(),noticeID=randomUUID(),recoveryAt=now()-10,recoveryMaterial={keyDigest:randomBytes(32).toString('base64url'),hostShare:randomBytes(64).toString('base64url'),recovererPacket:randomBytes(128).toString('base64url'),noticeChannel:'anc1_'+randomBytes(32).toString('base64url')};
+ await source.unit.run(store=>{
+  store.map('member_recovery_keys').set(recoverer,{household:recoverer,publicKey:recoveryPublicKey,updatedAt:recoveryAt});
+  store.map('member_recovery_configurations').set(source.input.house,{owner:source.input.house,recoverer,recovererKeyDigest:recoveryKeyDigest,...recoveryMaterial,epoch:1,createdAt:recoveryAt,updatedAt:recoveryAt});
+  store.map('member_recovery_requests').set(recoveryID,{id:recoveryID,owner:source.input.house,recoverer,epoch:1,requesterPublicKey:Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url'),...recoveryMaterial,state:'completed',release:randomBytes(128).toString('base64url'),noticeID,noticeReceipt:'portable-notice-receipt',createdAt:recoveryAt,updatedAt:recoveryAt+1});
+  store.map('member_recovery_logs').set(noticeID,{id:noticeID,owner:source.input.house,recovery:recoveryID,recoverer,state:'completed',occurredAt:recoveryAt,deliveredAt:recoveryAt+1,receipt:'portable-notice-receipt'});
+ });
+ const dependencyNames=['identities','root_endorsed','configs','disclosures','registry_entries','registry_keys'];
+ const dependencies=await source.unit.run(store=>dependencyNames.map(namespace=>[namespace,[...store.map<unknown>(namespace)].map(([key,value])=>[key,structuredClone(value)] as const)] as const));
+ await targetUnit.run(store=>{for(const [namespace,entries]of dependencies){const map=store.map(namespace);for(const [key,value]of entries)map.set(key,value);}});
+ const targetGrant=await targetUnit.run(store=>{const r=memberRuntime(store,targetConfig,now);r.authority.provisionUnclaimedPrincipal('moved-member',['merchant-1']);r.authority.registerCredential(source.input.credential,'moved-member');r.login.provisionVerifiedPasskey(source.input.credential,coseOf(source.pair),1,source.user);r.authority.markCredentialProven(source.input.credential);expect(r.authority.adoptHousehold('moved-member',source.input.credential)).toBe(source.input.house);return r.authority.createSessionAfterVerification(source.input.credential,now()+90000);});
+ const targetRequest=(path:string,body?:unknown)=>new Request(targetOrigin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',authorization:'Bearer '+targetGrant.token},...(body===undefined?{}:{body:JSON.stringify(body)})}),targetSend=(path:string,body?:unknown)=>targetApp.fetch(targetRequest(path,body),{peer:'move-target'});
+ const statementReview=await(await source.send('/member/statements/prepare',{offer:source.input.statement.offer,disputed:[]})).json();
+ const statementAssertion=loginResponse(source.pair,source.input.credential,source.user,statementReview.publicKey.challenge,50);
+ expect((await source.send('/member/operations/'+statementReview.operationID+'/submit',{assertion:statementAssertion})).status).toBe(200);
+ const preparedResponse=await source.send('/member/host-move/export',{targetOrigin});expect(preparedResponse.status).toBe(201);const prepared=await preparedResponse.json();
+ expect(prepared).toMatchObject({profile:'atarasy.member-host-export.1',household:source.input.house,sourceOrigin:source.c.origin,targetOrigin});
+ expect(JSON.stringify(prepared)).not.toContain(source.grant.token);
+ const archive=JSON.parse(Buffer.from(prepared.archive,'base64url').toString('utf8'));
+ const movedPrivate=archive.privateRecords.map((row:any)=>({...row,envelope:{profile:'atarasy.private-node-record.1',nonce:randomBytes(12).toString('base64url'),ciphertext:randomBytes(48).toString('base64url')} }));
+ const damaged=prepared.archive.slice(0,-1)+(prepared.archive.endsWith('A')?'B':'A');
+ expect((await targetSend('/member/host-move/import',{archive:damaged,digest:prepared.digest,privateRecords:movedPrivate})).status).toBe(400);
+ const mismatchedPrivate=movedPrivate.map((row:any,index:number)=>index===0?{...row,id:randomUUID()}:row);
+ expect((await targetSend('/member/host-move/import',{archive:prepared.archive,digest:prepared.digest,privateRecords:mismatchedPrivate})).status).toBe(400);
+ expect((await source.send('/auth/session')).status).toBe(200);expect((await targetSend('/member/private-node/records')).status).toBe(200);
+ const importedResponse=await targetSend('/member/host-move/import',{archive:prepared.archive,digest:prepared.digest,privateRecords:movedPrivate});expect(importedResponse.status).toBe(201);const receipt=await importedResponse.json();
+ expect(archive.node.offers).toHaveLength(1);expect(await targetUnit.run(store=>[...store.map('offers').values()])).toHaveLength(1);
+ expect(receipt).toMatchObject({profile:'atarasy.member-host-import-receipt.1',move:prepared.id,household:source.input.house,sourceOrigin:source.c.origin,targetOrigin,archiveDigest:prepared.digest,privateRecords:movedPrivate.length});
+ expect(await(await targetSend('/member/host-move/imports/'+prepared.digest)).json()).toEqual(receipt);
+ expect(await(await targetSend('/member/host-move/import',{archive:prepared.archive,digest:prepared.digest,privateRecords:movedPrivate})).json()).toEqual(receipt);
+ const importProofReview=await(await targetSend('/member/host-move/imports/'+prepared.digest+'/prepare',{})).json(),targetAssertion=loginResponseAt(source.pair,source.input.credential,source.user,importProofReview.publicKey.challenge,2,targetOrigin,targetConfig.rpID);
+ const attestation=await(await targetSend('/member/host-move/imports/'+prepared.digest+'/attest',{preparation:importProofReview.id,assertion:targetAssertion})).json();expect(attestation).toMatchObject({profile:'atarasy.member-host-import-attestation.1',receipt,proof:{credential:source.input.credential}});
+ const restartedTarget=await openPostgresMemberHTTP(pool,targetIdentity,targetConfig,now),restartSend=(path:string)=>restartedTarget.fetch(targetRequest(path),{peer:'move-target-restart'});
+ expect(await(await restartSend('/member/host-move/imports/'+prepared.digest)).json()).toEqual(receipt);expect((await restartSend('/member/private-node/records')).status).toBe(200);
+ const sourcePermissions=await(await source.send('/member/permissions/list')).json(),targetPermissions=await(await targetSend('/member/permissions/list')).json();expect(targetPermissions.permissions).toEqual(sourcePermissions.permissions);
+ for(const path of ['/member/recovery/configuration','/member/recovery/requests','/member/recovery/log'])expect(await(await targetSend(path)).json()).toEqual(await(await source.send(path)).json());
+ const targetRecords=await(await targetSend('/member/private-node/records')).json();expect(targetRecords.records).toEqual(movedPrivate);
+ const sourceOffers=await(await source.send('/offers?household='+encodeURIComponent(source.input.house)+'&presenter=merchant-1')).json(),targetOffers=await(await targetSend('/offers?household='+encodeURIComponent(source.input.house)+'&presenter=merchant-1')).json();expect(targetOffers).toEqual(sourceOffers);
+ expect((await source.send('/member/host-move/'+prepared.id+'/retirement/prepare',{attestation:{...attestation,receipt:{...receipt,importedAt:receipt.importedAt+1}}})).status).toBe(404);
+ const retirementReview=await(await source.send('/member/host-move/'+prepared.id+'/retirement/prepare',{attestation})).json();
+ expect((await source.send('/member/host-move/'+prepared.id+'/retirement/retire',{preparation:retirementReview.id,attestation:{...attestation,receipt:{...receipt,importedAt:receipt.importedAt+1}},assertion:{}})).status).toBe(404);expect((await source.send('/auth/session')).status).toBe(200);
+ const assertion=loginResponse(source.pair,source.input.credential,source.user,retirementReview.publicKey.challenge,60);
+ const retired=await source.send('/member/host-move/'+prepared.id+'/retirement/retire',{preparation:retirementReview.id,attestation,assertion});expect(retired.status).toBe(200);expect(await retired.json()).toMatchObject({profile:'atarasy.member-host-retirement.1',move:prepared.id,targetOrigin});
+ expect((await source.send('/auth/session')).status).toBe(401);expect((await targetSend('/auth/session')).status).toBe(200);expect((await targetSend('/member/private-node/records')).status).toBe(200);
+});
+
+test('host move refuses while recovery is unresolved and keeps source authority',async()=>{
+ const source=await setup(),id=randomUUID(),recoverer=(await setup()).input.house;
+ await source.unit.run(store=>{store.map('member_recovery_requests').set(id,{id,owner:source.input.house,recoverer,epoch:1,requesterPublicKey:Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url'),hostShare:randomBytes(64).toString('base64url'),recovererPacket:randomBytes(128).toString('base64url'),keyDigest:randomBytes(32).toString('base64url'),noticeChannel:'anc1_'+randomBytes(32).toString('base64url'),state:'pending',release:null,noticeID:null,noticeReceipt:null,createdAt:now(),updatedAt:now()});});
+ const refused=await source.send('/member/host-move/export',{targetOrigin:'https://target.example'});expect(refused.status).toBe(409);expect(await refused.json()).toEqual({error:'recovery_move_pending'});expect((await source.send('/auth/session')).status).toBe(200);
+});
+test('host move rolls back a target import that would leave an active offer behind',async()=>{
+ const source=await setup(),targetOrigin='https://target.example',targetConfig={...source.c,origin:targetOrigin,rpID:'target.example'},targetIdentity:Identity={id:'http_'+randomUUID().replaceAll('-',''),environment:'test',origin:targetOrigin,epoch:1};ids.push(targetIdentity.id);await initialiseDeployment(pool,targetIdentity);
+ const targetUnit=postgresStore(pool,targetIdentity),dependencyNames=['identities','root_endorsed','configs','disclosures','registry_entries','registry_keys'],dependencies=await source.unit.run(store=>dependencyNames.map(namespace=>[namespace,[...store.map<unknown>(namespace)].map(([key,value])=>[key,structuredClone(value)] as const)] as const));
+ await targetUnit.run(store=>{for(const [namespace,entries]of dependencies){const map=store.map(namespace);for(const [key,value]of entries)map.set(key,value);}});
+ const targetGrant=await targetUnit.run(store=>{const r=memberRuntime(store,targetConfig,now);r.authority.provisionUnclaimedPrincipal('moving-active-member',['merchant-1']);r.authority.registerCredential(source.input.credential,'moving-active-member');r.login.provisionVerifiedPasskey(source.input.credential,coseOf(source.pair),1,source.user);r.authority.markCredentialProven(source.input.credential);r.authority.adoptHousehold('moving-active-member',source.input.credential);return r.authority.createSessionAfterVerification(source.input.credential,now()+90000);}),targetApp=await openPostgresMemberHTTP(pool,targetIdentity,targetConfig,now);
+ const prepared=await(await source.send('/member/host-move/export',{targetOrigin})).json(),reply=await targetApp.fetch(new Request(targetOrigin+'/member/host-move/import',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+targetGrant.token},body:JSON.stringify({archive:prepared.archive,digest:prepared.digest,privateRecords:[]})}),{peer:'active-move-target'});
+ expect(reply.status).toBe(409);expect(await reply.json()).toEqual({error:'host_move_import_incomplete'});expect((await source.send('/auth/session')).status).toBe(200);
+ expect(await targetUnit.run(store=>({offers:store.map('offers').size,imports:store.map('member_host_imports').size}))).toEqual({offers:0,imports:0});
 });
 
 test('lost-device recovery releases no share until a recoverer signs and an independent notice is delivered',async()=>{

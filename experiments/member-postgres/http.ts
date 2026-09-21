@@ -14,11 +14,13 @@ import { memberTransport } from '../member-login/transport.ts';
 import { memberReadBoundary } from '../member-read/gate.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { Registry } from '../../engine/src/shared/registry.ts';
-import { RecoveryRegister } from '../../engine/src/hub/node.ts';
+import { RecoveryRegister, exportNode, digest as nodeDigest } from '../../engine/src/hub/node.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { openPermissionRequests } from './permission-requests.ts';
 import { openPrivateNode, PrivateNodeError } from './private-node.ts';
 import { openMemberRecovery, MemberRecoveryError, type MemberRecoveryNotifier } from './member-recovery.ts';
+import { openMemberHostMove, MemberHostMoveError } from './member-host-move.ts';
+import { validateNodeImport, validateArchiveDependencies } from '../member-transactions/node-import.ts';
 import { PermissionLedger } from '../../engine/src/hub/permissions.ts';
 import type { PreparedAssertion } from './login.ts';
 import { presenterRequest } from './presenter-http.ts';
@@ -49,7 +51,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     return {delivered};
    },
    async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),privateNode=/^\/member\/private-node\/records(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}))?$/.exec(url.pathname),recovery=/^\/member\/recovery(?:\/.*)?$/.test(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest||!!privateNode||recovery,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),privateNode=/^\/member\/private-node\/records(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}))?$/.exec(url.pathname),recovery=/^\/member\/recovery(?:\/.*)?$/.test(url.pathname),hostMove=/^\/member\/host-move(?:\/.*)?$/.test(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest||!!privateNode||recovery||hostMove,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -71,7 +73,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     let inputBody:unknown,bytes:string|undefined;
     if(request.method==='POST'){
      if(request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()!=='application/json')return json(400,'invalid_body');
-     try{inputBody=await body(request,c.maximumBodyBytes,c.bodyTimeoutMs);bytes=JSON.stringify(inputBody);}catch{return json(400,'invalid_body');}
+     try{inputBody=await body(request,hostMove?Math.max(c.maximumBodyBytes,6_000_000):c.maximumBodyBytes,c.bodyTimeoutMs);bytes=JSON.stringify(inputBody);}catch{return json(400,'invalid_body');}
     }
     if(request.signal.aborted)return json(400,'request_aborted');
     const fixed=new Request(request.url,{method:request.method,headers:request.headers,...(bytes===undefined?{}:{body:bytes})});
@@ -80,6 +82,45 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
      if(presenter)return presenterRequest(r,{quotes:r.quotes,deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
      if(member){
       if(url.search)return {status:404,body:JSON.stringify({error:'operation_unavailable'})};
+      if(hostMove){
+       const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
+       const api=openMemberHostMove(r,{origin:c.origin,rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs}),privateApi=openPrivateNode(r),recoveryApi=openMemberRecovery(r,{rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs}),path=url.pathname;
+       if(path==='/member/host-move/export'&&request.method==='POST'){
+        if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).join(',')!=='targetOrigin')throw new MemberHostMoveError(400,'invalid_host_move');
+        const who=r.authority.sessionPrincipal(token);if(!who)throw new MemberHostMoveError(404,'host_move_unavailable');
+        await r.engine.settleWhatOwesNothing(who.household);
+        const node=exportNode(r.engine,new RecoveryRegister(store),new PermissionLedger(store),r.engine.mandates,r.deliveries,who.household,now(),r.quotes);
+        return {status:201,body:JSON.stringify(api.prepareExport(token,(inputBody as {targetOrigin:unknown}).targetOrigin,node,privateApi.list(token).records,recoveryApi.exportForMove(token)))};
+       }
+       if(path==='/member/host-move/import'&&request.method==='POST'){
+        if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).sort().join(',')!=='archive,digest,privateRecords')throw new MemberHostMoveError(400,'invalid_host_move');
+        const supplied=inputBody as {archive:unknown;digest:unknown;privateRecords:unknown},decoded=api.inspectArchive(token,supplied.archive,supplied.digest),node=validateNodeImport(decoded.archive.node,decoded.archive.household);
+        validateArchiveDependencies(node,r.engine);
+        if(!Array.isArray(supplied.privateRecords)||supplied.privateRecords.length!==decoded.archive.privateRecords.length)throw new MemberHostMoveError(400,'invalid_host_move');
+        const source=decoded.archive.privateRecords as {id:string;revision:number;updatedAt:number}[],target=supplied.privateRecords as {id?:unknown;revision?:unknown;updatedAt?:unknown}[];
+        if(source.some((row,index)=>row.id!==target[index]?.id||row.revision!==target[index]?.revision||row.updatedAt!==target[index]?.updatedAt))throw new MemberHostMoveError(400,'invalid_host_move');
+        const hub={quotes:r.quotes,deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},inner=createApp(r.engine,hub);
+        const imported=await inner(new Request(c.origin+'/households/'+encodeURIComponent(decoded.archive.household)+'/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(node)}));
+        if(imported.status!==201)throw new MemberHostMoveError(409,'host_move_import_refused');
+        const importResult=await imported.json() as {imported?:unknown;left_behind?:unknown};
+        if(importResult.imported!==true||!Array.isArray(importResult.left_behind)||importResult.left_behind.length!==0)throw new MemberHostMoveError(409,'host_move_import_incomplete');
+        privateApi.importRows(token,supplied.privateRecords);
+        recoveryApi.importForMove(token,decoded.archive.recovery);
+        return {status:201,body:JSON.stringify(api.imported(token,decoded.archive,decoded.digest,nodeDigest(node),target.length))};
+       }
+       const importMatch=/^\/member\/host-move\/imports\/([A-Za-z0-9_-]{43})(?:\/(prepare|attest))?$/.exec(path);
+       if(importMatch){const [,archiveDigest,action]=importMatch;if(!action&&request.method==='GET')return {status:200,body:JSON.stringify(api.importStatus(token,archiveDigest!))};if(action==='prepare'&&request.method==='POST')return {status:200,body:JSON.stringify(api.prepareImportAttestation(token,archiveDigest!))};if(action==='attest'&&request.method==='POST')return {status:200,body:JSON.stringify(await api.attestImport(token,archiveDigest!,inputBody))};return {status:405,body:JSON.stringify({error:'method_not_allowed'})};}
+       const retirement=/^\/member\/host-move\/([a-f0-9-]{36})\/retirement\/(prepare|retire)$/.exec(path);
+       if(retirement&&request.method==='POST'){
+        const [,id,action]=retirement;
+        if(action==='prepare'){
+         if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).join(',')!=='attestation')throw new MemberHostMoveError(400,'invalid_host_move');
+         return {status:200,body:JSON.stringify(await api.prepareRetirement(token,id!,(inputBody as {attestation:unknown}).attestation))};
+        }
+        return {status:200,body:JSON.stringify(await api.retire(token,id!,inputBody))};
+       }
+       return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
+      }
       if(recovery){
        const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
        const api=openMemberRecovery(r,{rpID:c.rpID,maximumLifetimeMs:c.maximumLifetimeMs}),path=url.pathname,body=inputBody;
@@ -202,9 +243,9 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
      const reply=await memberTransport({...r,read,admit:async()=>true,maxBodyBytes:c.maximumBodyBytes})(fixed,context);
      return {status:reply.status,body:await reply.text()};
     });
-    if(Buffer.byteLength(result.body)>1_048_576)return json(503,'response_unavailable');
+    if(Buffer.byteLength(result.body)>(hostMove?8_000_000:1_048_576))return json(503,'response_unavailable');
     return new Response(result.status===204?null:result.body,{status:result.status,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}});
-   }catch(error){if(recovery&&error instanceof MemberRecoveryError)return json(error.status,error.code);if(privateNode&&error instanceof PrivateNodeError)return json(error.status,error.code);if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
+   }catch(error){if(hostMove&&error instanceof MemberHostMoveError)return json(error.status,error.code);if((recovery||hostMove)&&error instanceof MemberRecoveryError)return json(error.status,error.code);if(privateNode&&error instanceof PrivateNodeError)return json(error.status,error.code);if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
   }
  };
 }

@@ -8,7 +8,9 @@ const maximumRevision = 9_007_199_254_740_991;
 // Base64 plus the fixed JSON envelope stays below the member HTTP profile's 20 KiB floor.
 const maximumCiphertextBytes = 12_288;
 
-type Envelope = { profile: 'atarasy.private-node-record.1'; nonce: string; ciphertext: string };
+export type PrivateNodeEnvelope = { profile: 'atarasy.private-node-record.1'; nonce: string; ciphertext: string };
+export type PrivateNodeRecord = { id: string; revision: number; updatedAt: number; envelope: PrivateNodeEnvelope };
+type Envelope = PrivateNodeEnvelope;
 type Stored = Envelope & { owner: string; id: string; revision: number; updatedAt: number };
 
 export class PrivateNodeError extends Error {
@@ -37,6 +39,12 @@ function envelope(value: unknown): Envelope {
 }
 function view(row: Stored) {
   return { id: row.id, revision: row.revision, updatedAt: row.updatedAt, envelope: { profile: row.profile, nonce: row.nonce, ciphertext: row.ciphertext } };
+}
+function importedRecord(value: unknown): PrivateNodeRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'envelope,id,revision,updatedAt') invalid();
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== 'string' || !uuid.test(row.id) || typeof row.revision !== 'number' || !Number.isSafeInteger(row.revision) || row.revision < 1 || row.revision > maximumRevision || typeof row.updatedAt !== 'number' || !Number.isSafeInteger(row.updatedAt) || row.updatedAt < 0) invalid();
+  return { id: row.id, revision: row.revision, updatedAt: row.updatedAt, envelope: envelope(row.envelope) };
 }
 
 export function openPrivateNode(r: ReturnTypeMemberRuntime) {
@@ -69,6 +77,20 @@ export function openPrivateNode(r: ReturnTypeMemberRuntime) {
       const row: Stored = { owner: expectedOwner, id, revision: expectedRevision + 1, updatedAt: r.now(), ...value };
       rows.put(key, row);
       return view(row);
+    },
+    importRows(token: string, supplied: unknown) {
+      const session = principal(token);
+      if (!Array.isArray(supplied) || supplied.length > 10_000) invalid();
+      const incoming = supplied.map(importedRecord);
+      if (incoming.map(row => row.id).join(',') !== incoming.map(row => row.id).sort().join(',') || new Set(incoming.map(row => row.id)).size !== incoming.length) invalid();
+      const expectedOwner = owner(session.household), held: PrivateNodeRecord[] = [];
+      rows.each(row => { if (row.owner === expectedOwner) held.push(view(row)); }); held.sort((a, b) => a.id.localeCompare(b.id));
+      if (held.length) {
+        if (JSON.stringify(held) !== JSON.stringify(incoming)) conflict();
+        return { imported: held.length, records: held };
+      }
+      for (const value of incoming) rows.insert(storageKey(expectedOwner, value.id), { owner: expectedOwner, id: value.id, revision: value.revision, updatedAt: value.updatedAt, ...value.envelope });
+      return { imported: incoming.length, records: incoming };
     },
   };
 }

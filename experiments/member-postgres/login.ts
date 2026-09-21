@@ -91,6 +91,23 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       authority.markCredentialProven(credentialID);
       return { counter };
     },
+    /** Verify a member-held proof made at the receiving HTTPS origin without changing this host's counter. */
+    async verifyPortableAssertion(credentialID: string, challenge: string, response: AuthenticationResponseJSON, receivingOrigin: string) {
+      if (!b64(challenge) || challenge.length !== 43 || !b64(credentialID)) throw new Error('Portable assertion unavailable');
+      const target = new URL(receivingOrigin);
+      if (target.origin !== receivingOrigin || target.protocol !== 'https:' || target.username || target.password || target.pathname !== '/' || target.search || target.hash) throw new Error('Portable assertion unavailable');
+      const fixed = structuredClone(response), credential = activeKey(credentialID) as Credential | null;
+      if (!credential || !fixed || JSON.stringify(fixed).length > 16384 || fixed.id !== credentialID || fixed.rawId !== credentialID || fixed.type !== 'public-key' || !fixed.response) throw new Error('Portable assertion unavailable');
+      for (const value of [fixed.response.clientDataJSON, fixed.response.authenticatorData, fixed.response.signature]) if (!b64(value)) throw new Error('Portable assertion unavailable');
+      const client = JSON.parse(Buffer.from(fixed.response.clientDataJSON, 'base64url').toString('utf8'));
+      if ((client.crossOrigin !== undefined && client.crossOrigin !== false) || client.topOrigin !== undefined || (fixed.response.userHandle != null && fixed.response.userHandle !== credential.user_handle)) throw new Error('Portable assertion unavailable');
+      const result = await verifyAuthenticationResponse({ response: fixed, expectedChallenge: challenge, expectedOrigin: receivingOrigin, expectedRPID: target.hostname, expectedType: 'webauthn.get', requireUserVerification: true,
+        // This proof is bound to one import receipt and may come from a synced
+        // passkey whose per-device counter is unrelated to this host's copy.
+        credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: 0 } });
+      if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credentialID) throw new Error('Portable assertion unavailable');
+      return { counter: result.authenticationInfo.newCounter };
+    },
     begin() {
       const at = now(), expiresAt = at + challengeLifetimeMs; integer(expiresAt);
       const id = randomUUID(), challenge = randomBytes(32).toString('base64url');

@@ -12,6 +12,7 @@ type Configuration = { owner: string; recoverer: string; recovererKeyDigest: str
 type RecoveryRequest = { id: string; owner: string; recoverer: string; epoch: number; requesterPublicKey: string; hostShare: string; recovererPacket: string; keyDigest: string; noticeChannel: string; state: State; release: string | null; noticeID: string | null; noticeReceipt: string | null; createdAt: number; updatedAt: number };
 type RecoveryLog = { id: string; owner: string; recovery: string; recoverer: string; state: 'notice_pending' | 'completed'; occurredAt: number; deliveredAt: number | null; receipt: string | null };
 type Preparation = { id: string; household: string; credential: string; kind: 'key' | 'configuration' | 'approval'; challenge: string; expiresAt: number };
+export type MemberRecoveryMove = { profile: 'atarasy.member-recovery-move.1'; keys: RecoveryKey[]; configurations: Configuration[]; requests: RecoveryRequest[]; logs: RecoveryLog[] };
 
 export type MemberRecoveryNotice = { profile: 'atarasy.member-recovery-notice.1'; id: string; owner: string; recovery: string; occurredAt: number };
 export type MemberRecoveryNoticeJob = { channel: string; notice: MemberRecoveryNotice };
@@ -97,7 +98,48 @@ export function openMemberRecovery(r: ReturnTypeMemberRuntime, policy: { rpID: s
       keyDigest: owner && row.state === 'completed' ? row.keyDigest : null,
     };
   }
+  function moveSnapshot(value: unknown, household: string): MemberRecoveryMove {
+    const body = exact(value, ['profile', 'keys', 'configurations', 'requests', 'logs']);
+    if (body.profile !== 'atarasy.member-recovery-move.1' || !Array.isArray(body.keys) || !Array.isArray(body.configurations) || !Array.isArray(body.requests) || !Array.isArray(body.logs) || [body.keys, body.configurations, body.requests, body.logs].some(rows => rows.length > 10_000)) invalid();
+    const whole = (value: unknown) => { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) invalid(); return value; };
+    const house = (value: unknown) => { if (typeof value !== 'string' || !isHouseholdName(value)) invalid(); return value; };
+    const bounded = (value: unknown, maximum = 256) => { if (typeof value !== 'string' || !value || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) invalid(); return value; };
+    const keyRows = body.keys.map(value => { const row = exact(value, ['household', 'publicKey', 'updatedAt']); return { household: house(row.household), publicKey: publicKey(row.publicKey), updatedAt: whole(row.updatedAt) }; });
+    const configurationRows = body.configurations.map(value => { const row = exact(value, ['owner', 'recoverer', 'recovererKeyDigest', 'keyDigest', 'hostShare', 'recovererPacket', 'noticeChannel', 'epoch', 'createdAt', 'updatedAt']); const fixed: Configuration = { owner: house(row.owner), recoverer: house(row.recoverer), recovererKeyDigest: decode(row.recovererKeyDigest, 32, 32).toString('base64url'), keyDigest: decode(row.keyDigest, 32, 32).toString('base64url'), hostShare: decode(row.hostShare, 64, 64).toString('base64url'), recovererPacket: decode(row.recovererPacket, 96, 2048).toString('base64url'), noticeChannel: bounded(row.noticeChannel, 48), epoch: whole(row.epoch), createdAt: whole(row.createdAt), updatedAt: whole(row.updatedAt) }; if (fixed.owner !== household || fixed.recoverer === household || fixed.epoch < 1 || fixed.createdAt > fixed.updatedAt || !/^anc1_[A-Za-z0-9_-]{43}$/.test(fixed.noticeChannel)) invalid(); return fixed; });
+    const requestRows = body.requests.map(value => { const row = exact(value, ['id', 'owner', 'recoverer', 'epoch', 'requesterPublicKey', 'hostShare', 'recovererPacket', 'keyDigest', 'noticeChannel', 'state', 'release', 'noticeID', 'noticeReceipt', 'createdAt', 'updatedAt']); const state = row.state; if (!['completed', 'cancelled'].includes(state as string)) fail(409, 'recovery_move_pending'); const fixed: RecoveryRequest = { id: bounded(row.id, 36), owner: house(row.owner), recoverer: house(row.recoverer), epoch: whole(row.epoch), requesterPublicKey: publicKey(row.requesterPublicKey), hostShare: decode(row.hostShare, 64, 64).toString('base64url'), recovererPacket: decode(row.recovererPacket, 96, 2048).toString('base64url'), keyDigest: decode(row.keyDigest, 32, 32).toString('base64url'), noticeChannel: bounded(row.noticeChannel, 48), state: state as State, release: row.release === null ? null : decode(row.release, 96, 2048).toString('base64url'), noticeID: row.noticeID === null ? null : bounded(row.noticeID, 36), noticeReceipt: row.noticeReceipt === null ? null : bounded(row.noticeReceipt), createdAt: whole(row.createdAt), updatedAt: whole(row.updatedAt) }; if (!uuid.test(fixed.id) || (fixed.noticeID !== null && !uuid.test(fixed.noticeID)) || (fixed.owner !== household && fixed.recoverer !== household) || fixed.owner === fixed.recoverer || fixed.epoch < 1 || fixed.createdAt > fixed.updatedAt || !/^anc1_[A-Za-z0-9_-]{43}$/.test(fixed.noticeChannel) || (fixed.state === 'completed' && (!fixed.release || !fixed.noticeID || !fixed.noticeReceipt))) invalid(); return fixed; });
+    const logRows = body.logs.map(value => { const row = exact(value, ['id', 'owner', 'recovery', 'recoverer', 'state', 'occurredAt', 'deliveredAt', 'receipt']); if (!['notice_pending', 'completed'].includes(row.state as string)) invalid(); const fixed: RecoveryLog = { id: bounded(row.id, 36), owner: house(row.owner), recovery: bounded(row.recovery, 36), recoverer: house(row.recoverer), state: row.state as RecoveryLog['state'], occurredAt: whole(row.occurredAt), deliveredAt: row.deliveredAt === null ? null : whole(row.deliveredAt), receipt: row.receipt === null ? null : bounded(row.receipt) }; if (!uuid.test(fixed.id) || !uuid.test(fixed.recovery) || fixed.owner !== household || (fixed.state === 'completed' ? fixed.deliveredAt === null || !fixed.receipt : fixed.deliveredAt !== null || fixed.receipt !== null)) invalid(); return fixed; });
+    for (const rows of [keyRows, configurationRows, requestRows, logRows]) { const ids = rows.map(row => 'household' in row ? row.household : 'owner' in row && !('id' in row) ? row.owner : (row as {id:string}).id); if (new Set(ids).size !== ids.length) invalid(); }
+    const keyMap = new Map(keyRows.map(row => [row.household, row]));
+    for (const row of configurationRows) { const recoverer = keyMap.get(row.recoverer); if (!recoverer || keyDigest(recoverer.publicKey) !== row.recovererKeyDigest) invalid(); }
+    const requestMap = new Map(requestRows.map(row => [row.id, row]));
+    for (const row of logRows) { const request = requestMap.get(row.recovery); if (!request || request.owner !== row.owner || request.recoverer !== row.recoverer || request.noticeID !== row.id) invalid(); }
+    const logMap = new Map(logRows.map(row => [row.id, row]));
+    for (const row of requestRows) { if (row.owner === household && row.state === 'completed') { const log = row.noticeID && logMap.get(row.noticeID); if (!log || log.recovery !== row.id || log.state !== 'completed' || log.receipt !== row.noticeReceipt) invalid(); } }
+    return { profile: 'atarasy.member-recovery-move.1', keys: keyRows, configurations: configurationRows, requests: requestRows, logs: logRows };
+  }
   return {
+    exportForMove(token: string): MemberRecoveryMove {
+      const who = session(token), keyHouseholds = new Set<string>([who.household]), configurationRows: Configuration[] = [], requestRows: RecoveryRequest[] = [], logRows: RecoveryLog[] = [];
+      configurations.each(row => { if (row.owner === who.household) { configurationRows.push(row); keyHouseholds.add(row.recoverer); } });
+      requests.each(row => { if (row.owner === who.household || row.recoverer === who.household) { if (row.state === 'pending' || row.state === 'approved') fail(409, 'recovery_move_pending'); requestRows.push(row); keyHouseholds.add(row.recoverer); } });
+      logs.each(row => { if (row.owner === who.household) logRows.push(row); });
+      const keyRows: RecoveryKey[] = []; keys.each(row => { if (keyHouseholds.has(row.household)) keyRows.push(row); });
+      for (const rows of [keyRows, configurationRows, requestRows, logRows]) rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      return moveSnapshot({ profile: 'atarasy.member-recovery-move.1', keys: keyRows, configurations: configurationRows, requests: requestRows, logs: logRows }, who.household);
+    },
+    importForMove(token: string, value: unknown) {
+      const who = session(token), snapshot = moveSnapshot(value, who.household);
+      const configurationIDs = new Set(snapshot.configurations.map(row => row.owner)), requestIDs = new Set(snapshot.requests.map(row => row.id)), logIDs = new Set(snapshot.logs.map(row => row.id));
+      configurations.each(row => { if (row.owner === who.household && !configurationIDs.has(row.owner)) fail(409, 'recovery_move_conflict'); });
+      requests.each(row => { if ((row.owner === who.household || row.recoverer === who.household) && !requestIDs.has(row.id)) fail(409, 'recovery_move_conflict'); });
+      logs.each(row => { if (row.owner === who.household && !logIDs.has(row.id)) fail(409, 'recovery_move_conflict'); });
+      const accept = <T extends object>(table: ReturnType<typeof records<T>>, key: string, row: T) => { const held = table.get(key); if (held && JSON.stringify(held) !== JSON.stringify(row)) fail(409, 'recovery_move_conflict'); if (!held) table.insert(key, row); };
+      for (const row of snapshot.keys) accept(keys, row.household, row);
+      for (const row of snapshot.configurations) accept(configurations, row.owner, row);
+      for (const row of snapshot.requests) accept(requests, row.id, row);
+      for (const row of snapshot.logs) accept(logs, row.id, row);
+      return snapshot;
+    },
     recoveryKey(token: string) { const who = session(token), row = keys.get(who.household); return { profile: 'atarasy.member-recovery-key.1' as const, household: who.household, publicKey: row?.publicKey ?? null, updatedAt: row?.updatedAt ?? null }; },
     prepareRecoveryKey(token: string, value: unknown) {
       const who = session(token), key = publicKey(exact(value, ['publicKey']).publicKey), valueChallenge = challenge('atarasy.member-recovery-key-registration.1', [who.household, key]);
