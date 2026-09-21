@@ -260,6 +260,15 @@ export function openMemberAuthority(path: Records, options: Options) {
       if (!row || row.household === null) return;
       return { session: row.id, household: row.household, principal: row.principal, credential: row.credential };
     },
+    /** Trusted notification worker lookup. A revoked credential yields no delivery authority. */
+    notificationContext(credentialID: string, sessionID: string) {
+      name(credentialID); name(sessionID);
+      const active = sessions.get(sessionID), credential = credentials.get(credentialID), person = credential && principals.get(credential.principal);
+      if (!active || active.credential !== credentialID || active.revoked !== 0 || active.expires <= now() || !credential || credential.revoked !== 0 || !person || person.disabled !== 0 || person.household === null || credential.proven !== 1) return;
+      const presenters: unknown = JSON.parse(person.presenters);
+      if (!Array.isArray(presenters) || grants(presenters) !== person.presenters) throw new Error('Invalid stored grants');
+      return { household: person.household as string, presenters: [...presenters] as string[] };
+    },
     /**
      * Final member-authorised host handover. Records remain recoverable on this
      * host, but every credential and bearer for the household loses access.
