@@ -256,9 +256,9 @@ export function openMemberAuthority(path: Records, options: Options) {
      */
     sessionPrincipal(token: string) {
       if (!/^amr1_[A-Za-z0-9_-]{43}$/.test(token)) return;
-      const row = activeSession(digest(token), now()) as { id: string; household: string | null; principal: string } | null;
+      const row = activeSession(digest(token), now()) as { id: string; household: string | null; principal: string; credential: string } | null;
       if (!row || row.household === null) return;
-      return { session: row.id, household: row.household, principal: row.principal };
+      return { session: row.id, household: row.household, principal: row.principal, credential: row.credential };
     },
     /** Trusted internal lookup only. Never exposed by the member HTTP handler. */
     transactionContext(token: string, mandate: string) {

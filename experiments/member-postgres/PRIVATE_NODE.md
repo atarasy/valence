@@ -16,4 +16,4 @@ The service cannot prove that arbitrary bytes came from a conforming encrypting 
 
 Tests cover authenticated create/read/list/update, stale compare-and-swap, restart, foreign household isolation, credential revocation, exact schemas, size and nonce bounds, database rollback and absence of plaintext/raw household fields. The generated fixture is decrypted independently by Atarasy Swift CryptoKit.
 
-This is the storage and device-loss prerequisite for IOS-B19. It does not implement the 2-of-3 recovery share ceremony, independent recovery notice or host migration; those remain IOS-B20 and IOS-B21.
+This is the storage and device-loss prerequisite for IOS-B19. The separate [member recovery ceremony](MEMBER_RECOVERY.md) now implements the local IOS-B20 service boundary; independent provider acceptance remains open. Host migration remains IOS-B21.

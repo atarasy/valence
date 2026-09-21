@@ -2,7 +2,7 @@ import { signConfig } from '../../engine/test/helpers.ts';
 import {beforeAll,afterAll,expect,test} from 'bun:test';
 import {canonicalWithdrawal,canonicalDecisions} from '../../engine/src/shared/decisions.ts';
 import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
-import {createCipheriv,createPublicKey,randomUUID,sign} from 'node:crypto';
+import {createCipheriv,createPublicKey,randomBytes,randomUUID,sign} from 'node:crypto';
 import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -688,4 +688,58 @@ test('private node write rolls back on database failure and succeeds on exact re
  try{expect((await s.send(path,{expectedRevision:0,envelope:privateEnvelope(10)})).status).toBe(503);expect((await(await s.send('/member/private-node/records')).json()).records).toEqual([]);}
  finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
  expect((await s.send(path,{expectedRevision:0,envelope:privateEnvelope(10)})).status).toBe(200);
+});
+
+test('lost-device recovery releases no share until a recoverer signs and an independent notice is delivered',async()=>{
+ const s=await setup(),recovererDevice=syntheticAuthenticator();
+ await s.unit.run(store=>memberRuntime(store,s.c,now).authority.provisionUnclaimedPrincipal('recovery-participant',[]));
+ const invitation=await s.unit.run(store=>memberRuntime(store,s.c,now).enrollment.issueInvitation('recovery-participant'));
+ const enrollment=await(await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();
+ expect((await s.send('/auth/enrollment/verify',{id:enrollment.id,response:recovererDevice.register(enrollment.publicKey.challenge,s.c.origin,s.c.rpID)})).status).toBe(201);
+ const login=await(await s.send('/auth/login/options',{})).json(),recovererUser=enrollment.publicKey.user.id;
+ const signedIn=await s.send('/auth/login/verify',{id:login.id,response:recovererDevice.authenticate(login.publicKey.challenge,s.c.origin,s.c.rpID,recovererUser,1)});expect(signedIn.status).toBe(200);
+ const recovererToken=(await signedIn.json()).token as string,recoverer=await s.unit.run(store=>memberRuntime(store,s.c,now).authority.adoptHousehold('recovery-participant',recovererDevice.id));
+ const recoveryPublicKey=Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url');
+ const preparedKey=await(await s.send('/member/recovery/key/prepare',{publicKey:recoveryPublicKey},recovererToken)).json();
+ const keyAssertion=recovererDevice.authenticate(preparedKey.publicKey.challenge,s.c.origin,s.c.rpID,recovererUser,2);
+ const registered=await(await s.send('/member/recovery/key/register',{preparation:preparedKey.id,publicKey:recoveryPublicKey,assertion:keyAssertion},recovererToken)).json();expect(registered).toMatchObject({household:recoverer,publicKey:recoveryPublicKey});
+ const participant=await(await s.send('/member/recovery/participant',{household:recoverer})).json();expect(participant.publicKey).toBe(recoveryPublicKey);
+ const configuration={epoch:1,recoverer,keyDigest:randomBytes(32).toString('base64url'),hostShare:randomBytes(64).toString('base64url'),recovererPacket:randomBytes(128).toString('base64url'),noticeChannel:'anc1_'+randomBytes(32).toString('base64url')};
+ const preparedConfiguration=await(await s.send('/member/recovery/configuration/prepare',configuration)).json();
+ const ownerAssertion=loginResponse(s.pair,s.input.credential,s.user,preparedConfiguration.publicKey.challenge,20);
+ const configured=await(await s.send('/member/recovery/configuration/submit',{preparation:preparedConfiguration.id,configuration,assertion:ownerAssertion})).json();expect(configured).toMatchObject({owner:s.input.house,recoverer,epoch:1,configured:true});
+ const requesterPublicKey=Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url');
+ const created=await(await s.send('/member/recovery/requests',{requesterPublicKey})).json();expect(created).toMatchObject({owner:s.input.house,recoverer,state:'pending',hostShare:null,release:null});
+ expect((await s.app.deliverRecoveryNotices({async deliver(){throw new Error('must not deliver');}})).delivered).toBe(0);
+ expect((await s.send('/member/recovery/requests/'+created.id+'/prepare',{release:randomBytes(128).toString('base64url')})).status).toBe(404);
+ const recovererList=await(await s.send('/member/recovery/requests',undefined,recovererToken)).json();expect(recovererList.requests[0]).toMatchObject({id:created.id,recovererPacket:configuration.recovererPacket,hostShare:null});
+ const release=randomBytes(128).toString('base64url'),preparedApproval=await(await s.send('/member/recovery/requests/'+created.id+'/prepare',{release},recovererToken)).json();
+ const approvalAssertion=recovererDevice.authenticate(preparedApproval.publicKey.challenge,s.c.origin,s.c.rpID,recovererUser,3);
+ const approved=await(await s.send('/member/recovery/requests/'+created.id+'/approve',{preparation:preparedApproval.id,release,assertion:approvalAssertion},recovererToken)).json();expect(approved).toMatchObject({state:'approved',hostShare:null});
+ const beforeNotice=await(await s.send('/member/recovery/requests/'+created.id)).json();expect(beforeNotice).toMatchObject({state:'approved',hostShare:null,release:null,keyDigest:null});
+ const pendingLog=await(await s.send('/member/recovery/log')).json();expect(pendingLog.events).toHaveLength(1);expect(pendingLog.events[0]).toMatchObject({recovery:created.id,state:'notice_pending',deliveredAt:null});
+ let attempted=0;try{await s.app.deliverRecoveryNotices({async deliver(job){attempted++;expect(job.channel).toBe(configuration.noticeChannel);expect(job.notice).toMatchObject({owner:s.input.house,recovery:created.id});throw new Error('independent channel down');}});}catch(error){expect((error as Error).message).toBe('independent channel down');}
+ expect(attempted).toBe(1);expect((await(await s.send('/member/recovery/requests/'+created.id)).json()).hostShare).toBeNull();
+ const delivered=await s.app.deliverRecoveryNotices({async deliver(job){return {receipt:'notice-receipt-'+job.notice.id};}});expect(delivered.delivered).toBe(1);
+ const completed=await(await s.send('/member/recovery/requests/'+created.id)).json();expect(completed).toMatchObject({state:'completed',hostShare:configuration.hostShare,release,keyDigest:configuration.keyDigest});
+ const finalLog=await(await s.send('/member/recovery/log')).json();expect(finalLog.events[0]).toMatchObject({state:'completed',receipt:'notice-receipt-'+finalLog.events[0].id});
+ if(process.env.ATARASY_RECOVERY_FIXTURE_OUTPUT)writeFileSync(process.env.ATARASY_RECOVERY_FIXTURE_OUTPUT,JSON.stringify({profile:'atarasy.member-recovery-fixture.1',scope:'Synthetic PostgreSQL recovery ceremony; no bearer token, private key or live notice destination.',environment:{name:s.c.environment,origin:s.c.origin},ownerSession:await(await s.send('/auth/session')).json(),recovererSession:await(await s.send('/auth/session',undefined,recovererToken)).json(),recoveryPublicKey,registered,participant,configuration,preparedConfiguration,configured,created,recovererList,preparedApproval,approved,pendingLog,completed,finalLog},null,2)+'\n',{flag:'wx',mode:0o600});
+ const recovererAfter=await(await s.send('/member/recovery/requests/'+created.id,undefined,recovererToken)).json();expect(recovererAfter.hostShare).toBeNull();expect(recovererAfter.keyDigest).toBeNull();
+ expect((await s.app.deliverRecoveryNotices({async deliver(){throw new Error('completed notice repeated');}})).delivered).toBe(0);
+ const secondRequest=await(await s.send('/member/recovery/requests',{requesterPublicKey:Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url')})).json();expect(secondRequest.state).toBe('pending');
+ const nextConfiguration={...configuration,epoch:2,keyDigest:randomBytes(32).toString('base64url'),hostShare:randomBytes(64).toString('base64url'),recovererPacket:randomBytes(128).toString('base64url')};
+ const nextPrepared=await(await s.send('/member/recovery/configuration/prepare',nextConfiguration)).json(),nextAssertion=loginResponse(s.pair,s.input.credential,s.user,nextPrepared.publicKey.challenge,21);
+ expect((await s.send('/member/recovery/configuration/submit',{preparation:nextPrepared.id,configuration:nextConfiguration,assertion:nextAssertion})).status).toBe(200);
+ expect(await(await s.send('/member/recovery/requests/'+created.id)).json()).toEqual(completed);
+ expect(await(await s.send('/member/recovery/requests/'+secondRequest.id)).json()).toMatchObject({state:'cancelled',hostShare:null,release:null});
+ const restarted=await openPostgresMemberHTTP(pool,s.identity,s.c,now),afterRestart=await restarted.fetch(s.request('/member/recovery/requests/'+created.id,undefined,s.grant.token),{peer:'recovery-restart'});expect(await afterRestart.json()).toEqual(completed);
+});
+
+test('recovery rejects host-only foreign stale and malformed attempts without replacing the configured policy',async()=>{
+ const s=await setup(),other=await setup(),key=Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url');
+ const absent={epoch:1,recoverer:other.input.house,keyDigest:randomBytes(32).toString('base64url'),hostShare:randomBytes(64).toString('base64url'),recovererPacket:randomBytes(128).toString('base64url'),noticeChannel:'anc1_'+randomBytes(32).toString('base64url')};
+ expect((await s.send('/member/recovery/configuration/prepare',absent)).status).toBe(404);
+ for(const [path,body,status] of [['/member/recovery/key/prepare',{publicKey:key+'x'},400],['/member/recovery/requests',{requesterPublicKey:key},404],['/member/recovery/configuration/submit',{configuration:absent,assertion:{}},400]] as const)expect((await s.send(path,body)).status).toBe(status);
+ expect(await(await s.send('/member/recovery/configuration')).json()).toEqual({profile:'atarasy.member-recovery-configuration.1',owner:s.input.house,configured:false,recoverer:null,recovererKeyDigest:null,keyDigest:null,epoch:null,createdAt:null,updatedAt:null});
+ expect((await other.send('/member/recovery/participant',{household:s.input.house})).status).toBe(404);
 });

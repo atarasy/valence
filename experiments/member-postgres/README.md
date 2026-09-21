@@ -8,6 +8,8 @@ Install the pinned dependencies with `bun install --frozen-lockfile`. Generate m
 
 [Blind private-node records](PRIVATE_NODE.md) add authenticated, revisioned ciphertext storage for the native IOS-B19 boundary. The database never receives the native envelope key or record plaintext; recovery and host move remain separate ceremonies.
 
+[Member recovery](MEMBER_RECOVERY.md) adds the authenticated two-participant recovery ceremony, durable pre-release log and trusted independent-notice delivery boundary for IOS-B20. No delivery provider is connected by the deployed entry.
+
 For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts --timeout 30000`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
 
 ## Behaviour and limits
