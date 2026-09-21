@@ -17,6 +17,7 @@ import { Registry } from '../../engine/src/shared/registry.ts';
 import { RecoveryRegister } from '../../engine/src/hub/node.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { openPermissionRequests } from './permission-requests.ts';
+import { openPrivateNode, PrivateNodeError } from './private-node.ts';
 import { PermissionLedger } from '../../engine/src/hub/permissions.ts';
 import type { PreparedAssertion } from './login.ts';
 import { presenterRequest } from './presenter-http.ts';
@@ -36,7 +37,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
  await unit.run(binding);let pending=0;
  return {descriptor:{...deployment,fingerprint:identity.fingerprint},
   async fetch(request:Request,context:{peer:string}):Promise<Response>{
-   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
+   const url=new URL(request.url),match=/^\/member\/operations\/([a-f0-9-]{36})(?:\/(submit|outcome|cancel))?$/.exec(url.pathname),prepare=url.pathname==='/member/statements/prepare',digital=url.pathname==='/member/decisions/prepare',withdrawal=url.pathname==='/member/withdrawals/prepare',mandate=/^\/member\/mandates\/(list|prepare|submit)$/.exec(url.pathname),mandateEffective=url.pathname==='/member/mandates/effective',mandateChanges=/^\/member\/mandates\/changes(?:\/([a-f0-9-]{36})(?:\/(prepare|submit|cancel))?)?$/.exec(url.pathname),permission=/^\/member\/permissions\/(list|revoke)$/.exec(url.pathname),permissionRequest=/^\/member\/permissions\/requests(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})(?:\/(grant|cancel))?)?$/.exec(url.pathname),privateNode=/^\/member\/private-node\/records(?:\/([a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}))?$/.exec(url.pathname),member=prepare||digital||withdrawal||!!match||!!mandate||mandateEffective||!!mandateChanges||!!permission||!!permissionRequest||!!privateNode,presenter=/^\/presenter\/(self|configs|disclosures|permission-requests(?:\/[a-f0-9-]{36}\/duplicate-check)?|offers(\/[A-Za-z0-9_-]+(\/(present|delivery|recovery|carriage-quote))?)?)$/.test(url.pathname);
    if(url.origin!==c.origin||url.username||url.password||url.hash||request.headers.has('cookie')||(request.headers.has('origin')&&request.headers.get('origin')!==c.origin)||['cross-site','same-site'].includes(request.headers.get('sec-fetch-site')??''))return json(403,'request_unavailable');
    // §13.2, question 55. A mandate identifier carries a colon and a full stop,
    // and a path may percent-encode either, so the segment filter admits them and
@@ -67,6 +68,18 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
      if(presenter)return presenterRequest(r,{quotes:r.quotes,deliveries:r.deliveries,registry:new Registry(store),recovery:new RecoveryRegister(store),approvals:new ApprovalDesk(store),permissions:new PermissionLedger(store)},fixed,inputBody);
      if(member){
       if(url.search)return {status:404,body:JSON.stringify({error:'operation_unavailable'})};
+      if(privateNode){
+       const id=privateNode[1];
+       if(!id&&request.method!=='GET')return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
+       const token=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];
+       if(!token)return {status:401,body:JSON.stringify({error:'unauthorised'})};
+       const api=openPrivateNode(r);
+       if(!id)return {status:200,body:JSON.stringify(api.list(token))};
+       if(request.method==='GET')return {status:200,body:JSON.stringify(api.read(token,id))};
+       if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).sort().join(',')!=='envelope,expectedRevision')throw new PrivateNodeError(400,'invalid_private_record');
+       const supplied=inputBody as {expectedRevision:unknown;envelope:unknown};
+       return {status:200,body:JSON.stringify(api.write(token,id,supplied.expectedRevision,supplied.envelope))};
+      }
       if(permissionRequest){
        const [,id,decision]=permissionRequest;
        if(request.method!==(decision?'POST':'GET'))return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
@@ -162,7 +175,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
     });
     if(Buffer.byteLength(result.body)>1_048_576)return json(503,'response_unavailable');
     return new Response(result.status===204?null:result.body,{status:result.status,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}});
-   }catch(error){if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
+   }catch(error){if(privateNode&&error instanceof PrivateNodeError)return json(error.status,error.code);if(mandateChanges&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}
   }
  };
 }

@@ -6,6 +6,8 @@ First implementation stage of Vault decision 58, following the confirmed Vercel 
 
 Install the pinned dependencies with `bun install --frozen-lockfile`. Generate migrations with `bun run generate`. Run `DATABASE_URL_UNPOOLED=... bun migrate.ts` against a dedicated development database using a direct connection. Provisioning identity is an explicit trusted call to `initialiseDeployment`, separate from HTTP and migration execution. Application traffic can use a pooled URL. Neither migration nor bootstrap runs at module import.
 
+[Blind private-node records](PRIVATE_NODE.md) add authenticated, revisioned ciphertext storage for the native IOS-B19 boundary. The database never receives the native envelope key or record plaintext; recovery and host move remain separate ceremonies.
+
 For tests, set `ATARASY_TEST_POSTGRES_URL` to an isolated PostgreSQL database and run `bun test store.test.ts --timeout 30000`. Tests apply tracked migrations and create/remove their own uniquely named deployment rows. They never read DATABASE_URL. Do not point the test URL at a production database. Test fixtures use synthetic identities, signatures and a copied local engine fixture; no member credentials are imported from a live account.
 
 ## Behaviour and limits

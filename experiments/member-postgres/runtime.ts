@@ -27,3 +27,4 @@ export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const operations={find:journal.findBlocking,findCurrent:journal.findCurrent};
  return {path,engine,deliveries,quotes,approvalCarriage,now,authority,login,enrollment,bindings,journal,reviews,operations};
 }
+export type ReturnTypeMemberRuntime = ReturnType<typeof memberRuntime>;

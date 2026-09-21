@@ -2,7 +2,7 @@ import { signConfig } from '../../engine/test/helpers.ts';
 import {beforeAll,afterAll,expect,test} from 'bun:test';
 import {canonicalWithdrawal,canonicalDecisions} from '../../engine/src/shared/decisions.ts';
 import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
-import {createPublicKey,randomUUID,sign} from 'node:crypto';
+import {createCipheriv,createPublicKey,randomUUID,sign} from 'node:crypto';
 import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -647,4 +647,45 @@ test('permission grant and request outcome roll back together after database fai
  try{expect((await s.send(path+'/grant',{digest:review.digest})).status).toBe(503);expect((await(await s.send('/member/permissions/list')).json()).permissions).toEqual([]);expect(await(await s.send(path)).json()).toEqual(review);}
  finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
  expect((await s.send(path+'/grant',{digest:review.digest})).status).toBe(200);
+});
+
+const privateEnvelope=(byte:number)=>({profile:'atarasy.private-node-record.1',nonce:Buffer.alloc(12,byte).toString('base64url'),ciphertext:Buffer.alloc(48,byte).toString('base64url')});
+test('private node retains only opaque versioned envelopes with compare-and-swap readback',async()=>{
+ const s=await setup(),id=randomUUID(),path='/member/private-node/records/'+id,key=Buffer.alloc(32,37),clear=Buffer.from('Synthetic private purchase and note; never host plaintext.'),encrypt=(revision:number,byte:number)=>{const nonce=Buffer.alloc(12,byte),cipher=createCipheriv('aes-256-gcm',key,nonce);cipher.setAAD(Buffer.from(JSON.stringify(['atarasy.private-node-record.1',s.c.environment,s.c.origin,s.input.house,id,String(revision)])));const ciphertext=Buffer.concat([cipher.update(clear),cipher.final(),cipher.getAuthTag()]);return {profile:'atarasy.private-node-record.1',nonce:nonce.toString('base64url'),ciphertext:ciphertext.toString('base64url')};},first=encrypt(1,7),second=encrypt(2,8);
+ const created=await s.send(path,{expectedRevision:0,envelope:first});expect(created.status).toBe(200);expect(created.headers.get('cache-control')).toBe('no-store');
+ const one=await created.json();expect(one).toEqual({id,revision:1,updatedAt:now(),envelope:first});
+ expect(await(await s.send(path)).json()).toEqual(one);expect((await(await s.send('/member/private-node/records')).json()).records).toEqual([one]);
+ expect((await s.send(path,{expectedRevision:0,envelope:second})).status).toBe(409);expect(await(await s.send(path)).json()).toEqual(one);
+ const updated=await(await s.send(path,{expectedRevision:1,envelope:second})).json();expect(updated.revision).toBe(2);expect(updated.envelope).toEqual(second);
+ const stored=await pool.query('SELECT value FROM atarasy_member.engine_rows WHERE deployment=$1 AND namespace=$2',[s.identity.id,'private_node_records']);
+ expect(stored.rows).toHaveLength(1);expect(stored.rows[0].value).not.toContain(s.input.house);expect(stored.rows[0].value).not.toContain(clear.toString());expect(stored.rows[0].value).not.toContain('token');expect(stored.rows[0].value).not.toContain('key');
+ const restarted=await openPostgresMemberHTTP(pool,s.identity,s.c,now),reply=await restarted.fetch(s.request(path,undefined,s.grant.token),{peer:'private-restart'});expect(await reply.json()).toEqual(updated);
+ if(process.env.ATARASY_PRIVATE_NODE_FIXTURE_OUTPUT)writeFileSync(process.env.ATARASY_PRIVATE_NODE_FIXTURE_OUTPUT,JSON.stringify({profile:'atarasy.private-node-fixture.1',scope:'Synthetic cross-language AES-256-GCM record; no bearer credential or live data.',environment:{name:s.c.environment,origin:s.c.origin},household:s.input.house,key:key.toString('base64url'),clear:clear.toString('base64url'),record:updated},null,2)+'\n',{flag:'wx',mode:0o600});
+});
+test('private node isolates households and rejects plaintext-shaped or malleable records',async()=>{
+ const s=await setup(),other=await setup(),id=randomUUID(),path='/member/private-node/records/'+id,envelope=privateEnvelope(9);
+ const outsider=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);r.authority.provisionUnclaimedPrincipal('private-outsider',[]);r.authority.registerCredential(other.input.credential,'private-outsider');r.login.provisionVerifiedPasskey(other.input.credential,coseOf(other.pair),1,other.user);r.authority.markCredentialProven(other.input.credential);r.authority.adoptHousehold('private-outsider',other.input.credential);return r.authority.createSessionAfterVerification(other.input.credential,now()+90000);});
+ expect((await s.send(path,{expectedRevision:0,envelope})).status).toBe(200);expect((await s.send(path,undefined,outsider.token)).status).toBe(404);expect((await(await s.send('/member/private-node/records',undefined,outsider.token)).json()).records).toEqual([]);
+ expect((await s.send(path,{expectedRevision:0,envelope},outsider.token)).status).toBe(200);expect((await s.send(path,undefined,outsider.token)).status).toBe(200);expect((await(await s.send('/member/private-node/records',undefined,outsider.token)).json()).records).toHaveLength(1);
+ const invalid=[
+  {expectedRevision:1,envelope:{...envelope,plaintext:'secret'}},
+  {expectedRevision:1,envelope:{...envelope,nonce:Buffer.alloc(11).toString('base64url')}},
+  {expectedRevision:1,envelope:{...envelope,ciphertext:Buffer.alloc(16).toString('base64url')}},
+  {expectedRevision:1,envelope:{...envelope,ciphertext:Buffer.alloc(12_305).toString('base64url')}},
+  {expectedRevision:1,envelope:{...envelope,profile:'other'}},
+  {expectedRevision:1,envelope},
+  {expectedRevision:1,envelope,household:s.input.house},
+ ];
+ // The sixth entry is valid and advances once; every other body is refused.
+ for(const [index,value] of invalid.entries()){const response=await s.send(path,value);expect(response.status).toBe(index===5?200:400);}
+ expect((await s.send(path+'?household=foreign')).status).toBe(404);expect((await s.send('/member/private-node/records',{})).status).toBe(405);
+ await s.unit.run(store=>memberRuntime(store,s.c,now).authority.revokeCredential(s.input.credential));expect((await s.send(path)).status).toBe(404);
+});
+test('private node write rolls back on database failure and succeeds on exact retry',async()=>{
+ const s=await setup(),id=randomUUID(),path='/member/private-node/records/'+id,fn='fail_private_'+randomUUID().replaceAll('-','');
+ await pool.query(`CREATE FUNCTION atarasy_member.${fn}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.deployment = '${s.identity.id}' AND NEW.namespace = 'private_node_records' THEN RAISE EXCEPTION 'injected private node failure'; END IF; RETURN NEW; END $$`);
+ await pool.query(`CREATE TRIGGER ${fn} BEFORE INSERT OR UPDATE ON atarasy_member.engine_rows FOR EACH ROW EXECUTE FUNCTION atarasy_member.${fn}()`);
+ try{expect((await s.send(path,{expectedRevision:0,envelope:privateEnvelope(10)})).status).toBe(503);expect((await(await s.send('/member/private-node/records')).json()).records).toEqual([]);}
+ finally{await pool.query(`DROP TRIGGER ${fn} ON atarasy_member.engine_rows`);await pool.query(`DROP FUNCTION atarasy_member.${fn}()`);}
+ expect((await s.send(path,{expectedRevision:0,envelope:privateEnvelope(10)})).status).toBe(200);
 });
