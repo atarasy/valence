@@ -7,12 +7,16 @@ import pathlib
 # was looking at the wrong one. Found on 2026-09-12, hours after the section
 # was written, by asking whether the surface guarded is the surface used.
 # Re-anchored 2026-09-12 (evening), when the block gained a product key (question 35).
+# Re-anchored 2026-09-22, when the block gained an optional contact (question 72).
 p = pathlib.Path("src/hub/approval.ts"); s = p.read_text()
 old = """      disclosures: offer.disclosures.map((d) => ({
         merchant: d.merchant,
         product: d.product,
         version: d.version,
         items: d.items.map((i) => ({ label: i.label, value: i.value })),
+        // Question 72. Rendered exactly as the merchant signed it, or null
+        // when the merchant gave none.
+        contact: d.contact ?? null,
         signature: d.signature,
       })),
       candidates,"""
