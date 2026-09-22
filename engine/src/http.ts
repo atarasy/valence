@@ -8,6 +8,7 @@ import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole, unauthenticatedReport } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
+import { leaveBlockers, leaveHost } from "./hub/leave.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
@@ -1415,6 +1416,17 @@ async function route(
       await engine.settleWhatOwesNothing(household);
       return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, household, Date.now(), hub.quotes));
     }
+  }
+
+  // §14.3. A household leaves this host. Like every other route here, this one
+  // authenticates nobody: the hub in front of it holds the member's signature
+  // (§13.1), and a deployment that exposes the engine to anything else has
+  // already given away the export beside it.
+  if (parts[0] === "households" && parts[1] && parts[2] === "leave") {
+    const household = segment(parts[1]);
+    const leaveContext = { engine, recovery, permissions, mandates: engine.mandates, deliveries, approvals: hub.approvals, quotes: hub.quotes };
+    if (method === "GET") return json({ household, blockers: leaveBlockers(leaveContext, household, Date.now()) });
+    if (method === "POST") return json(leaveHost(leaveContext, household, Date.now()));
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "import") {
