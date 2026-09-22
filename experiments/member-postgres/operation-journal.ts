@@ -155,6 +155,23 @@ export function openOperationJournal(path: Records, authority: Authority, bindin
         operation.state = 'refused'; operation.refusal = reason; save(operation); return operation;
       }).immediate();
     },
+    /**
+     * §14.3. Trusted internal call only, after the caller has verified consent
+     * and blockers (an unexpired uncommitted operation is one of them, so every
+     * row this removes is already committed, cancelled, refused or expired). A
+     * head is removed with the operations it points at, keyed by the same
+     * offer id its decision and withdrawal carried.
+     */
+    deleteHousehold(household: string) {
+      return db.transaction(() => {
+        const offerIDs = new Set<string>(), operationIDs: string[] = [];
+        let opsDeleted = 0;
+        operations.deleteWhere(v => { if (v.household === household) { offerIDs.add(v.offer); operationIDs.push(v.id); opsDeleted++; return true; } return false; });
+        let headsDeleted = 0;
+        heads.deleteWhere(v => { if (offerIDs.has(v.offer)) { headsDeleted++; return true; } return false; });
+        return { operations: opsDeleted, decisionHeads: headsDeleted, offerIDs: [...offerIDs], operationIDs };
+      }).immediate();
+    },
     close() { db.close(); },
   });
 }

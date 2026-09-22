@@ -270,6 +270,28 @@ export function openMemberAuthority(path: Records, options: Options) {
       return { household: person.household as string, presenters: [...presenters] as string[] };
     },
     /**
+     * §14.3. A household leaves rather than moves: unlike `retireHouseholdAccess`,
+     * nothing here is kept as history. Every principal of `household` and every
+     * credential, session and ownership row those principals hold is removed
+     * outright, so the household name adopts cleanly if the same key enrols
+     * again later (§13.2, question 55's one-way adoption has nothing left to
+     * collide with). The caller has already verified the household's consent
+     * and re-checked every blocker in this same transaction; this method trusts
+     * that and does not check either.
+     */
+    deleteHouseholdRecords(household: string) {
+      name(household);
+      return db.transaction(() => {
+        const memberIDs = new Set<string>(); principals.each(p => { if (p.household === household) memberIDs.add(p.id); });
+        const credentialIDs = new Set<string>(); credentials.each(c => { if (memberIDs.has(c.principal)) credentialIDs.add(c.id); });
+        let sessionsDeleted = 0; sessions.each(s => { if (credentialIDs.has(s.credential)) { sessions.delete(s.id); sessionsDeleted++; } });
+        for (const id of credentialIDs) credentials.delete(id);
+        for (const id of memberIDs) principals.delete(id);
+        let ownershipDeleted = 0; ownership.each(o => { if (o.household === household) { ownership.delete(JSON.stringify([o.kind, o.id])); ownershipDeleted++; } });
+        return { principals: memberIDs.size, credentials: credentialIDs.size, sessions: sessionsDeleted, ownership: ownershipDeleted, principalIDs: [...memberIDs], credentialIDs: [...credentialIDs] };
+      }).immediate();
+    },
+    /**
      * Final member-authorised host handover. Records remain recoverable on this
      * host, but every credential and bearer for the household loses access.
      */
