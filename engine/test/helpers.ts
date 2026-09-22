@@ -4,7 +4,7 @@ import type { Store } from "../src/common/store.js";
 import { InMemoryLedger } from "../src/engine/ledger.js";
 import { canonical, type EdgeInput } from "../src/shared/lineage.js";
 import { canonicalDecisions, type DecisionInput } from "../src/shared/decisions.js";
-import { canonicalDisclosure } from "../src/shared/disclosure.js";
+import { canonicalDisclosure, type DisclosureContact } from "../src/shared/disclosure.js";
 import { canonicalStatement, statementLines } from "../src/shared/statement.js";
 import { canonicalWithdrawal } from "../src/shared/decisions.js";
 import { canonicalGift } from "../src/shared/gift.js";
@@ -110,7 +110,11 @@ export const MERCHANT_PAIR = generateKeyPairSync("ed25519");
  * disclose is the seller's law, and a fixture that pretended otherwise would
  * assert something this codebase cannot check.
  */
-export function disclosureFor(merchant: string, product: string | null = null) {
+export function disclosureFor(
+  merchant: string,
+  product: string | null = null,
+  contact: DisclosureContact | null = null
+) {
   const body = {
     merchant,
     product,
@@ -120,6 +124,7 @@ export function disclosureFor(merchant: string, product: string | null = null) {
       { label: "delivery", value: "already placed" },
       { label: "returns", value: "as the merchant published" },
     ],
+    contact,
   };
   return {
     ...body,

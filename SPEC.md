@@ -592,10 +592,11 @@ disclosure
   product      null for the merchant's standing text; a product reference for a block about that product alone (requirement 5)
   version      the merchant's own version of this text
   items[]      label and value, in the merchant's own order
+  contact      OPTIONAL. kind (email, tel or url) and value, the merchant's own contact (requirement 7)
   signature    by the merchant's registered key, over the canonical form
 ```
 
-The canonical form is the merchant, the version, the product (empty for the standing text), and then each item as `label` and `value`, **every part percent-encoded** before the separators join them, for the reason §8 and §16.1 escape theirs: a plain join lets whoever relays the block move the boundary between two fields under a signature that still verifies. The product is inside the signed bytes so that a block signed for one product cannot be re-filed under another, or under the merchant as a whole.
+The canonical form is the merchant, the version, the product (empty for the standing text), and then each item as `label` and `value`, **every part percent-encoded** before the separators join them, for the reason §8 and §16.1 escape theirs: a plain join lets whoever relays the block move the boundary between two fields under a signature that still verifies. The product is inside the signed bytes so that a block signed for one product cannot be re-filed under another, or under the merchant as a whole. **Where the merchant gives a contact, one final line is appended**, `contact:<kind>=<value>` with the value percent-encoded; absent or null, no line is appended and the bytes are identical to a disclosure with no contact at all, so a signature made before this field existed still verifies.
 
 **The requirements are five, and each is checkable.**
 
@@ -620,6 +621,8 @@ The canonical form is the merchant, the version, the product (empty for the stan
    **So a fork's surface is not an escape and was never meant to be one.** Question 38 of the concept documents asked whether a hub the merchant never appointed displays such a screen at all, and the answer this specification builds on is that the question does not reach the design: the procedure is the presenter's wherever it is rendered, and the duty stays on the merchant where the article puts it. **What remains genuinely unsettled is narrower**, whether a merchant that merely publishes a signed block has entrusted anything to anybody, and this design never relies on that: it rests on the presenter, which is entrusted by composing the offer. 法12条の3 and 12条の4 are the reason to think the narrower reading is right, because where that Act wants a contractor to carry a duty in its own name it creates a named category and demands 「一括して委託」.
 
    **Presentation is where refusing costs least**, and this section refused only at the decision when it was written, on the reasoning that refusing earlier would let one merchant's omission stop a presenter offering anything at all. **That is backwards.** Refusing at creation costs the presenter one candidate. Refusing at the decision costs a household the whole signed set, because a decided set is all-or-nothing (§10.5), and the person has already read it, decided and signed. **The check at the decision stays** because an offer imported under §14.2 never passed through the receiving host's presentation, and it is the only thing between a block signed by a key that host never held and a household's signature.
+
+7. **A merchant may sign a contact, and the hub shows it beside its return terms.** Question 72, decided 2026-09-22. `contact` is OPTIONAL: `kind` is `email`, `tel` or `url`, and `value` is the merchant's own. Where present, an implementation MUST render it exactly as the merchant signed it, on every surface that already carries the block (requirement 4). **This is not a messaging feature.** The hub hands over nothing through it: no household data leaves, no message is composed or sent on the household's behalf, and no refund is initiated. A household that wants to reach the merchant contacts it itself, by whatever the block gives; the hub's part ends at showing it. An implementation MUST NOT add a route that sends anything to a merchant on a household's behalf under this field, and MUST NOT treat its presence as a refund channel.
 
 ## 11. Physical binding: recovery
 

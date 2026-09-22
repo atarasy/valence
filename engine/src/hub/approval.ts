@@ -3,6 +3,7 @@ import type { ValenceEngine } from "../engine/offers.js";
 import type { Offer, Valence } from "../common/types.js";
 import { collectedAs } from "../shared/collected.js";
 import type { Delivery } from "./delivery.js";
+import type { DisclosureContact } from "../shared/disclosure.js";
 
 /**
  * The approval surface.
@@ -132,6 +133,8 @@ export type Approval = {
     product: string | null;
     version: string;
     items: { label: string; value: string }[];
+    /** Question 72, decided 2026-09-22. Null when the merchant gave none. */
+    contact: DisclosureContact | null;
     signature: string;
   }[];
   offer: string;
@@ -248,6 +251,9 @@ export class ApprovalDesk {
         product: d.product,
         version: d.version,
         items: d.items.map((i) => ({ label: i.label, value: i.value })),
+        // Question 72. Rendered exactly as the merchant signed it, or null
+        // when the merchant gave none.
+        contact: d.contact ?? null,
         signature: d.signature,
       })),
       candidates,
