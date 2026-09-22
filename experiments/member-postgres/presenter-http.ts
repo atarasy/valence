@@ -151,6 +151,34 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
   }
   // §6.6a. A refund that came back, and its repayment, reach the engine as sent, as a correction does.
   if(parts[2]==='returns')return forward('/offers/'+encodeURIComponent(id)+'/returns',input);
+  // Clause 59. A presenter records what it considered and argued against, per candidate; the mandate
+  // clause the engine requires is never theirs to state, so this fills it from the offer's own mandate
+  // record instead of taking a shop's word for a household's standing protections.
+  if(parts[2]==='deliberation'){
+   if(url.search||Object.keys(b).sort().join(',')!=='excluded,per_candidate')return reply(400,{error:'malformed',message:'a deliberation carries per_candidate and excluded only; mandate is filled by this host'});
+   const offer=r.engine.mustGet(id,r.now());
+   if(offer.state!=='drafted'&&offer.state!=='presented')return reply(409,{error:'offer_not_open',message:'a deliberation is recorded only while an offer is drafted or presented'});
+   const per=b.per_candidate;
+   if(typeof per!=='object'||per===null||Array.isArray(per))return reply(400,{error:'malformed',message:'per_candidate must be an object'});
+   const perRecord=per as Record<string,unknown>,candidateIds=offer.candidates.map(c=>c.id),perKeys=Object.keys(perRecord);
+   if(perKeys.length!==candidateIds.length||!candidateIds.every(cid=>Object.hasOwn(perRecord,cid)))
+    return reply(400,{error:'malformed',message:'per_candidate must name exactly this offer\'s candidates'});
+   for(const [key,value] of Object.entries(perRecord)){
+    if(typeof value!=='object'||value===null||Array.isArray(value)||Object.keys(value as object).sort().join(',')!=='alternatives,argument_against')
+     return reply(400,{error:'malformed',message:`candidate ${key}: alternatives and argument_against only`});
+    const entry=value as Record<string,unknown>,alternatives=entry.alternatives;
+    if(!Array.isArray(alternatives)||alternatives.length===0||alternatives.length>10||alternatives.some(a=>typeof a!=='string'||a.trim()===''||a.length>500))
+     return reply(400,{error:'malformed',message:`candidate ${key}: alternatives must be 1 to 10 non-blank strings of at most 500 characters`});
+    const argumentAgainst=entry.argument_against;
+    if(typeof argumentAgainst!=='string'||argumentAgainst.trim()===''||argumentAgainst.length>1000)
+     return reply(400,{error:'malformed',message:`candidate ${key}: argument_against must be a non-blank string of at most 1000 characters`});
+   }
+   const excluded=b.excluded;
+   if(!Array.isArray(excluded))return reply(400,{error:'malformed',message:'excluded must be an array'});
+   const mandate=r.engine.mandates.get(offer.mandate);
+   if(!mandate||typeof mandate.lapses_at!=='number')return reply(409,{error:'mandate_unavailable',message:'no mandate record backs this offer\'s mandate'});
+   return forward('/offers/'+encodeURIComponent(id)+'/deliberation',{per_candidate:perRecord,excluded,mandate:{kind:'standing',scope:offer.mandate,lapses_at:mandate.lapses_at}});
+  }
   if(parts[2]==='carriage-quote'){
    if(url.search||Object.keys(b).sort().join(',')!=='carriage')return reply(400,{error:'malformed',message:'quotation takes only carriage and no query'});
    if(binding!=='digital')return reply(422,{error:'not_digital',message:'a pre-order quotation is for a digital offer'});
