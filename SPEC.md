@@ -905,7 +905,7 @@ An import is an arrival from outside, not a restore of the host's own backup, so
 
 ### 14.3 A household leaves a host
 
-**Draft, 2026-09-22, not yet decided.** A hub that lets a person create an account lets them delete it (Apple App Review Guideline 5.1.1(v); vault `77`). Leaving is not moving: nothing is imported anywhere, and what the household wants kept it takes with an export first (§14, clause 43). The founder decided the shape on 2026-09-22; the rules below are the proposal for review.
+**Decided by the founder on 2026-09-22.** A hub that lets a person create an account lets them delete it (Apple App Review Guideline 5.1.1(v); vault `77`, `78`). Leaving is not moving: nothing is imported anywhere, and what the household wants kept it takes with an export first (§14, clause 43). The export is the ordinary one and carries no mark that it was taken to leave, because a mark would move the format's version and tell the reader nothing the export does not.
 
 **Deletion is a member operation signed like any other.** An implementation MUST require the household's signature under a user-verified assertion over a request naming the household and this host (§10.5), and MUST NOT delete on a session alone, because a session is what a stolen device carries. A hub SHOULD offer the full export (§14) before it asks for the signature.
 
@@ -920,9 +920,9 @@ An import is an arrival from outside, not a restore of the host's own backup, so
 
 **What another household holds is not the leaving household's to delete.** A gift the household gave or received stays in the other household's records unchanged, with its lineage edge, because the other household's receipt and its exploration floor (§5.1) rest on them, and changing the signed bytes would break the signature §14.2 verifies when that household moves. A hub MUST display the departed party as a member who has left, not by any identifier. **The departed household's public key is retained exactly as long as a remaining household's edge or gift needs it to verify**, and removed with the last such row; a public key without the credentials, sessions and mandates deleted beside it identifies no one to this host.
 
-**Afterwards.** A presenter route naming a deleted offer answers `404 not_found`, the same as an offer that never existed, so a merchant learns nothing about a household from asking; a correction for one (§6.6) is refused the same way and is the merchant's to handle outside the protocol. An implementation MUST keep, for its own audit, the fact that a household identifier was deleted and when, and nothing else about it. The same passkey enrolling again later creates a household again with nothing of the old one's history, because none remains.
+**Afterwards.** A presenter route naming a deleted offer answers `404 not_found`, the same as an offer that never existed, so a merchant learns nothing about a household from asking; a correction for one (§6.6) is refused the same way and is the merchant's to handle outside the protocol. An implementation MUST keep, for its own audit, the fact that a household identifier was deleted and when, and nothing else about it, for seven years: the period a seller keeps the records of a sale (法人税法施行規則 59条), so that a question about one of the household's purchases can still be answered with when the household left. The same passkey enrolling again later creates a household again with nothing of the old one's history, because none remains.
 
-**Open for review**: whether §14's export should gain a field saying the node was exported for deletion; how long the audit fact is kept; and whether a host may keep the shared copies for a period when a dispute with a merchant is open.
+**An open dispute does not hold the shared copies back.** A dispute is between the household, the merchant and the provider, and the merchant answers it from its own copy; the host does not see the dispute and could not tell when such a hold ended.
 
 ----
 
