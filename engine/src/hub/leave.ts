@@ -8,6 +8,8 @@ import type { CarriageQuotes } from "./carriage-quote.js";
 import { conflict } from "../common/errors.js";
 import { atomically } from "../common/store.js";
 import { moneyStillToMove, needsStatement } from "../shared/statement.js";
+import { verifyPersonal, type Assertion } from "../shared/decisions.js";
+import { unprocessable } from "../common/errors.js";
 import type { Offer } from "../common/types.js";
 
 /**
@@ -103,6 +105,33 @@ export function leaveBlockers(ctx: LeaveContext, household: string, now = Date.n
   }
 
   return blockers;
+}
+
+/**
+ * §14.3. What a household signs to leave: the profile, the household and the
+ * host it is leaving. The hub in front of the engine may hold the signature
+ * instead and call the library, which is what the member API does; an
+ * implementation reached over HTTP has nothing else to go on.
+ */
+export function canonicalLeave(household: string, relyingPartyId: string): Buffer {
+  return Buffer.from(JSON.stringify(["valence.leave.1", household, relyingPartyId]));
+}
+
+/**
+ * §14.3. Checks that the household itself asked. Throws `422 unsigned` when
+ * nothing was sent or the household has no key here, and `422 bad_signature`
+ * when what was sent does not cover this deletion at this host.
+ */
+export function checkLeaveSignature(ctx: LeaveContext, household: string, sent: { signature?: string; assertion?: Assertion }): void {
+  const pem = ctx.engine.publicKeyFor(household);
+  const one = sent.signature !== undefined, other = sent.assertion !== undefined;
+  if (one && other) throw unprocessable("bad_signature", "a deletion carries a signature or an assertion, not both");
+  if (!pem || (!one && !other)) throw unprocessable("unsigned", `deleting ${household} is signed by the household itself`);
+  let ok = false;
+  try {
+    ok = verifyPersonal(canonicalLeave(household, ctx.engine.relyingPartyId), one ? { signature: sent.signature! } : { assertion: sent.assertion! }, pem, ctx.engine.relyingPartyId);
+  } catch { ok = false; }
+  if (!ok) throw unprocessable("bad_signature", `the signature does not cover deleting ${household} at this host`);
 }
 
 /**

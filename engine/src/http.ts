@@ -8,7 +8,7 @@ import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole, unauthenticatedReport } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
-import { leaveBlockers, leaveHost } from "./hub/leave.js";
+import { leaveBlockers, leaveHost, checkLeaveSignature } from "./hub/leave.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
@@ -1426,7 +1426,19 @@ async function route(
     const household = segment(parts[1]);
     const leaveContext = { engine, recovery, permissions, mandates: engine.mandates, deliveries, approvals: hub.approvals, quotes: hub.quotes };
     if (method === "GET") return json({ household, blockers: leaveBlockers(leaveContext, household, Date.now()) });
-    if (method === "POST") return json(leaveHost(leaveContext, household, Date.now()));
+    if (method === "POST") {
+      // §14.3. Over HTTP the household signs; the member API holds its own
+      // signature and calls the library instead. Without this the hub in front
+      // of the engine would delete any household anyone named.
+      const raw = (await body(request)) as { signature?: unknown; assertion?: unknown };
+      const sent: { signature?: string; assertion?: Assertion } = {};
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        if (typeof raw.signature === "string") sent.signature = raw.signature;
+        if (raw.assertion !== undefined) sent.assertion = readAssertion(raw.assertion, "this deletion");
+      }
+      checkLeaveSignature(leaveContext, household, sent);
+      return json(leaveHost(leaveContext, household, Date.now()));
+    }
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "import") {
