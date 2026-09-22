@@ -234,6 +234,30 @@ export class RecoveryRegister {
   logFor(household: string): RecoveryRecord[] {
     return this.log.get(household) ?? [];
   }
+
+  /**
+   * §14.3, clause 53. Other households whose recoverer list names this key,
+   * each named by its own household identifier. Deleting a recoverer would
+   * leave that household's account unrecoverable by the one route it chose,
+   * so a household holding this role for another cannot be deleted while it
+   * still holds it.
+   */
+  recovererFor(key: string): string[] {
+    const out: string[] = [];
+    for (const [household, keys] of this.recoverers) {
+      if (household !== key && keys.includes(key)) out.push(household);
+    }
+    return out;
+  }
+
+  /** §14.3. This household's own recovery configuration and log, and nothing of anyone it recovers or is recovered by. */
+  deleteHousehold(household: string): { recoverers: number; channels: number; log: number } {
+    return {
+      recoverers: this.recoverers.delete(household) ? 1 : 0,
+      channels: this.channels.delete(household) ? 1 : 0,
+      log: this.log.delete(household) ? 1 : 0,
+    };
+  }
 }
 
 /**

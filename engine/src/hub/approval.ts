@@ -192,6 +192,11 @@ export class ApprovalDesk {
     return this.deliberations.get(offerId);
   }
 
+  /** §14.3. The deliberation for one offer, deleted with it. */
+  deleteOffer(offerId: string): boolean {
+    return this.deliberations.delete(offerId);
+  }
+
   /**
    * Renders the approval, or refuses.
    *

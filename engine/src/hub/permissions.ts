@@ -300,6 +300,27 @@ export class PermissionLedger {
     return [...(this.queries.get(household) ?? [])];
   }
 
+  /** §14.3. This household's own pending actions, still live. An expired one blocks nothing, because nothing more can be asked from it. */
+  pendingActionsFor(household: string, now = Date.now()): PendingAction[] {
+    return [...this.actions.values()].filter((a) => a.household === household && a.expires_at > now);
+  }
+
+  /** §14.3. This household's own grants, its duplicate-check log and every pending action of its, live or not. */
+  deleteHousehold(household: string): { permissions: number; queries: number; actions: number } {
+    const permissions = (this.rows.get(household) ?? []).length;
+    this.rows.delete(household);
+    const queries = (this.queries.get(household) ?? []).length;
+    this.queries.delete(household);
+    let actions = 0;
+    for (const [id, a] of [...this.actions]) {
+      if (a.household === household) {
+        this.actions.delete(id);
+        actions++;
+      }
+    }
+    return { permissions, queries, actions };
+  }
+
   allows(input: {
     household: string;
     grantee: string;

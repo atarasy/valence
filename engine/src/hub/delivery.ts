@@ -88,6 +88,11 @@ export class DeliveryRegister {
     return offers.map((o) => this.rows.get(o)).filter((d): d is Delivery => d !== undefined);
   }
 
+  /** §14.3. The delivery row for one offer, deleted with it. */
+  deleteOffer(offer: string): boolean {
+    return this.rows.delete(offer);
+  }
+
   /**
    * §14.2, question 51. What `importRows` refuses, decided before anything is
    * written. Two rows for one offer in the same body meet each other as a row

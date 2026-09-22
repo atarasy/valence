@@ -55,6 +55,15 @@ export interface Ledger {
   release(input: { requestId: string; reason: string }): Promise<Reservation>;
 
   get(requestId: string): Reservation | undefined;
+
+  /**
+   * §14.3. Erases the row entirely, for a household whose ledger this holds
+   * nothing more to hold for. Optional: an external ledger (Meter) may have
+   * no operation that erases a hold's history, and `leaveBlockers` already
+   * refuses to delete a household with anything still `held` before this is
+   * ever reached, so an adapter without it is asked nothing here.
+   */
+  forget?(requestId: string): void;
 }
 
 export class InMemoryLedger implements Ledger {
@@ -126,5 +135,10 @@ export class InMemoryLedger implements Ledger {
 
   get(requestId: string): Reservation | undefined {
     return this.rows.get(requestId);
+  }
+
+  /** §14.3. */
+  forget(requestId: string): void {
+    this.rows.delete(requestId);
   }
 }

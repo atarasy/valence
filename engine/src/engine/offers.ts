@@ -239,6 +239,15 @@ export class ValenceEngine {
   /** §7.1. Keys an identity root endorsed, as against keys merely registered here. */
   private readonly rootEndorsed: Map<string, true>;
   /**
+   * §14.3. The audit fact a household's deletion leaves behind: that its
+   * identifier was deleted, and when, and nothing else about it, kept for
+   * seven years (法人税法施行規則 59条) so that a question about one of its
+   * past purchases can still be answered with when it left. Keyed by the
+   * household identifier, one row per household, never rewritten once it has
+   * a `left_at`, so a later call for the same household does not move it.
+   */
+  private readonly departedHouseholds: Map<string, { household: string; left_at: number }>;
+  /**
    * §7.6 and clause 19. The value stored beside the time is an opaque token,
    * not the edge's identifier.
    *
@@ -485,6 +494,7 @@ export class ValenceEngine {
     this.confirmations = store.map("confirmations");
     this.corrections = store.map("corrections");
     this.rootEndorsed = store.map("root_endorsed");
+    this.departedHouseholds = store.map("departed_households");
     this.recoveries = new RecoveryLedger(store);
     this.mandates = new MandateRegister(store);
     this.householdLedger = new HouseholdLedger(store);
@@ -2864,6 +2874,110 @@ export class ValenceEngine {
     for (const [id, list] of Object.entries(rows)) {
       if (!this.corrections.has(id)) this.corrections.set(id, list.map((c) => ({ ...c })));
     }
+  }
+
+  // ---- §14.3, a household leaves a host -------------------------------------
+
+  /**
+   * Every offer, whatever its state, that still names this identifier: as
+   * its recipient or as the giver paying for someone else's. `hub/leave.ts`
+   * uses this to tell the household's own offers (deleted with it) from a
+   * gift another household gave or received through it (kept, and the reason
+   * an identity may still be needed after the household that held it left).
+   */
+  offersNaming(household: string): Offer[] {
+    return [...this.offers.values()].filter((o) => o.household === household || o.giver === household);
+  }
+
+  /** §14.3. Whether this offer's reserve is still held on this ledger. */
+  reservationHeld(offerId: string): boolean {
+    return this.ledger.get(offerId)?.status === "held";
+  }
+
+  /**
+   * §14.3. Deletes everything this engine holds about one offer: the offer
+   * itself, its reserve, and every row keyed by its id, plus the note on each
+   * of its candidates. Returns how many rows came out of each table, so a
+   * household leaving can report what left with it.
+   *
+   * This is the engine's half of what §14.3 deletes; the hub's half
+   * (deliveries, carriage quotes, deliberations) lives in registers this
+   * engine holds no reference to, which is why `hub/leave.ts` calls into
+   * three more of them besides this method.
+   */
+  deleteOfferRecord(offerId: string): Record<string, number> {
+    const counts: Record<string, number> = {};
+    const bump = (key: string, had: boolean) => {
+      if (had) counts[key] = (counts[key] ?? 0) + 1;
+    };
+    const offer = this.offers.get(offerId);
+    if (!offer) return counts;
+    for (const c of offer.candidates) {
+      this.candidateIndex.delete(c.id);
+      bump("notes", this.notes.delete(c.id));
+    }
+    const had = this.ledger.get(offerId) !== undefined;
+    this.ledger.forget?.(offerId);
+    bump("reservations", had);
+    bump("settlements", this.settlements.delete(offerId));
+    bump("settled_here", this.settledHere.delete(offerId));
+    bump("decided_protections", this.decidedProtections.delete(offerId));
+    bump("member_statement_confirmations", this.memberStatementConfirmations.delete(offerId));
+    bump("confirmations", this.confirmations.delete(offerId));
+    bump("corrections", this.corrections.delete(offerId));
+    bump("recoveries", this.recoveries.deleteFor(offerId));
+    bump("household_settled", this.householdLedger.deleteSettled(offerId));
+    bump("household_offers", this.householdLedger.deleteRecordedOffer(offerId));
+    bump("offers", this.offers.delete(offerId));
+    return counts;
+  }
+
+  /** §14.3. An edge deleted only when both ends name this household (a self-edge); every other edge is another household's record. */
+  deleteEdge(id: string): boolean {
+    return this.edges.delete(id);
+  }
+
+  /** §14.3. This household's own outgoing receipts and the payments it carried from elsewhere. */
+  deleteHouseholdOwnRows(household: string): { bare_receipts: number; carried_payments: number; mandate_reads: number } {
+    const receipts = this.receipts.delete(household) ? 1 : 0;
+    const payments = this.carriedPayments.delete(household) ? 1 : 0;
+    // §16.3, §16.5. Keyed `${kind}|${household}`; `ceiling_daily` is read
+    // under the payer, which for the household's own offers is itself.
+    let reads = 0;
+    if (this.lastProtectionRead.delete(`cooling_seconds|${household}`)) reads++;
+    if (this.lastProtectionRead.delete(`ceiling_daily|${household}`)) reads++;
+    return { bare_receipts: receipts, carried_payments: payments, mandate_reads: reads };
+  }
+
+  /**
+   * §14.3. The public key for this identifier, deleted only when nothing
+   * left standing still names it: **"retained exactly as long as a remaining
+   * household's edge or gift needs it to verify, and removed with the last
+   * such row."** Callers check `offersNaming` and `edgesTouching` first;
+   * this does the deletion once they agree nothing remains.
+   */
+  deleteIdentity(key: string): { identities: number; root_endorsed: number } {
+    return {
+      identities: this.identities.delete(key) ? 1 : 0,
+      root_endorsed: this.rootEndorsed.delete(key) ? 1 : 0,
+    };
+  }
+
+  /**
+   * §14.3. Records that this household left, once, at the moment it first
+   * does: a second call for a household already in this register changes
+   * nothing, so `left_at` names the first departure and not a later no-op
+   * one. Returns whether this call was the one that wrote it.
+   */
+  recordDeparture(household: string, at: number): boolean {
+    if (this.departedHouseholds.has(household)) return false;
+    this.departedHouseholds.set(household, { household, left_at: at });
+    return true;
+  }
+
+  /** §14.3. Every household this host has ever deleted, and when. */
+  departures(): { household: string; left_at: number }[] {
+    return [...this.departedHouseholds.values()];
   }
 
   mustGet(offerId: string, now?: number): Offer {

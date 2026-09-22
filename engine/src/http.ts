@@ -15,7 +15,7 @@ import { DeliveryRegister, type DeliveryStatus } from "./hub/delivery.js";
 import { answersFor, ownerOf, type Role } from "./common/roles.js";
 import type { Assertion, PersonalSignature } from "./shared/decisions.js";
 import { renderStatement } from "./hub/statement.js";
-import { owesSettlement } from "./shared/statement.js";
+import { moneyStillToMove } from "./shared/statement.js";
 import { collectedAs } from "./shared/collected.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
 import {
@@ -246,21 +246,6 @@ function reportAuthenticated(hub: Hub, request: Request): boolean {
  * and for whether a merchant is in the network, and holds no reference to
  * anything else of the hub's.
  */
-/**
- * §14.2 and §6.4, question 57. Whether an offer can still move money: it can
- * be decided, it is decided and not settled, or it is a physical box whose
- * collection has not happened or whose statement is still owed. Such an offer
- * stays where its reserve is.
- */
-function moneyStillToMove(offer: Offer, collection?: { collected_at: number | null; missing?: string[] }): boolean {
-  if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided") return true;
-  if (offer.state === "expired") {
-    if (owesSettlement(offer)) return true;
-    if (offer.binding === "physical" && (!collection || collection.collected_at === null)) return true;
-  }
-  return false;
-}
-
 export function createApp(
   engine: ValenceEngine,
   hub: Hub,

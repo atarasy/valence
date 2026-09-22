@@ -225,6 +225,11 @@ export class RecoveryLedger {
     }
   }
 
+  /** §14.3. The collection row for one offer being deleted with it. */
+  deleteFor(offer: string): boolean {
+    return this.rows.delete(offer);
+  }
+
   /** Past the deadline and the grace period, with nothing collected. */
   overdue(offer: string, now: number): boolean {
     const row = this.rows.get(offer);
