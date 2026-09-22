@@ -2819,6 +2819,19 @@ export class ValenceEngine {
       if (isDeepStrictEqual(same, c)) return { correction: { ...same }, created: false };
       throw conflict("correction_conflict", `correction ${c.id} was already recorded with different content`);
     }
+    this.checkCorrection(c, settlement, carriage, existing);
+    const stored = { ...c };
+    this.corrections.set(c.offer, [...existing, stored]);
+    return { correction: { ...stored }, created: true };
+  }
+
+  /**
+   * §6.6. Every rule a correction is held to beyond its identity, against the
+   * settlement it corrects and the corrections before it. Shared by the route
+   * and by a move, so a correction arriving from another host meets exactly
+   * what one appended here does.
+   */
+  checkCorrection(c: Correction, settlement: Settlement, carriage: number | null, prior: Correction[]): void {
     const pem = this.identities.get(c.merchant);
     if (!pem) throw unprocessable("unknown_merchant", `no key is registered for ${c.merchant}`);
     if (!verifyCorrection(c, pem)) throw unprocessable("bad_signature", `this correction is not signed by ${c.merchant}`);
@@ -2831,7 +2844,7 @@ export class ValenceEngine {
     if (c.corrected_at < settlement.settled_at) {
       throw unprocessable("correction_before_settlement", "a correction cannot predate the settlement it corrects");
     }
-    const already = existing.filter((e) => e.merchant === c.merchant).reduce((sum, e) => sum + e.amount, 0);
+    const already = prior.filter((e) => e.merchant === c.merchant).reduce((sum, e) => sum + e.amount, 0);
     const ceiling = charged + (carriage ?? 0);
     if (already + c.amount > ceiling) {
       throw unprocessable(
@@ -2839,9 +2852,23 @@ export class ValenceEngine {
         `corrections of ${already + c.amount} would exceed the ${ceiling} this merchant was paid on offer ${c.offer}`
       );
     }
-    const stored = { ...c };
-    this.corrections.set(c.offer, [...existing, stored]);
-    return { correction: { ...stored }, created: true };
+  }
+
+  /** §6.6, §14.2. The corrections of these offers, for a household's export. */
+  correctionsForOffers(offerIds: string[]): Record<string, Correction[]> {
+    const out: Record<string, Correction[]> = {};
+    for (const id of offerIds) {
+      const held = this.corrections.get(id);
+      if (held && held.length) out[id] = held.map((c) => ({ ...c }));
+    }
+    return out;
+  }
+
+  /** §14.2. The receiving end, one offer at a time, never replacing what a host holds. */
+  importCorrections(rows: Record<string, Correction[]>): void {
+    for (const [id, list] of Object.entries(rows)) {
+      if (!this.corrections.has(id)) this.corrections.set(id, list.map((c) => ({ ...c })));
+    }
   }
 
   mustGet(offerId: string, now?: number): Offer {

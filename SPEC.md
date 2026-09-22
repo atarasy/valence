@@ -69,7 +69,7 @@ drafted ──present──▶ presented ──decide───▶ decided ──
 | `settle` | the offer is priced and closed. See §6. |
 | `settle_default` | expiry path for offers that carry a default (§2.2). |
 
-An offer MUST NOT move from `settled` to any other state. Corrections are new offers.
+An offer MUST NOT move from `settled` to any other state. A change to what was offered is a new offer; a reduction of what a signed settlement charged is appended beside it (§6.6), and the offer stays settled.
 
 ### 2.2 Expiry defaults
 
@@ -355,13 +355,15 @@ The canonical form is `valence-correction/1`, then the id, the offer, the mercha
 
 **The rules are five.**
 
-1. **A correction only lowers.** One that would raise what the household pays is not a correction: it is a new statement the household signs, and nothing here records it. An implementation MUST refuse an amount below 1.
+1. **A correction only lowers.** One that would raise what the household pays is not a correction: it is a new offer, which the household decides and signs like any other (§2.1), and it settles and is charged as its own settlement. An implementation MUST refuse an amount below 1.
 2. **It is the merchant's.** An implementation MUST verify the signature against the key registered for the merchant named, and MUST refuse `422 not_merchant_of_record` from a merchant that was charged nothing on the settlement's lines (a disputed line was never charged, §6.5).
 3. **It needs nothing of the household**, because it only takes something off, and a household is never asked to sign a reduction of its own bill.
 4. **Together they lower no more than was paid.** The sum of one merchant's corrections MUST NOT exceed that merchant's charged lines plus the carriage the household's statement carried; beyond it, `422 correction_exceeds_charge`.
 5. **The same correction twice is one correction.** An identical retry answers `200` with the record already held; the same identifier with anything different answers `409 correction_conflict`, so a retry can never become a second reduction.
 
 **The household's receipt shows the original, each correction and the net**, at `GET /offers/{id}/corrections`: the settlement's `charged` and the carriage as they were signed, every correction in the order it arrived, and what remains. `GET /offers/{id}/settlement` is unchanged, because it is the signed record.
+
+**It moves with the household.** A household's export carries its corrections as `corrections`, by offer, in `valence-node/10` (§14.2). An import MUST hold each one to the rules above against the settlement the same body carries, MUST refuse `422 unscoped_correction` one naming an offer the body does not carry, and MUST NOT add to or remove from the corrections of an offer the host already holds.
 
 **What it does not do.** It moves no money: a refund is made on the merchant's own account by the merchant's own provider, and the correction is the record that it was. It does not change the day a daily ceiling is read against (§16.3), which keeps counting what was settled; a reduction that raised the room left in a day would let a merchant's refund authorise the next charge. **And it builds no route by which a household asks for a refund**, which stays the merchant's to give under its own return terms (§10a, requirement 7).
 

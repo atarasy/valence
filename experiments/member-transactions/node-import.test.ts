@@ -39,6 +39,18 @@ test('a disclosure in an archive may carry a signed contact of exactly a kind an
   for (const ok of [null, { kind: 'email', value: 'help@shop.example' }]) expect(() => validateNodeImport(withContact(ok), HOUSE)).not.toThrow();
   for (const bad of [{ kind: 'sms', value: 'x' }, { kind: 'email' }, { kind: 'url', value: 'https://x', extra: 1 }]) expect(() => validateNodeImport(withContact(bad), HOUSE)).toThrow('Invalid');
 });
+test('corrections in an archive are filed under a carried offer, with exactly the signed fields (question 70)', async () => {
+  const s = await fixture();
+  expect(s.node.corrections).toEqual({});
+  const offerId = s.node.offers[0].id;
+  const row = { id: 'r-1', offer: offerId, merchant: 'm', amount: 1, kind: 'refund', note: '', corrected_at: 0, signature: 'x' };
+  expect(() => validateNodeImport({ ...structuredClone(s.node), corrections: { [offerId]: [row] } }, HOUSE)).not.toThrow();
+  for (const bad of [{ [offerId]: [{ ...row, amount: 0 }] }, { [offerId]: [{ ...row, extra: 1 }] }, { [offerId]: [{ ...row, offer: 'other' }] }, { [offerId]: [] }, { [offerId]: [row, row] }, { unknown_offer: [{ ...row, offer: 'unknown_offer' }] }]) {
+    expect(() => validateNodeImport({ ...structuredClone(s.node), corrections: bad }, HOUSE)).toThrow('Invalid');
+  }
+  const legacy = structuredClone(s.node); delete legacy.corrections; legacy.format = 'valence-node/9';
+  expect(() => validateNodeImport(legacy, HOUSE)).not.toThrow();
+});
 test('HTTP preflight rejects malformed archive before touching an existing store', async () => {
   const s = await fixture(), before = rows(s.source), malformed = structuredClone(s.node); malformed.receipts = [{ ref: 'r', at: 0, product: 'leak' }];
   const response = await s.app.fetch(new Request(policy.origin + `/households/${encodeURIComponent(HOUSE)}/import`, { method: 'POST', body: JSON.stringify(malformed) }));
@@ -100,7 +112,7 @@ test('decision protections survive an archive and cannot name an unrelated offer
 
 test('quotation archives require the new register and bind every quote to a digital offer', async () => {
   const s = await fixture();
-  expect(s.node.format).toBe('valence-node/9');
+  expect(s.node.format).toBe('valence-node/10');
   expect(s.node.carriage_quotes).toEqual([]);
   const legacy = structuredClone(s.node); legacy.format = 'valence-node/8'; delete legacy.carriage_quotes;
   expect(validateNodeImport(legacy, HOUSE).carriage_quotes).toEqual([]);

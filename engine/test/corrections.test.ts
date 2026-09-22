@@ -165,4 +165,81 @@ describe("§6.6, question 70: a correction is appended and the settlement is nev
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
 });
+
+describe("§6.6, §14.2, question 70: corrections move with the household", () => {
+  async function exported() {
+    const a = await settled();
+    const c = signed({ id: "r-1", offer: a.offer.id, merchant: "maker-a", amount: 400, kind: "refund", note: "one pack damaged", corrected_at: a.settlement.settled_at });
+    a.engine.appendCorrection(c, null);
+    const node = (await (await a.handle(new Request(`https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/export`))).json()) as Record<string, any>;
+    return { a, c, node };
+  }
+  const importInto = (handle: (r: Request) => Promise<Response>, node: unknown) =>
+    handle(new Request(`https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/import`, { method: "POST", body: JSON.stringify(node) }));
+  function freshHost() {
+    const made = makeEngine();
+    const handle = createApp(made.engine, {
+      deliveries: made.deliveries, approvals: new ApprovalDesk(), recovery: new RecoveryRegister(),
+      permissions: new PermissionLedger(), registry: new Registry(),
+    });
+    return { engine: made.engine, handle };
+  }
+
+  test("the export carries them, and the next host holds them exactly", async () => {
+    // NOTE (mutation check, 2026-09-22): export_drops_corrections and
+    // import_drops_corrections.
+    const { a, c, node } = await exported();
+    expect(node.format).toBe("valence-node/10");
+    expect(node.corrections).toEqual({ [a.offer.id]: [c] });
+    const b = freshHost();
+    const r = await importInto(b.handle, node);
+    expect(r.status).toBe(201);
+    expect(b.engine.correctionsFor(a.offer.id)).toEqual([c]);
+  });
+
+  test("a correction altered on the way is refused and nothing is written", async () => {
+    // NOTE (mutation check, 2026-09-22): import_correction_unchecked.
+    const { a, node } = await exported();
+    node.corrections[a.offer.id][0].amount = node.settlements[0].charged;
+    const b = freshHost();
+    const r = await importInto(b.handle, node);
+    expect(r.status).toBe(422);
+    expect(((await r.json()) as { error: string }).error).toBe("bad_signature");
+    expect(b.engine.correctionsFor(a.offer.id)).toEqual([]);
+    expect(b.engine.settlement(a.offer.id)).toBeUndefined();
+  });
+
+  test("a correction for an offer the body does not carry is refused", async () => {
+    // NOTE (mutation check, 2026-09-22): import_corrections_unscoped.
+    const { a, node } = await exported();
+    const b = freshHost();
+    const r = await importInto(b.handle, { ...node, offers: [], settlements: [], collections: [], deliveries: [], notes: [], confirmations: {}, decided_protections: {}, carriage_quotes: [] });
+    expect(r.status).toBe(422);
+    expect(((await r.json()) as { error: string }).error).toBe("unscoped_correction");
+    expect(b.engine.correctionsFor(a.offer.id)).toEqual([]);
+  });
+
+  test("an offer already here takes no correction it does not hold, and the same body again changes nothing", async () => {
+    // NOTE (mutation check, 2026-09-22): carried_corrections_not_compared.
+    const { a, c, node } = await exported();
+    const b = freshHost();
+    expect((await importInto(b.handle, node)).status).toBe(201);
+    expect((await importInto(b.handle, node)).status).toBe(201);
+    expect(b.engine.correctionsFor(a.offer.id)).toEqual([c]);
+    const more = signed({ id: "r-2", offer: a.offer.id, merchant: "maker-a", amount: 1, kind: "refund", note: "", corrected_at: a.settlement.settled_at });
+    const r = await importInto(b.handle, { ...node, corrections: { [a.offer.id]: [c, more] } });
+    expect(r.status).toBe(409);
+    expect(b.engine.correctionsFor(a.offer.id)).toEqual([c]);
+  });
+
+  test("an archive from before question 70 still moves, and a current one without the field does not", async () => {
+    const { a, node } = await exported();
+    const { corrections: _, ...rest } = node;
+    expect((await importInto(freshHost().handle, rest)).status).toBe(400);
+    expect((await importInto(freshHost().handle, { ...rest, format: "valence-node/9" })).status).toBe(201);
+    expect(a.engine.correctionsFor(a.offer.id).length).toBe(1);
+  });
+});
+
