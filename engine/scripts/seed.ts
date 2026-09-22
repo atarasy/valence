@@ -478,3 +478,6 @@ console.log(JSON.stringify(productDisclosure));
 // that the suite uses the names the keys have rather than names of its own.
 console.log(HOUSEHOLD);
 console.log(MANDATE);
+// §6.6, §6.6a. The first merchant's private key, twelfth, base64 of the PEM,
+// so the probes can sign a correction and a record that its refund came back.
+console.log(Buffer.from(seedKeys["merchant:maker-a"]!, "utf8").toString("base64"));

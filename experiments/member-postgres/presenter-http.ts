@@ -149,6 +149,8 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
    // drift from it (a mutation removing one measured nothing either way).
    return forward('/offers/'+encodeURIComponent(id)+'/corrections',input);
   }
+  // §6.6a. A refund that came back, and its repayment, reach the engine as sent, as a correction does.
+  if(parts[2]==='returns')return forward('/offers/'+encodeURIComponent(id)+'/returns',input);
   if(parts[2]==='carriage-quote'){
    if(url.search||Object.keys(b).sort().join(',')!=='carriage')return reply(400,{error:'malformed',message:'quotation takes only carriage and no query'});
    if(binding!=='digital')return reply(422,{error:'not_digital',message:'a pre-order quotation is for a digital offer'});

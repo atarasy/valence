@@ -512,7 +512,7 @@ describe("§14.2, valence-node/11: an export carries the keys its edges verify w
     leaveHost(ctx, giver.household, now + 1000);
 
     const exported = exportNode(ctx.engine, ctx.recovery, ctx.permissions, ctx.engine.mandates, ctx.deliveries, recipient.household, now + 2000, ctx.quotes);
-    expect(exported.format).toBe("valence-node/11");
+    expect(exported.format).toBe("valence-node/12");
     expect(exported.keys[giver.household]).toBe(giver.pem);
 
     // A second host that has never seen the giver still verifies its edge.

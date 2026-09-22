@@ -1,4 +1,5 @@
 import type { Correction } from "../shared/correction.js";
+import type { CorrectionReturn } from "../shared/correction-return.js";
 import type { CarriageQuote, CarriageQuotes } from "./carriage-quote.js";
 import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -58,7 +59,12 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * question 70). A /9 export carries none, and its settlements arrive with
  * no correction, which is what they had before the field existed.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/11";
+/**
+ * Bumped to /12 on 2026-09-23, when `correction_returns` was named below
+ * (§6.6a). A /10 or /11 export carries none, and its corrections arrive with
+ * no record that a refund came back, which is what they had before.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/12";
 
 export type NodeExport = {
   format: string;
@@ -102,6 +108,13 @@ export type NodeExport = {
    * uncorrected bill. New in `valence-node/10`.
    */
   corrections: Record<string, Correction[]>;
+  /**
+   * §6.6a. What became of each refund correction: returned by the card
+   * issuer, and repaid another way. Without it a move would arrive showing a
+   * refund the household never received as though it had. New in
+   * `valence-node/12`.
+   */
+  correction_returns: Record<string, CorrectionReturn[]>;
   settlements: Settlement[];
   notes: Note[];
   /**
@@ -320,6 +333,7 @@ export function exportNode(
     confirmations: engine.confirmationsFor(offers.map((o) => o.id)),
     decided_protections: engine.decidedProtectionsFor(offers.map((o) => o.id)),
     corrections: engine.correctionsForOffers(offers.map((o) => o.id)),
+    correction_returns: engine.returnsForOffers(offers.map((o) => o.id)),
     ...permissions.exportFor(household),
     // §14.2, question 56. The signed rows and the claims together, because the
     // export is the record of what this household has and an offer that moved

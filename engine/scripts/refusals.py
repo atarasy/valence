@@ -75,6 +75,10 @@ for path in (HERE / "src").rglob("*.ts"):
         r'(?:unprocessable|conflict|badRequest|notFound)\((?:\s|//[^\n]*\n)*"([a-z_]+)"', text
     ):
         emitted.add(m.group(1))
+    # A refusal with its own status and name is built directly, as
+    # `unknown_correction` (§6.6a) is, and a helper-only scan never saw it.
+    for m in re.finditer(r'new ValenceError\(\s*\d{3},\s*"([a-z_]+)"', text):
+        emitted.add(m.group(1))
 
 # Quoted-string occurrences in suite files, including comments and inputs.
 # They are candidates for review, not evidence of response assertions.

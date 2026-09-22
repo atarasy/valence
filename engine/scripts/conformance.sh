@@ -129,6 +129,7 @@ DISCLOSURE_PRODUCT_JSON="$(printf '%s\n' "$SEED_OUT" | sed -n 9p)"
 # key has, so the suite is told them rather than carrying literals of its own.
 SEED_HOUSEHOLD="$(printf '%s\n' "$SEED_OUT" | sed -n 10p)"
 SEED_MANDATE="$(printf '%s\n' "$SEED_OUT" | sed -n 11p)"
+SEED_MERCHANT_KEY="$(printf '%s\n' "$SEED_OUT" | sed -n 12p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
@@ -146,6 +147,7 @@ VALENCE_CONFIG_VERSION="cfg-conformance" \
 VALENCE_HOUSEHOLD="$SEED_HOUSEHOLD" \
 VALENCE_MANDATE="$SEED_MANDATE" \
 VALENCE_MANDATE_KEY="$MANDATE_KEY" \
+VALENCE_MERCHANT_KEY="$SEED_MERCHANT_KEY" \
 VALENCE_PRODUCTS="tea-a,tea-b,coffee-a,miso-a,nori-a" \
 VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
 VALENCE_LINEAGE_EDGE="$EDGE" \

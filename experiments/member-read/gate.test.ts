@@ -6,6 +6,7 @@ import { validProjection } from './projection.ts';
 import fixtures from './reference-fixtures.json';
 import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MERCHANT_PAIR, decideSigned, houseFor, makeEngine } from '../../engine/test/helpers.ts';
 import { canonicalCorrection } from '../../engine/src/shared/correction.ts';
+import { canonicalCorrectionReturn } from '../../engine/src/shared/correction-return.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { RecoveryRegister } from '../../engine/src/hub/node.ts';
@@ -164,6 +165,12 @@ describe('member read boundary',()=>{
   const own=await read('own');expect(own.status).toBe(200);
   expect(await own.json()).toEqual({offer:offer.id,original:{charged:settlement.charged,carriage:null},corrections:[correction],net:settlement.charged-500});
   expect((await read('other')).status).toBe(404);
+  // §6.6a. Once the refund came back the receipt carries returns and owed, and the pinned schema admits them.
+  const returnFields={correction:'r-1',offer:offer.id,merchant:'maker-a',state:'returned' as const,note:'the issuer sent it back',at:fields.corrected_at+1};
+  const returned={...returnFields,signature:sign(null,canonicalCorrectionReturn(returnFields),MERCHANT_PAIR.privateKey).toString('base64')};
+  engine.appendReturn(returned);
+  const owed=await read('own');expect(owed.status).toBe(200);
+  expect(await owed.json()).toEqual({offer:offer.id,original:{charged:settlement.charged,carriage:null},corrections:[correction],net:settlement.charged-500,returns:[returned],owed:500});
   // A response with a field the pinned schema does not name fails closed.
   const corrupting=async(r:Request)=>{const res=await handler(r);const body=await res.json() as Record<string,unknown>;return new Response(JSON.stringify({...body,extra:'unexpected'}),{status:res.status,headers:{'content-type':'application/json'}});};
   const dirty=memberReadBoundary({environment:'fixture',origin:'https://unit.example',resolveSession,ownerOf,next:corrupting});
