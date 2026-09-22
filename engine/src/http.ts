@@ -1707,7 +1707,7 @@ async function route(
       // the carriage its delivery row signed.
       for (const [id, list] of Object.entries(arrivingCorrections) as [string, Correction[]][]) {
         const settlement = (body_.settlements ?? []).find((r) => r.offer === id);
-        if (!settlement) throw unprocessable("unscoped_correction", `a correction names ${id}, whose settlement this import does not carry`);
+        if (!settlement) throw unprocessable("correction_without_settlement", `a correction names ${id}, whose settlement this import does not carry`);
         const carriage = (body_.deliveries ?? []).find((d) => d.offer === id)?.carriage ?? null;
         list.forEach((c, i) => engine.checkCorrection(c, settlement, carriage, list.slice(0, i)));
       }
