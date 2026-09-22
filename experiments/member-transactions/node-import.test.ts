@@ -112,7 +112,7 @@ test('decision protections survive an archive and cannot name an unrelated offer
 
 test('quotation archives require the new register and bind every quote to a digital offer', async () => {
   const s = await fixture();
-  expect(s.node.format).toBe('valence-node/11');
+  expect(s.node.format).toBe('valence-node/12');
   expect(s.node.carriage_quotes).toEqual([]);
   const legacy = structuredClone(s.node); legacy.format = 'valence-node/8'; delete legacy.carriage_quotes;
   expect(validateNodeImport(legacy, HOUSE).carriage_quotes).toEqual([]);
@@ -121,5 +121,35 @@ test('quotation archives require the new register and bind every quote to a digi
   for (const quote of [{offer:s.node.offers[0].id,carriage:0,quoted_at:0},{offer:'foreign',carriage:1,quoted_at:1}]) {
     const changed = structuredClone(s.node); changed.carriage_quotes = [quote];
     expect(() => validateNodeImport(changed, HOUSE)).toThrow();
+  }
+});
+
+test('§6.6a: a current archive names its correction returns, an older one reads as none, and each names a carried correction', async () => {
+  const s = await fixture();
+  expect(s.node.correction_returns).toEqual({});
+  const absent = structuredClone(s.node); delete absent.correction_returns;
+  expect(() => validateNodeImport(absent, HOUSE)).toThrow('Invalid node archive');
+  for (const format of ['valence-node/11', 'valence-node/10']) {
+    const older = structuredClone(s.node); older.format = format; delete older.correction_returns;
+    expect(validateNodeImport(older, HOUSE).correction_returns).toEqual({});
+  }
+  const offer = s.node.offers[0].id;
+  const correction = { id: 'r-1', offer, merchant: 'maker-a', amount: 1, kind: 'refund', note: '', corrected_at: 1, signature: 'sig' };
+  const returned = { correction: 'r-1', offer, merchant: 'maker-a', state: 'returned', note: '', at: 2, signature: 'sig' };
+  const good = structuredClone(s.node); good.corrections = { [offer]: [correction] }; good.correction_returns = { [offer]: [returned] };
+  expect(validateNodeImport(good, HOUSE).correction_returns).toEqual({ [offer]: [returned] });
+  for (const change of [
+    (n: any) => { n.correction_returns[offer][0].correction = 'r-404'; },
+    (n: any) => { n.correction_returns.foreign = n.correction_returns[offer]; },
+    (n: any) => { n.correction_returns[offer][0].state = 'reversed'; },
+    (n: any) => { n.correction_returns[offer][0].note = 'x'.repeat(501); },
+    (n: any) => { n.correction_returns[offer][0].at = -1; },
+    (n: any) => { n.correction_returns[offer][0].extra = true; },
+    (n: any) => { n.correction_returns[offer].push({ ...n.correction_returns[offer][0] }); },
+    (n: any) => { n.correction_returns[offer] = []; },
+    (n: any) => { n.correction_returns[offer][0].offer = 'foreign'; },
+  ]) {
+    const bad = structuredClone(good); change(bad);
+    expect(() => validateNodeImport(bad, HOUSE)).toThrow('Invalid node archive');
   }
 });

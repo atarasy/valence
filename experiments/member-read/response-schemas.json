@@ -1532,6 +1532,57 @@
         "type": "integer",
         "minimum": 0,
         "maximum": 9007199254740991
+      },
+      "returns": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "correction": {
+              "type": "string"
+            },
+            "offer": {
+              "type": "string"
+            },
+            "merchant": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "returned",
+                "repaid"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "correction",
+            "offer",
+            "merchant",
+            "state",
+            "note",
+            "at",
+            "signature"
+          ]
+        }
+      },
+      "owed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
       }
     },
     "required": [

@@ -11,6 +11,7 @@ import {houseOf,mandateOf} from '../member-transactions/atomic-fixture.ts';
 import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
 import {canonicalDecisions} from '../../engine/src/shared/decisions.ts';
 import {canonicalCorrection} from '../../engine/src/shared/correction.ts';
+import {canonicalCorrectionReturn} from '../../engine/src/shared/correction-return.ts';
 import {PermissionLedger} from '../../engine/src/hub/permissions.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
@@ -246,6 +247,18 @@ test('question 70: a presenter forwards a signed correction and reads its receip
  const receipt=await s.send(s.tokenA,path);expect(receipt.status).toBe(200);
  expect(await receipt.json()).toEqual({offer:offer.id,original:{charged:settlement.charged,carriage:null},corrections:[{...fields,signature:good.signature}],net:settlement.charged-500});
  expect((await s.send(s.tokenB,path)).status).toBe(404);
+ // §6.6a. The refund came back: the shop records it through the same credential, and the receipt then owes it.
+ const returnsPath='/presenter/offers/'+offer.id+'/returns';
+ const returnFields={correction:'r-1',offer:offer.id,merchant:s.a.merchant.id,state:'returned' as const,note:'the issuer sent it back',at:fields.corrected_at+1};
+ const {offer:_o,...returnBody}={...returnFields,signature:sign(null,canonicalCorrectionReturn(returnFields),s.a.merchant.pair.privateKey).toString('base64')};
+ expect((await s.send(s.tokenB,returnsPath,returnBody)).status).toBe(404);
+ const recorded=await s.send(s.tokenA,returnsPath,returnBody);expect(recorded.status).toBe(201);
+ expect((await s.send(s.tokenA,returnsPath,returnBody)).status).toBe(200);
+ const unknown=await s.send(s.tokenA,returnsPath,{...returnBody,correction:'r-404'});
+ expect(unknown.status).toBe(404);expect((await unknown.json()).error).toBe('unknown_correction');
+ const owed=await (await s.send(s.tokenA,path)).json();
+ expect(owed.returns).toEqual([{...returnFields,signature:returnBody.signature}]);
+ expect(owed.owed).toBe(500);expect(owed.net).toBe(settlement.charged-500);
 });
 test('§14.3: a presenter cannot write an offer to a household this host holds no member for, and the refusal says nothing about why',async()=>{
  const s=await setup();
