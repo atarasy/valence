@@ -18,7 +18,7 @@ import { renderStatement } from "../src/hub/statement.js";
 import { canonicalDisclosure, verifyDisclosure, type DisclosureContact } from "../src/shared/disclosure.js";
 
 type OfferView = {
-  disclosures: { product: string | null; contact: DisclosureContact | null }[];
+  disclosures: { product: string | null; contact?: DisclosureContact }[];
 };
 
 /**
@@ -194,7 +194,7 @@ describe("§10a, question 72: a registered contact reaches every screen", () => 
     expect(block.contact).toEqual(CONTACT);
   });
 
-  test("a disclosure with no contact renders null, not undefined, on every screen", async () => {
+  test("a disclosure with no contact carries no contact key on any screen, so an older client reads it unchanged", async () => {
     const made = makeEngine();
     const { engine } = made;
     const offer = await engine.createOffer({
@@ -212,8 +212,11 @@ describe("§10a, question 72: a registered contact reaches every screen", () => 
     const handle = createApp(engine, hub());
     const r = await handle(new Request(`https://unit.example/offers/${offer.id}`));
     const body = (await r.json()) as OfferView;
+    // NOTE (mutation check, 2026-09-22): contact_rendered_as_null. The iOS and
+    // Android clients compare a block's keys exactly, so `contact: null`
+    // failed every offer read on a client from before question 72.
     const block = body.disclosures.find((d) => d.product === null)!;
-    expect(block.contact).toBeNull();
+    expect(Object.keys(block).sort()).toEqual(["items", "merchant", "product", "signature", "version"]);
 
     const desk = new ApprovalDesk();
     desk.record({
@@ -224,9 +227,9 @@ describe("§10a, question 72: a registered contact reaches every screen", () => 
     });
     const rendered = desk.render(engine, offer, undefined);
     if ("missing" in rendered) throw new Error(rendered.missing);
-    expect(rendered.disclosures.find((d) => d.product === null)!.contact).toBeNull();
+    expect("contact" in rendered.disclosures.find((d) => d.product === null)!).toBe(false);
 
     const statement = renderStatement(offer, undefined, engine.recoveries.for(offer.id));
-    expect(statement.disclosures.find((d) => d.product === null)!.contact).toBeNull();
+    expect("contact" in statement.disclosures.find((d) => d.product === null)!).toBe(false);
   });
 });

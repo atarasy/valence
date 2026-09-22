@@ -188,7 +188,9 @@ function offerView(o: Offer, recovery: Recovery | undefined) {
       items: d.items.map((i) => ({ label: i.label, value: i.value })),
       // Question 72. Rendered exactly as the merchant signed it, or null when
       // the merchant gave none.
-      contact: d.contact ?? null,
+      // Absent, not null, where the merchant gave none: a client from before
+      // question 72 checks a block's keys exactly and would refuse a new one.
+      ...(d.contact ? { contact: d.contact } : {}),
       signature: d.signature,
     })),
   };
