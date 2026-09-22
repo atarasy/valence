@@ -36,6 +36,7 @@ import type {
   Recovery,
 } from "./common/types.js";
 import type { DisclosureContact } from "./shared/disclosure.js";
+import { CORRECTION_KINDS } from "./shared/correction.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -915,6 +916,43 @@ async function route(
           }),
           201
         );
+      }
+      if (action === "corrections" && (method === "POST" || method === "GET")) {
+        // §6.6, question 70. A signed settlement is never rewritten; what
+        // lowers it afterwards is appended beside it, signed by the merchant.
+        const settlement = engine.settlement(id);
+        if (!settlement) throw notFound(`offer ${id} has no settlement`);
+        const carriage = (await engine.deliveryFor(id))?.carriage ?? null;
+        if (method === "POST") {
+          const raw = strict(await body(request), ["id", "merchant", "amount", "kind", "note", "corrected_at", "signature"], "correction");
+          const note = raw.note === undefined ? "" : raw.note;
+          if (typeof note !== "string" || note.length > 500) {
+            throw badRequest("malformed", "correction: note must be a string of at most 500 characters");
+          }
+          const { correction, created } = engine.appendCorrection(
+            {
+              id: requireString(raw, "id", "correction"),
+              offer: id,
+              merchant: requireString(raw, "merchant", "correction"),
+              amount: requireInteger(raw, "amount", "correction", 1),
+              kind: requireEnum(raw, "kind", "correction", CORRECTION_KINDS),
+              note,
+              corrected_at: requireInteger(raw, "corrected_at", "correction", 0),
+              signature: requireString(raw, "signature", "correction"),
+            },
+            carriage
+          );
+          return json(correction, created ? 201 : 200);
+        }
+        // The household's receipt: the original, each correction and the net.
+        const corrections = engine.correctionsFor(id);
+        const corrected = corrections.reduce((sum, c) => sum + c.amount, 0);
+        return json({
+          offer: id,
+          original: { charged: settlement.charged, carriage },
+          corrections,
+          net: settlement.charged + (carriage ?? 0) - corrected,
+        });
       }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can
