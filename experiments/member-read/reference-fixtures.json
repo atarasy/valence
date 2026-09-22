@@ -330,6 +330,26 @@
     "signed_as": "agent",
     "receipt": "8dd054c219bc26d87b02e661dd63bcdffcca3fbbb7d9c6f4df9f1a1cdef3bbdf"
   },
+  "corrections": {
+    "offer": "dc6c0582-d5bf-41c4-9c72-5ec94c8f8162",
+    "original": {
+      "charged": 1200,
+      "carriage": 550
+    },
+    "corrections": [
+      {
+        "id": "r-1",
+        "offer": "dc6c0582-d5bf-41c4-9c72-5ec94c8f8162",
+        "merchant": "maker-a",
+        "amount": 500,
+        "kind": "refund",
+        "note": "damaged in transit",
+        "corrected_at": 1789257526916,
+        "signature": "9EUcb63XBrNBXv82EQAzIKu8NWlfgZsOxQUhS9Z/cZOrR72sS4zmRC2UV/hbokb8HCUkOmp/77x90Q8yRswRAg=="
+      }
+    ],
+    "net": 700
+  },
   "mandate-created": {
     "id": "key:GapFPBkM27MpzcPFpc5WyN5gG_f6Ojm5VPmSOLEADjo.1",
     "household": "key:GapFPBkM27MpzcPFpc5WyN5gG_f6Ojm5VPmSOLEADjo",

@@ -1,9 +1,11 @@
 import { FIXTURE_MANDATE } from '../member-transactions/atomic-fixture.ts';
 import { describe, expect, test } from 'bun:test';
+import { sign } from 'node:crypto';
 import { memberReadBoundary, type Session, type Ownership } from './gate.ts';
 import { validProjection } from './projection.ts';
 import fixtures from './reference-fixtures.json';
-import { CONFIG_VERSION, houseFor, makeEngine } from '../../engine/test/helpers.ts';
+import { CONFIG_VERSION, HOUR, HOUSEHOLD, MANDATE, MERCHANT_PAIR, decideSigned, houseFor, makeEngine } from '../../engine/test/helpers.ts';
+import { canonicalCorrection } from '../../engine/src/shared/correction.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { ApprovalDesk } from '../../engine/src/hub/approval.ts';
 import { RecoveryRegister } from '../../engine/src/hub/node.ts';
@@ -76,6 +78,7 @@ describe('member read boundary',()=>{
    ['digital-approval',offerPath+'/approval','approval',{household:offer.household,presenter:offer.presenter}],
    ['physical-statement','/offers/'+fixtures['physical-statement'].offer+'/statement','statement',{household:fixtures['physical-statement'].household,presenter:offer.presenter}],
    ['physical-settled','/offers/'+fixtures['physical-settled'].offer+'/settlement','settlement',{household:base.household,presenter:offer.presenter}],
+   ['corrections','/offers/'+fixtures['corrections'].offer+'/corrections','corrections',{household:base.household,presenter:offer.presenter}],
    ['mandate-created','/_node/mandates/'+fixtures['mandate-created'].id,'mandate',{household:fixtures['mandate-created'].household}],
   ] as const){const {state,read}=setup();state.owner=owner;state.session!.household=owner.household;state.body=fixtures[id];expect(validProjection(kind,state.body)).toBe(true);expect((await read(path)).status).toBe(200);}
  });
@@ -134,6 +137,38 @@ describe('member read boundary',()=>{
   const first=await get('/offers/'+own.id);expect(first.status).toBe(200);expect((await first.json()).household).toBe(own.household);
   expect((await get('/offers/'+other.id)).status).toBe(404);expect(calls).toBe(1);
   const list=await get('/offers?household='+encodeURIComponent(own.household)+'&presenter=merchant-1');expect(list.status).toBe(200);expect((await list.json()).offers.map((o:any)=>o.id)).toEqual([own.id]);
+ });
+ test('question 70: a household\'s own corrections receipt reads, an unsettled or unowned offer refuses, and a schema mismatch fails closed',async()=>{
+  const {engine,deliveries}=makeEngine();
+  const offer=engine.createOffer({binding:'digital',household:HOUSEHOLD,purpose:'replenish',config_version:CONFIG_VERSION,expires_at:Date.now()+HOUR,mandate:MANDATE,price_band:null,giver:null,candidates:[{product:'tea-a',quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]});
+  await engine.present(offer.id);
+  const handler=createApp(engine,{deliveries,approvals:new ApprovalDesk(),recovery:new RecoveryRegister(),permissions:new PermissionLedger(),registry:new Registry()});
+  const ownerOf=async(r:{kind:'offer'|'mandate';id:string})=>{try{const o=engine.mustGet(r.id);return {household:o.household,presenter:o.presenter};}catch{return undefined;}};
+  const session:Session={id:'session-corrections',environment:'fixture',household:HOUSEHOLD,presenters:['merchant-1'],expiresAt:Date.now()+60000,revoked:false};
+  const resolveSession=async(t:string)=>t==='own'?session:t==='other'?{...session,household:'someone-else'}:undefined;
+  const gate=memberReadBoundary({environment:'fixture',origin:'https://unit.example',resolveSession,ownerOf,next:handler});
+  const path='/offers/'+offer.id+'/corrections';
+  const read=(token:string,p=path)=>gate(new Request('https://unit.example'+p,{headers:{authorization:'Bearer '+token}}));
+  // Not yet decided, so the offer has no settlement: the upstream 404 passes through.
+  expect((await read('own')).status).toBe(404);
+  // A foreign household is refused before the engine is ever asked.
+  expect((await read('other')).status).toBe(404);
+  // An offer id nobody holds answers the same way.
+  expect((await read('own','/offers/does-not-exist/corrections')).status).toBe(404);
+  await decideSigned(engine,offer.id,offer.candidates.map(c=>({candidate:c.id,valence:'kept' as const,kept_as:'self' as const})));
+  await engine.settle(offer.id);
+  const settlement=engine.settlement(offer.id)!;
+  const fields={id:'r-1',offer:offer.id,merchant:'maker-a',amount:500,kind:'refund' as const,note:'damaged in transit',corrected_at:settlement.settled_at+1};
+  const correction={...fields,signature:sign(null,canonicalCorrection(fields),MERCHANT_PAIR.privateKey).toString('base64')};
+  engine.appendCorrection(correction,null);
+  const own=await read('own');expect(own.status).toBe(200);
+  expect(await own.json()).toEqual({offer:offer.id,original:{charged:settlement.charged,carriage:null},corrections:[correction],net:settlement.charged-500});
+  expect((await read('other')).status).toBe(404);
+  // A response with a field the pinned schema does not name fails closed.
+  const corrupting=async(r:Request)=>{const res=await handler(r);const body=await res.json() as Record<string,unknown>;return new Response(JSON.stringify({...body,extra:'unexpected'}),{status:res.status,headers:{'content-type':'application/json'}});};
+  const dirty=memberReadBoundary({environment:'fixture',origin:'https://unit.example',resolveSession,ownerOf,next:corrupting});
+  const mismatched=await dirty(new Request('https://unit.example'+path,{headers:{authorization:'Bearer own'}}));
+  expect(mismatched.status).toBe(503);
  });
 });
 

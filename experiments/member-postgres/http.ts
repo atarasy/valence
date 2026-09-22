@@ -74,7 +74,7 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
    // the read boundary decodes and checks the form. A filter of `[A-Za-z0-9_-]+`
    // made this route answer 404 for every real identifier, so a household could
    // not read its own mandate and `RemoteMandates` read every one as absent.
-   if(!member&&!presenter&&!authPaths.includes(url.pathname)&&url.pathname!=='/offers'&&!/^\/offers\/[A-Za-z0-9_-]+(?:\/(approval|statement|settlement))?$/.test(url.pathname)&&!/^\/_node\/mandates\/[A-Za-z0-9_.:%-]+$/.test(url.pathname))return json(404,'request_unavailable');
+   if(!member&&!presenter&&!authPaths.includes(url.pathname)&&url.pathname!=='/offers'&&!/^\/offers\/[A-Za-z0-9_-]+(?:\/(approval|statement|settlement|corrections))?$/.test(url.pathname)&&!/^\/_node\/mandates\/[A-Za-z0-9_.:%-]+$/.test(url.pathname))return json(404,'request_unavailable');
    if(typeof context?.peer!=='string'||!context.peer||context.peer.length>256||pending>=c.maximumPending)return json(503,'unavailable');
    if(!['GET','POST'].includes(request.method))return json(405,'method_not_allowed');
    pending++;
