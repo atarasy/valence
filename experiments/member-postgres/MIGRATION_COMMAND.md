@@ -64,6 +64,7 @@ This package has a mutation corpus (`scripts/mutate.sh`, `scripts/sweep.sh`) but
 |---|---|---|
 | `rebind_accepts_any_source_profile` | The allow-list lookup in `runRebindCommand`, so any bound profile (including one this codebase never issued) is treated as eligible for the requested transition | CAUGHT (1 of 279) |
 | `rebind_ignores_other_key_changes` | The check that every configuration key besides the transition's addition is identical between the bound row and the plan | CAUGHT (1 of 279) |
+| `rebind_ignores_dropped_keys` | The union of the bound and planned keys in that comparison, so a key the plan drops is not a difference | CAUGHT (1 of 280) |
 | `failure_reason_leaks_unknown_messages` | `failureReason()`'s fallback to the error's bare name, returning the raw message instead, which is exactly what the safe-message allow-list exists to stop | CAUGHT (3 of 279) |
 
 Each caught mutation restored the source to its committed state on exit, verified by `git status` afterwards. The catching tests are, respectively, `rebind-runtime.test.ts`'s "refuses an outside-the-allow-list source profile even when its stored config already matches the target" (written specifically to isolate the allow-list check from the other-key check, since every prior test happened to trip both at once), "refuses when a key besides androidAppOrigins differs from the bound config", and `deployment/entry.test.ts`'s "an unlisted message is never printed" together with the pg-style redaction test.
