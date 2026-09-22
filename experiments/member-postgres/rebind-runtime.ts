@@ -33,10 +33,10 @@ export function readRebindPlan(path: string): RebindPlan {
  } finally { closeSync(fd); }
 }
 
-/** Keys of `next` whose value differs from `old`, skipping any key named in `skip`. Comparison is per key, never of the whole object, so unrelated key ordering in a value read back from storage cannot manufacture a difference. */
+/** Keys whose value differs between `old` and `next`, including a key only one of them holds, skipping any key named in `skip`. Comparison is per key, never of the whole object, so unrelated key ordering in a value read back from storage cannot manufacture a difference. */
 function differingKeys(old: Record<string, unknown>, next: Record<string, unknown>, skip: ReadonlySet<string>): string[] {
  const changed: string[] = [];
- for (const key of Object.keys(next)) {
+ for (const key of new Set([...Object.keys(old), ...Object.keys(next)])) {
   if (skip.has(key)) continue;
   if (JSON.stringify(old[key]) !== JSON.stringify(next[key])) changed.push(key);
  }

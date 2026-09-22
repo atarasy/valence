@@ -60,6 +60,16 @@ test('refuses when a key besides androidAppOrigins differs from the bound config
  expect((await boundRow(unit))!.profile).toBe('atarasy.member-runtime.1');
 });
 
+test('refuses when the bound config holds a key the new config drops', async () => {
+ // A rebind that silently forgets a bound setting is not the one transition
+ // this command exists for. Comparing only the new config's keys missed it.
+ const { identity, unit, oldConfig } = await boundToV1({ legacySetting: true } as Partial<typeof oldShapeConfig>);
+ const { legacySetting: _dropped, ...rest } = oldConfig as typeof oldConfig & { legacySetting?: boolean };
+ const plan = { identity, config: { ...rest, androidAppOrigins: [] } as MemberRuntimeConfig };
+ await expect(runRebindCommand(plan, env, false)).rejects.toThrow('Rebind command refused');
+ expect((await boundRow(unit))!.profile).toBe('atarasy.member-runtime.1');
+});
+
 test('refuses when androidAppOrigins is not the empty list the transition allows', async () => {
  const { identity, oldConfig } = await boundToV1();
  const origin = 'android:apk-key-hash:' + randomBytes(32).toString('base64url');
