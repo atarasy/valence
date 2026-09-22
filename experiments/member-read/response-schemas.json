@@ -299,6 +299,33 @@
                       ]
                     }
                   },
+                  "contact": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "email",
+                              "tel",
+                              "url"
+                            ]
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "value"
+                        ]
+                      }
+                    ]
+                  },
                   "signature": {
                     "type": "string"
                   }
@@ -639,6 +666,33 @@
                 ]
               }
             },
+            "contact": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "email",
+                        "tel",
+                        "url"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                }
+              ]
+            },
             "signature": {
               "type": "string"
             }
@@ -753,6 +807,33 @@
                   "value"
                 ]
               }
+            },
+            "contact": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "email",
+                        "tel",
+                        "url"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                }
+              ]
             },
             "signature": {
               "type": "string"
@@ -1155,6 +1236,33 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            "contact": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "email",
+                        "tel",
+                        "url"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ]
+                }
+              ]
             },
             "signature": {
               "type": "string",
