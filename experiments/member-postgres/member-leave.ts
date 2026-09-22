@@ -13,7 +13,7 @@ type HostMovePreparation = { id: string; household: string };
 type HostImport = { digest: string; household: string };
 type HostImportPreparation = { id: string; household: string; expiresAt: number };
 type RecoveryKey = { household: string };
-type RecoveryConfiguration = { owner: string };
+type RecoveryConfiguration = { owner: string; recoverer: string };
 type RecoveryRequest = { id: string; owner: string; recoverer: string; state: 'pending' | 'approved' | 'completed' | 'cancelled' };
 type RecoveryLog = { id: string; owner: string };
 type RecoveryPreparation = { id: string; household: string; expiresAt: number };
@@ -102,6 +102,9 @@ export function openMemberLeave(r: ReturnTypeMemberRuntime, ctx: LeaveContext, p
     mandateChanges.each(c => { if (c.mandate.household === household && c.state === 'pending') blockers.push({ kind: 'mandate_change_pending', id: c.id }); });
     recoveryRequests.each(row => { if ((row.owner === household || row.recoverer === household) && ['pending', 'approved'].includes(row.state)) blockers.push({ kind: 'recovery_request_pending', id: row.id }); });
     recoveryPreparations.each(p => { if (p.household === household && p.expiresAt > at) blockers.push({ kind: 'recovery_request_pending', id: p.id }); });
+    // §14.3: a role held for another household blocks, and this service's own
+    // two-of-three recovery names its recoverer here, apart from the engine's.
+    recoveryConfigurations.each(c => { if (c.recoverer === household && c.owner !== household) blockers.push({ kind: 'recoverer', id: c.owner }); });
     permissionRequests.each(row => { if (row.terms.household === household && row.state === 'pending' && row.terms.reviewExpiresAt > at) blockers.push({ kind: 'permission_request_pending', id: row.terms.requestID }); });
     return blockers;
   }

@@ -1007,5 +1007,10 @@ test('§14.3: an unexpired uncommitted operation, a pending mandate change and a
  const withRecoveryRequest=await (await s.send('/member/account/leave',undefined,d.token)).json();
  expect(withRecoveryRequest.blockers).toEqual([{kind:'recovery_request_pending',id:'request-1'}]);
  await s.unit.run(store=>{store.map<any>('member_recovery_requests').delete('request-1');});
+ // Named as another household's recoverer in this service's own recovery.
+ await s.unit.run(store=>{store.map<any>('member_recovery_configurations').set('someone-else',{owner:'someone-else',recoverer:d.household,recovererKeyDigest:'r',keyDigest:'k',hostShare:'h',recovererPacket:'p',noticeChannel:'anc1_x',epoch:1,createdAt:now(),updatedAt:now()});});
+ const asRecoverer=await (await s.send('/member/account/leave',undefined,d.token)).json();
+ expect(asRecoverer.blockers).toEqual([{kind:'recoverer',id:'someone-else'}]);
+ await s.unit.run(store=>{store.map<any>('member_recovery_configurations').delete('someone-else');});
  expect((await (await s.send('/member/account/leave',undefined,d.token)).json()).blockers).toEqual([]);
 });
