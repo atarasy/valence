@@ -616,7 +616,7 @@ describe("§12, §14, question 61: a giver's payments move with the giver", () =
     const offer = await giftFrom(engine);
 
     const inFlight = await exportOf(a, giver);
-    expect(inFlight.format).toBe("valence-node/10");
+    expect(inFlight.format).toBe("valence-node/11");
     expect(inFlight.gifts_in_flight).toEqual([offer.id]);
     expect(inFlight.payments).toEqual([]);
     const { engine: engineB } = makeEngine();
@@ -723,7 +723,7 @@ describe("§14.2, §16.5: what a decided set was decided under moves with it", (
     expect(held).toBeDefined();
 
     const leaving = await exportOf(a, HOUSEHOLD);
-    expect(leaving.format).toBe("valence-node/10");
+    expect(leaving.format).toBe("valence-node/11");
     expect((leaving.decided_protections as Record<string, unknown>)[offer.id]).toEqual(held as never);
 
     const { engine: engineB } = makeEngine();

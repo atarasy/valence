@@ -149,7 +149,10 @@ export function leaveHost(ctx: LeaveContext, household: string, now = Date.now()
   if (blockers.length > 0) {
     throw conflict(
       "leave_blocked",
-      `${household} cannot leave while ${blockers.map((b) => `${b.kind} ${b.id}`).join(", ")} ${blockers.length === 1 ? "is" : "are"} unresolved`
+      `${household} cannot leave while ${blockers.map((b) => `${b.kind} ${b.id}`).join(", ")} ${blockers.length === 1 ? "is" : "are"} unresolved`,
+      // The refusal carries what blocked it, so a screen can name each one
+      // without asking again and racing its own answer.
+      { blockers }
     );
   }
 
