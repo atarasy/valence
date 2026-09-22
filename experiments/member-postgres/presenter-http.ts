@@ -137,9 +137,9 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
  if(parts.length===3&&parts[2]==='corrections'&&method==='GET')return forward('/offers/'+encodeURIComponent(id)+'/corrections',undefined,'GET');
  if(parts.length===3&&method==='POST'){
   if(parts[2]==='corrections'){
-   // The engine validates the shape and the signature; only an unknown field is refused here, the way `delivery` refuses one.
-   const allowed=['id','merchant','amount','kind','note','corrected_at','signature'];
-   if(Object.keys(b).some(k=>!allowed.includes(k)))return reply(400,{error:'malformed',message:'a correction has only id, merchant, amount, kind, note, corrected_at and signature'});
+   // Forwarded as sent: the engine refuses an unknown field, a bad shape and a
+   // bad signature itself, so a second copy of its key list here could only
+   // drift from it (a mutation removing one measured nothing either way).
    return forward('/offers/'+encodeURIComponent(id)+'/corrections',input);
   }
   if(parts[2]==='carriage-quote'){
