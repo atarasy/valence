@@ -56,19 +56,3 @@ Always run the dry run first and read `differing` before passing `--write`. Take
 
 The command prints one small JSON summary (`deployment`, `from`, `to`, `action`, `differing`) on success and a fixed, generic message on any refusal; it never prints a connection string, a member row or a driver error, and it always closes its own pool. Tests exercise it against a synthetic deployment and the executable CLI as a subprocess, including redaction of connection failures. No hosted database is part of that test.
 
-### Mutation coverage
-
-This package has a mutation corpus (`scripts/mutate.sh`, `scripts/sweep.sh`) but no separate results ledger, so the three mutations this branch added are recorded here rather than in a file that does not exist. Each was run in isolation with `./scripts/mutate.sh <name>` against a disposable local PostgreSQL, which runs all four experiment packages and reports CAUGHT, SURVIVED, INERT or ABORTED from the run's own pass/fail counts, not from an exit code alone.
-
-| Mutation | Removes | Verdict |
-|---|---|---|
-| `rebind_accepts_any_source_profile` | The allow-list lookup in `runRebindCommand`, so any bound profile (including one this codebase never issued) is treated as eligible for the requested transition | CAUGHT (1 of 279) |
-| `rebind_ignores_other_key_changes` | The check that every configuration key besides the transition's addition is identical between the bound row and the plan | CAUGHT (1 of 279) |
-| `rebind_ignores_dropped_keys` | The union of the bound and planned keys in that comparison, so a key the plan drops is not a difference | CAUGHT (1 of 280) |
-| `failure_reason_leaks_unknown_messages` | `failureReason()`'s fallback to the error's bare name, returning the raw message instead, which is exactly what the safe-message allow-list exists to stop | CAUGHT (3 of 279) |
-| `receipt_admitted_for_any_household` | Question 70. The household/presenter ownership check in `gate.ts`'s `permitted()`, for the corrections-receipt route alone, so a signed-in session for any household could read any offer's corrections | CAUGHT (2 of 285) |
-| `receipt_schema_unconstrained` | Question 70. The pinned `corrections` response schema in `response-schemas.json`, replacing it with an empty schema that admits any shape | CAUGHT (1 of 285) |
-| `presenter_correction_any_offer` | Question 70. The ownership guard in `presenter-http.ts`, for the two presenter corrections routes alone, so a credential could read or append a correction to another presenter's offer | CAUGHT (1 of 286) |
-| `presenter_correction_body_unchecked` | **Retired 2026-09-22.** It survived because the check it removed duplicated the engine's own refusal of an unknown field on the forwarded body; the duplicate was removed rather than kept unobservable | SURVIVED, then retired with the check |
-
-Each caught mutation restored the source to its committed state on exit, verified by `git status` afterwards. The catching tests are, respectively, `rebind-runtime.test.ts`'s "refuses an outside-the-allow-list source profile even when its stored config already matches the target" (written specifically to isolate the allow-list check from the other-key check, since every prior test happened to trip both at once), "refuses when a key besides androidAppOrigins differs from the bound config", and `deployment/entry.test.ts`'s "an unlisted message is never printed" together with the pg-style redaction test.

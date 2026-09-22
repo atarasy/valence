@@ -52,7 +52,7 @@ Valence conformance is a requirement of the [Ataraxia](https://github.com/ataras
 - **No negative signal to the giver** (clause 16). Nothing in the gift-facing response surface can express a recipient's inaction.
 - **Absent capabilities** (clauses 28, 29, 30). There is no discount object, no per-person event store, no urgency field. Not disabled — absent.
 
-Conformance tests live in the Ataraxia repository. **The suites are written**, and they run against any implementation over HTTP, importing nothing from one. Measured on 2026-09-11: 198 mutations, 231 probes at runtime with one skipped, 225 of them shown to fail under at least one deliberate break, and no break surviving.
+Conformance tests live in the Ataraxia repository. **The suites are written**, and they run against any implementation over HTTP, importing nothing from one.
 
 ## The reference engine
 
@@ -68,7 +68,7 @@ Writing it found three holes in this document, each corrected in the same pass:
 
 ## Status
 
-Draft, September 2026. The specification and reference engine are written. Current test evidence belongs with the conformance logs and mutation ledger, rather than a fixed suite count in this overview. No production implementation exists. Expect breaking changes.
+Draft, September 2026. The specification and reference engine are written. Current test evidence belongs with the conformance logs rather than a fixed suite count in this overview. No production implementation exists. Expect breaking changes.
 
 ## Licence
 

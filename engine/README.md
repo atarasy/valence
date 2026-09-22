@@ -28,9 +28,7 @@ underneath an offer.
 
 Two things, and no others.
 
-1. Give the conformance suites a subject. Mutation measurements establish
-   which probes have been shown to fail; the ledger and the logs record
-   their coverage and its gaps.
+1. Give the conformance suites a subject.
 2. Find out which requirements the specification states but no component
    supplies. One was found on the first pass and is recorded below.
 
@@ -64,45 +62,6 @@ Starts the combined and separate-role servers, seeds their catalogues, and
 runs the suites listed in `scripts/conformance.sh` from the ataraxia repository. Set `ATARAXIA_TESTS` if that
 repository is not beside this one.
 
-## Checking that the tests can fail
-
-```
-./scripts/mutate.sh no_floor python3 scripts/mutations/no_floor.py
-```
-
-Applies one break, runs the suites, prints what failed, and restores. The
-mutations in `scripts/mutations/` are the ones the ledger in
-`ataraxia/tests/MUTATIONS.md` records, 198 of them as of 2026-09-11. A probe
-that stays green under its mutation is not a probe, and this is how that is
-found out rather than assumed.
-
-## Sweeping all of them
-
-```
-./scripts/coverage.sh                    # hours; resumable
-python3 scripts/fragility.py             # how much each proof rests on
-python3 scripts/anchors.py               # seconds; which breaks stopped applying
-```
-
-`coverage.sh` applies every mutation in turn and collects the probes that
-failed. It keeps each verdict and each run's logs under
-`~/Documents/valence-sweeps/sweep-<key>`, where the key covers source, scripts, engine unit tests, conformance files,
-package and lock files, runtime versions and the relevant environment settings.
-Inputs are checked before and after each mutation; a changed input invalidates
-the result directory. This detects changes rather than preventing concurrent
-writers, so use an isolated checkout and keep its inputs fixed during a sweep. `--fresh` discards
-the directory, and `VALENCE_SWEEP_HOME` moves it. **It lived under `/tmp` until
-2026-09-11, when a reboot took a finished sweep's verdicts and every log behind
-its figures.**
-
-Run `anchors.py` after any change to `src`. It runs mutations on disposable
-copies and inspects executed replacements on file-derived text, including
-multiple files and intermediate replacements. Aliased methods, imported
-helpers and skipped branches are outside that inspection. A matching anchor
-can still target the wrong occurrence: the mutation's changed behaviour and
-failure context need review. `python3 scripts/test_anchors.py` checks the
-instrumentation against missing and legitimate replacement fixtures.
-
 ## What this implementation found
 
 **The reserve ceiling has no owner.** §6.4 requires that a settlement above the
@@ -116,7 +75,7 @@ extended it to post-paid accounts inside their credit limit, which the code
 does not do. The ceiling is enforced in `src/engine/ledger.ts` before anything is
 delegated, and the specification now says so.
 
-**A green suite can miss the mutation it exists for.** The first version of the
+**A green suite can miss the break it exists for.** The first version of the
 floor suite passed against an implementation demanding twice the declared
 exploration rate, because every probe asked only whether an offer *below* the
 floor was refused. The suite now asks the deployment for its rate and checks

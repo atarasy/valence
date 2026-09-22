@@ -39,26 +39,12 @@ states that turns out to have no owner. Record those, and open a correction in
 
 ## The rule that governs the tests
 
-**A test that cannot fail is not a test.** Every probe in the conformance
-suites carries a note naming the mutation it was shown to catch, and
-`scripts/mutations/` holds those mutations so anyone can rerun them.
+**A test that cannot fail is not a test.** Watch a new probe fail against the
+behaviour it exists to refuse before trusting it green.
 
-Do not add a probe to those suites without a mutation. Do not write the note
-before running the mutation: the first draft of the absence suite had notes
-written from intent, and two of them described behaviour the mutation did not
-produce.
-
-**And do not add a mutation without its row in `MUTATIONS.md`.** That ledger is
-the only document saying how much a rule rests on, so a mutation added beside a
-question's implementation is invisible to a reader while the sweep still counts
-it. Three were found that way on 2026-09-13. `python3 scripts/ledger.py` names
-them in a second, and reads the reverse direction too.
-
-**A mutation whose name is one word from another's is a trap rather than a
-duplicate.** `statement_without_carriage` breaks the hub's statement surface
-and `statement_without_the_carriage` broke the canonical form both sides
-compute; the second was renamed `canonical_form_without_carriage` on
-2026-09-13. Name a mutation for what it breaks, not for where it sits.
+Mutation testing (the `scripts/mutations/` corpus, `mutate.sh`, the sweep and
+the `MUTATIONS.md` ledger) was removed on 2026-09-22 by the founder's decision.
+Notes in the suites that name a mutation are historical and point at nothing.
 
 ## Things that will be tempting and are wrong
 

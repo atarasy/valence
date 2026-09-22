@@ -71,7 +71,7 @@ export ATARASY_TEST_POSTGRES_URL="postgres://user@host:port/an_isolated_database
 cd experiments/member-postgres && bun test --timeout 60000   # 20
 ```
 
-A throwaway instance is enough (`initdb` into a temporary directory, `pg_ctl start -o "-p <port>"`, `createdb`); the tests apply their own migrations and remove their own rows. **Nothing in the corpus covers this package**: it has no mutation script and no conformance probe, so its rules are proven in its own tests or nowhere, which is how seven refutation rounds each found a defect under the previous round's fix.
+A throwaway instance is enough (`initdb` into a temporary directory, `pg_ctl start -o "-p <port>"`, `createdb`); the tests apply their own migrations and remove their own rows. **No conformance probe covers this package**, so its rules are proven in its own tests or nowhere, which is how seven refutation rounds each found a defect under the previous round's fix.
 
 ## Style
 

@@ -2472,11 +2472,6 @@ export class ValenceEngine {
     return this.identities.get(key);
   }
 
-  /** Whether the identity root has attested this key. Used by a mutation. */
-  isKnownKey(key: string): boolean {
-    return this.identities.has(key);
-  }
-
   edge(id: string): LineageEdge | undefined {
     return this.edges.get(id);
   }

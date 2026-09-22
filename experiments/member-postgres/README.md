@@ -69,13 +69,7 @@ The third was the acceptance flow and is a change to the service. `prepareDevice
 
 **This package had no mutation scripts and no conformance probe until 2026-09-18**, which is how seven refutation rounds each found a defect under the previous round's fix: every rule they closed arrived with no negative beside it. It has a corpus now.
 
-```bash
-export ATARASY_TEST_POSTGRES_URL="postgres://user@host:port/an_isolated_database"
-./scripts/sweep.sh                        # the whole corpus
-./scripts/mutate.sh <name>                # one break, one verdict
-```
-
-`mutate.sh` refuses while any source in scope is uncommitted, applies one break, runs **all four experiment packages** and answers CAUGHT, SURVIVED, INERT or ABORTED. It runs the siblings because a rule this package relies on is sometimes proven in the package that owns it: `gate_restates_the_mandate_form` survived while only this package's tests ran, and `member-read` catches it. A run that named no test at all is an abort rather than a catch. Measured 2026-09-18 at valence `6dcc694`: **15 mutations, 15 caught, none surviving, none inert, none aborting**, against 195 tests across the four packages.
+**The mutation corpus was removed on 2026-09-22** by the founder's decision, with `scripts/mutate.sh` and `scripts/sweep.sh`. The paragraphs below describe what it measured while it existed.
 
 **Two of the fifteen did not start caught, and both are worth knowing.** `gate_restates_the_mandate_form` was the harness's own gap, above. `enrolment_writes_before_the_refusal` was real: swapping the passkey write back in front of the authority's refusal changed nothing observable, because the caller wraps the enrolment in a savepoint and the roll-back hides it. **What is left of that rule is the order, and the order is only visible from inside the store**, so `http.test.ts` now replaces the store's `map` for one run and requires no write to `member_passkeys` when the credential is refused. The engine met the same shape on the same day in `import-atomic.test.ts`.
 
