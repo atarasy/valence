@@ -907,6 +907,8 @@ An import is an arrival from outside, not a restore of the host's own backup, so
 
 **Decided by the founder on 2026-09-22.** A hub that lets a person create an account lets them delete it (Apple App Review Guideline 5.1.1(v); vault `77`, `78`). Leaving is not moving: nothing is imported anywhere, and what the household wants kept it takes with an export first (§14, clause 43). The export is the ordinary one and carries no mark that it was taken to leave, because a mark would move the format's version and tell the reader nothing the export does not.
 
+**The engine's route is `GET` and `POST /households/{id}/leave`**: the first answers `{household, blockers}`, the second deletes or refuses `409 leave_blocked` with them. Like every other household route on the engine (§13.1), it authenticates nobody; the hub in front of it holds the member's signature.
+
 **Deletion is a member operation signed like any other.** An implementation MUST require the household's signature under a user-verified assertion over a request naming the household and this host (§10.5), and MUST NOT delete on a session alone, because a session is what a stolen device carries. A hub SHOULD offer the full export (§14) before it asks for the signature.
 
 **An implementation MUST refuse to delete while anything is in progress**, and MUST name each thing it refused for, so that the person can finish it:
