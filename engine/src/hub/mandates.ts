@@ -163,6 +163,8 @@ export const MAX_COOLING_SECONDS = 30 * 86_400;
 const MAX_CLAIMED_VERSION = 2 ** 20;
 
 export class MandateRegister {
+  /** §14.3. Set by the engine: whether a key's household has left this host. */
+  departed: (key: string) => boolean = () => false;
 
   /** §13.2. Where this register keeps what it holds. Unset is in memory. */
   constructor(store: Store = inMemoryStore()) {
@@ -312,6 +314,11 @@ export class MandateRegister {
     for (const k of mandate.co_signers) {
       if (!isHouseholdName(k)) {
         throw unprocessable("name_is_not_the_key", `co-signer ${k} is not a key`);
+      }
+      // §14.3. A household that has left can sign nothing here, so naming it
+      // would leave the mandate impossible to loosen (clause 47).
+      if (this.departed(k)) {
+        throw unprocessable("co_signer_departed", `co-signer ${k} has left this host`);
       }
     }
     const before = this.rows.get(mandate.id);

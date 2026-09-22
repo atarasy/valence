@@ -160,7 +160,11 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
         if(!inputBody||typeof inputBody!=='object'||Array.isArray(inputBody)||Object.keys(inputBody).length)throw new MemberLeaveError(400,'invalid_leave');
         return {status:200,body:JSON.stringify(api.prepare(token))};
        }
-       if(action==='submit'&&request.method==='POST')return {status:200,body:JSON.stringify(await api.submit(token,inputBody))};
+       if(action==='submit'&&request.method==='POST'){
+        const result=await api.submit(token,inputBody);
+        if('refused' in result)return {status:409,body:JSON.stringify({error:'leave_blocked',blockers:result.refused})};
+        return {status:200,body:JSON.stringify(result)};
+       }
        return {status:405,body:JSON.stringify({error:'method_not_allowed'})};
       }
       if(refresh){

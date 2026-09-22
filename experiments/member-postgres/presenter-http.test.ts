@@ -45,6 +45,8 @@ async function setup(){
   e.registerIdentity(HOUSE,HOUSEHOLD_PAIR.publicKey.export({type:'spki',format:'pem'}).toString());
   const mandate={id:MANDATE,household:HOUSE,ceiling_out_of_network:10000,ceiling_daily:null,cooling_seconds:null,co_signers:[],lapses_at:Date.now()+86_400_000*7,version:1};
   e.mandates.record({mandate,signatures:{[HOUSE]:sign(null,canonicalMandate(mandate,config.rpID),HOUSEHOLD_PAIR.privateKey).toString('base64')},assertions:{},keyOf:(k:string)=>e.publicKeyFor(k),relyingPartyId:config.rpID});});
+ // §14.3: an offer goes only to a household this host holds a member for. Its own unit: a unit opens a namespace once.
+ await unit.run(store=>{store.map<any>('member_principals').set('fixture-member',{id:'fixture-member',household:HOUSE,presenters:'[]',disabled:0});});
  // One registration per unit, as the operator command does: a unit opens each record namespace once.
  const register=(s:ReturnType<typeof shop>)=>unit.run(store=>registerPresenter(memberRuntime(store,config),{presenter:s.presenter.id,presenterName:'Shop '+s.presenter.id.slice(-1).toUpperCase(),presenterKey:pem(s.presenter.pair),merchant:s.merchant.id,merchantKey:pem(s.merchant.pair),at:Date.now()}).token);
  const tokenA=await register(a),tokenB=await register(b);
@@ -244,4 +246,13 @@ test('question 70: a presenter forwards a signed correction and reads its receip
  const receipt=await s.send(s.tokenA,path);expect(receipt.status).toBe(200);
  expect(await receipt.json()).toEqual({offer:offer.id,original:{charged:settlement.charged,carriage:null},corrections:[{...fields,signature:good.signature}],net:settlement.charged-500});
  expect((await s.send(s.tokenB,path)).status).toBe(404);
+});
+test('§14.3: a presenter cannot write an offer to a household this host holds no member for, and the refusal says nothing about why',async()=>{
+ const s=await setup();
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('a-1'))).status).toBe(201);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ const stranger={...s.offerBody('a-1','tea-a'),household:'key:'+'A'.repeat(43)};
+ const refused=await s.send(s.tokenA,'/presenter/offers',stranger);
+ expect(refused.status).toBe(404);
+ expect(await refused.json()).toMatchObject({error:'household_unavailable'});
 });
