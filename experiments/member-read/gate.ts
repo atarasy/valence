@@ -45,7 +45,7 @@ function route(request: Request, origin: string): Route | undefined {
   }
   if (parts[1] !== 'offers' || !pathID.test(parts[2] ?? '')) return;
   if (parts.length === 3) return { kind: 'resource', resource: { kind: 'offer', id: parts[2]! } };
-  if (parts.length === 4 && ['approval', 'statement', 'settlement'].includes(parts[3]!)) return { kind: 'resource', resource: { kind: 'offer', id: parts[2]! }, action: parts[3] };
+  if (parts.length === 4 && ['approval', 'statement', 'settlement', 'corrections'].includes(parts[3]!)) return { kind: 'resource', resource: { kind: 'offer', id: parts[2]! }, action: parts[3] };
 }
 function fingerprint(session: Session): string {
   return JSON.stringify([session.id, session.environment, session.household, session.expiresAt, [...session.presenters].sort()]);
@@ -66,7 +66,7 @@ function projection(body: any, route: Route, owner?: Ownership): boolean {
   if (body.offer !== route.resource.id) return false;
   if (route.action === 'approval') return body.presenter === owner?.presenter;
   if (route.action === 'statement') return body.household === owner?.household;
-  return true; // Settlement identifies only the offer; authority is the ownership index.
+  return true; // Settlement and corrections identify only the offer; authority is the ownership index.
 }
 export function memberReadBoundary(deps: Dependencies): (request: Request) => Promise<Response> {
   if (!deps.environment || new URL(deps.origin).origin !== deps.origin || !deps.origin.startsWith('https://')) throw new Error('An explicit HTTPS origin and environment are required');
@@ -107,7 +107,7 @@ export function memberReadBoundary(deps: Dependencies): (request: Request) => Pr
         return new Response(JSON.stringify({ error: body.error, message: 'Read refused.' }), { status: upstream.status, headers });
       }
       if (upstream.status !== 200) return fail(503, 'read_unavailable');
-      const schema = selected.kind === 'list' ? 'list' : selected.resource.kind === 'mandate' ? 'mandate' : (selected.action ?? 'offer') as 'offer' | 'approval' | 'statement' | 'settlement';
+      const schema = selected.kind === 'list' ? 'list' : selected.resource.kind === 'mandate' ? 'mandate' : (selected.action ?? 'offer') as 'offer' | 'approval' | 'statement' | 'settlement' | 'corrections';
       if (!validProjection(schema, body) || !projection(body, selected, ownerSnapshot)) return fail(503, 'read_unavailable');
       if (selected.kind === 'list') {
         // Lists must not bypass the authoritative resource source used by detail reads.

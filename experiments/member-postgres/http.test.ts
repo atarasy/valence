@@ -18,6 +18,8 @@ import type {MemberRuntimeConfig} from './config.ts';
 import {seedUnified,loginResponse} from '../member-transactions/unified-fixture.ts';
 import {fixtureTime} from '../member-transactions/atomic-fixture.ts';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
+import {MERCHANT_PAIR} from '../../engine/test/helpers.ts';
+import {canonicalCorrection} from '../../engine/src/shared/correction.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
 const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',androidAppOrigins:[],explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
@@ -854,4 +856,31 @@ test('recovery rejects host-only foreign stale and malformed attempts without re
  for(const [path,body,status] of [['/member/recovery/key/prepare',{publicKey:key+'x'},400],['/member/recovery/requests',{requesterPublicKey:key},404],['/member/recovery/configuration/submit',{configuration:absent,assertion:{}},400]] as const)expect((await s.send(path,body)).status).toBe(status);
  expect(await(await s.send('/member/recovery/configuration')).json()).toEqual({profile:'atarasy.member-recovery-configuration.1',owner:s.input.house,configured:false,recoverer:null,recovererKeyDigest:null,keyDigest:null,epoch:null,createdAt:null,updatedAt:null});
  expect((await other.send('/member/recovery/participant',{household:s.input.house})).status).toBe(404);
+});
+test('question 70: a household reads its own settled offer\'s corrections receipt, and an unsettled offer, an unknown offer and a foreign household all refuse',async()=>{
+ const s=await setup(),offer=s.input.statement.offer,path='/offers/'+offer+'/corrections';
+ // Not yet settled: the engine's own 404 passes through the gate.
+ expect((await s.send(path)).status).toBe(404);
+ expect((await s.send('/offers/does-not-exist/corrections')).status).toBe(404);
+ const submit=await (await s.send('/member/statements/prepare',{offer,disputed:[]})).json();
+ expect((await s.send('/member/operations/'+submit.operationID+'/submit',{assertion:loginResponse(s.pair,s.input.credential,s.user,submit.publicKey.challenge,2)})).status).toBe(200);
+ const {correction,settlement}=await s.unit.run(store=>{
+  const r=memberRuntime(store,s.c,now),settlement=r.engine.settlement(offer)!;
+  const fields={id:'r-1',offer,merchant:'maker-a',amount:500,kind:'refund' as const,note:'damaged in transit',corrected_at:settlement.settled_at+1};
+  const signed={...fields,signature:sign(null,canonicalCorrection(fields),MERCHANT_PAIR.privateKey).toString('base64')};
+  const {correction}=r.engine.appendCorrection(signed,550);
+  return {correction,settlement};
+ });
+ const own=await s.send(path);expect(own.status).toBe(200);
+ expect(await own.json()).toEqual({offer,original:{charged:settlement.charged,carriage:550},corrections:[correction],net:settlement.charged+550-500});
+ // A scoped session for another household in the same deployment cannot read it.
+ const outsider=await setup();
+ const foreign=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);
+  r.authority.provisionUnclaimedPrincipal('outsider',['merchant-1']);
+  r.authority.registerCredential(outsider.input.credential,'outsider');
+  r.login.provisionVerifiedPasskey(outsider.input.credential,coseOf(outsider.pair),1,outsider.user);
+  r.authority.markCredentialProven(outsider.input.credential);r.authority.adoptHousehold('outsider',outsider.input.credential);
+  return r.authority.createSessionAfterVerification(outsider.input.credential,now()+90000);
+ });
+ expect((await s.send(path,undefined,foreign.token)).status).toBe(404);
 });

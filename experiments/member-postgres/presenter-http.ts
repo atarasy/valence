@@ -133,7 +133,15 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
   // Clause 49 and §7.5b: the carrier code resolves to an address, so the merchant sees carriage and status only.
   return reply(200,{offer:JSON.parse(offer.body),delivery:delivery?{carriage:delivery.carriage,status:delivery.status}:null,recovery:r.engine.recoveries.for(id)??null,settlement:r.engine.settlement(id)??null,carriage_quote:r.quotes.find(id)??null});
  }
+ // §6.6, question 70. A shop reads its own offer's corrections exactly as it reads anything else about it: unchanged from the engine.
+ if(parts.length===3&&parts[2]==='corrections'&&method==='GET')return forward('/offers/'+encodeURIComponent(id)+'/corrections',undefined,'GET');
  if(parts.length===3&&method==='POST'){
+  if(parts[2]==='corrections'){
+   // Forwarded as sent: the engine refuses an unknown field, a bad shape and a
+   // bad signature itself, so a second copy of its key list here could only
+   // drift from it (a mutation removing one measured nothing either way).
+   return forward('/offers/'+encodeURIComponent(id)+'/corrections',input);
+  }
   if(parts[2]==='carriage-quote'){
    if(url.search||Object.keys(b).sort().join(',')!=='carriage')return reply(400,{error:'malformed',message:'quotation takes only carriage and no query'});
    if(binding!=='digital')return reply(422,{error:'not_digital',message:'a pre-order quotation is for a digital offer'});

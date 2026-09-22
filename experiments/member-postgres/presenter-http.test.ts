@@ -9,6 +9,8 @@ import {canonicalConfig} from '../../engine/src/engine/offers.ts';
 import {canonicalMandate} from '../../engine/src/hub/mandates.ts';
 import {houseOf,mandateOf} from '../member-transactions/atomic-fixture.ts';
 import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
+import {canonicalDecisions} from '../../engine/src/shared/decisions.ts';
+import {canonicalCorrection} from '../../engine/src/shared/correction.ts';
 import {PermissionLedger} from '../../engine/src/hub/permissions.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
@@ -197,4 +199,49 @@ test('a presenter exports only its own records, without a delivery code',async()
  expect(theirs.deliveries).toEqual([]);
  expect((await s.send(s.tokenA,'/presenter/export?presenter='+s.b.presenter.id)).status).toBe(400);
  expect((await s.send('apr1_'+'x'.repeat(43),'/presenter/export')).status).toBe(401);
+});
+
+// §6.6, question 70. A shop appends a correction to its own settled offer
+// and reads the receipt back; the body carries no `offer` (the engine takes
+// it from the path, exactly as the member GET does), and an id the merchant
+// was not paid on or a signature the merchant did not make are the engine's
+// own refusals, passed through unchanged.
+test('question 70: a presenter forwards a signed correction and reads its receipt, only for its own offer',async()=>{
+ const s=await setup();
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('c-1'))).status).toBe(201);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ const created=await s.send(s.tokenA,'/presenter/offers',{...s.offerBody('c-1','tea-a'),binding:'digital'});
+ expect(created.status).toBe(201);
+ const offer=await created.json() as {id:string;candidates:{id:string}[]};
+ expect((await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/present',{})).status).toBe(200);
+ const decisions=[{candidate:offer.candidates[0]!.id,valence:'kept' as const,kept_as:'self' as const}];
+ const decisionSignature=sign(null,canonicalDecisions(offer.id,decisions),HOUSEHOLD_PAIR.privateKey).toString('base64');
+ const settlement=await s.unit.run(async store=>{
+  const r=memberRuntime(store,config);
+  await r.engine.decide(offer.id,decisions,decisionSignature);
+  return r.engine.settle(offer.id);
+ });
+ const path='/presenter/offers/'+offer.id+'/corrections';
+ const signed=(fields:{id:string;offer:string;merchant:string;amount:number;kind:'refund'|'collection';note:string;corrected_at:number},key=s.a.merchant.pair.privateKey)=>{
+  const signature=sign(null,canonicalCorrection(fields),key).toString('base64');
+  const {offer:_omit,...rest}=fields;
+  return {...rest,signature};
+ };
+ const fields={id:'r-1',offer:offer.id,merchant:s.a.merchant.id,amount:500,kind:'refund' as const,note:'damaged in transit',corrected_at:settlement.settled_at+1};
+ const good=signed(fields);
+ // Another presenter's offer answers exactly like one that does not exist.
+ expect((await s.send(s.tokenB,path,good)).status).toBe(404);
+ const first=await s.send(s.tokenA,path,good);expect(first.status).toBe(201);
+ const retried=await s.send(s.tokenA,path,good);expect(retried.status).toBe(200);
+ expect(await retried.json()).toEqual(await first.json());
+ // An unknown field is refused here, before the engine is ever asked.
+ expect((await s.send(s.tokenA,path,{...good,extra:'unexpected'})).status).toBe(400);
+ // A signature by the wrong key passes through as the engine's own refusal.
+ const forgedFields={...fields,id:'r-2'};
+ const forged=signed(forgedFields,s.a.presenter.pair.privateKey);
+ const badSignature=await s.send(s.tokenA,path,forged);
+ expect(badSignature.status).toBe(422);expect((await badSignature.json()).error).toBe('bad_signature');
+ const receipt=await s.send(s.tokenA,path);expect(receipt.status).toBe(200);
+ expect(await receipt.json()).toEqual({offer:offer.id,original:{charged:settlement.charged,carriage:null},corrections:[{...fields,signature:good.signature}],net:settlement.charged-500});
+ expect((await s.send(s.tokenB,path)).status).toBe(404);
 });

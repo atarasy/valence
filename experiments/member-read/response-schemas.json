@@ -1440,6 +1440,107 @@
       "confirmation"
     ]
   },
+  "corrections": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "CorrectionsResponse",
+    "description": "Pinned reference projection. Safe-integer limits and closed fields are native contract checks, not authenticated service guarantees.",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "offer": {
+        "type": "string"
+      },
+      "original": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "charged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "carriage": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "charged",
+          "carriage"
+        ]
+      },
+      "corrections": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "offer": {
+              "type": "string"
+            },
+            "merchant": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "kind": {
+              "enum": [
+                "refund",
+                "collection"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "corrected_at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "offer",
+            "merchant",
+            "amount",
+            "kind",
+            "note",
+            "corrected_at",
+            "signature"
+          ]
+        }
+      },
+      "net": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": [
+      "offer",
+      "original",
+      "corrections",
+      "net"
+    ]
+  },
   "mandate": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "MandateResponse",
