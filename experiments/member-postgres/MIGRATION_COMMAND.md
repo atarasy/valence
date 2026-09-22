@@ -55,3 +55,15 @@ The command refuses unless the source profile it finds bound is in an explicit a
 Always run the dry run first and read `differing` before passing `--write`. Take a Neon backup branch of the target database before writing, the same discipline as any other operator command against a live deployment (`OPERATIONAL_SNAPSHOT.md`). Once `--write` succeeds, **promote the new build immediately**: the old build's own `binding()` check now refuses every request against the rebound row (it still expects the old profile), so the window between rebinding and promoting is exactly the outage #41 produced, and rebinding first only means the *next* deploy fixes it rather than every deploy after a rebuild.
 
 The command prints one small JSON summary (`deployment`, `from`, `to`, `action`, `differing`) on success and a fixed, generic message on any refusal; it never prints a connection string, a member row or a driver error, and it always closes its own pool. Tests exercise it against a synthetic deployment and the executable CLI as a subprocess, including redaction of connection failures. No hosted database is part of that test.
+
+### Mutation coverage
+
+This package has a mutation corpus (`scripts/mutate.sh`, `scripts/sweep.sh`) but no separate results ledger, so the three mutations this branch added are recorded here rather than in a file that does not exist. Each was run in isolation with `./scripts/mutate.sh <name>` against a disposable local PostgreSQL, which runs all four experiment packages and reports CAUGHT, SURVIVED, INERT or ABORTED from the run's own pass/fail counts, not from an exit code alone.
+
+| Mutation | Removes | Verdict |
+|---|---|---|
+| `rebind_accepts_any_source_profile` | The allow-list lookup in `runRebindCommand`, so any bound profile (including one this codebase never issued) is treated as eligible for the requested transition | CAUGHT (1 of 279) |
+| `rebind_ignores_other_key_changes` | The check that every configuration key besides the transition's addition is identical between the bound row and the plan | CAUGHT (1 of 279) |
+| `failure_reason_leaks_unknown_messages` | `failureReason()`'s fallback to the error's bare name, returning the raw message instead, which is exactly what the safe-message allow-list exists to stop | CAUGHT (3 of 279) |
+
+Each caught mutation restored the source to its committed state on exit, verified by `git status` afterwards. The catching tests are, respectively, `rebind-runtime.test.ts`'s "refuses an outside-the-allow-list source profile even when its stored config already matches the target" (written specifically to isolate the allow-list check from the other-key check, since every prior test happened to trip both at once), "refuses when a key besides androidAppOrigins differs from the bound config", and `deployment/entry.test.ts`'s "an unlisted message is never printed" together with the pg-style redaction test.
