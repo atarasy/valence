@@ -107,31 +107,45 @@ export function leaveBlockers(ctx: LeaveContext, household: string, now = Date.n
   return blockers;
 }
 
+/** §14.3. How far a signed request's moment may be from this host's clock. */
+export const SIGNED_REQUEST_WINDOW_MS = 5 * 60_000;
+
 /**
- * §14.3. What a household signs to leave: the profile, the household and the
- * host it is leaving. The hub in front of the engine may hold the signature
- * instead and call the library, which is what the member API does; an
- * implementation reached over HTTP has nothing else to go on.
+ * §14.3. What a household signs to leave: the profile, the household, the
+ * host it is leaving and the moment it asked. The moment is what keeps a
+ * signature that was once seen from deleting the household again after the
+ * same key enrols once more. The member API holds its own signature and calls
+ * the library instead.
  */
-export function canonicalLeave(household: string, relyingPartyId: string): Buffer {
-  return Buffer.from(JSON.stringify(["valence.leave.1", household, relyingPartyId]));
+export function canonicalLeave(household: string, relyingPartyId: string, at: number): Buffer {
+  return Buffer.from(JSON.stringify(["valence.leave.1", household, relyingPartyId, at]));
+}
+
+/** §14, clause 43. What a household signs to read its own export through a hub that carries engine routes. */
+export function canonicalExport(household: string, relyingPartyId: string, at: number): Buffer {
+  return Buffer.from(JSON.stringify(["valence.export.1", household, relyingPartyId, at]));
 }
 
 /**
- * §14.3. Checks that the household itself asked. Throws `422 unsigned` when
- * nothing was sent or the household has no key here, and `422 bad_signature`
- * when what was sent does not cover this deletion at this host.
+ * Checks that the household itself signed `bytes`, at a moment within the
+ * window. Throws `422 unsigned`, `422 stale_request` or `422 bad_signature`.
  */
-export function checkLeaveSignature(ctx: LeaveContext, household: string, sent: { signature?: string; assertion?: Assertion }): void {
-  const pem = ctx.engine.publicKeyFor(household);
+export function checkHouseholdSignature(engine: ValenceEngine, household: string, bytes: Buffer, at: number, sent: { signature?: string; assertion?: Assertion }, now = Date.now()): void {
+  const pem = engine.publicKeyFor(household);
   const one = sent.signature !== undefined, other = sent.assertion !== undefined;
-  if (one && other) throw unprocessable("bad_signature", "a deletion carries a signature or an assertion, not both");
-  if (!pem || (!one && !other)) throw unprocessable("unsigned", `deleting ${household} is signed by the household itself`);
+  if (one && other) throw unprocessable("bad_signature", "a request carries a signature or an assertion, not both");
+  if (!pem || (!one && !other)) throw unprocessable("unsigned", `this is signed by ${household} itself`);
+  if (!Number.isSafeInteger(at) || Math.abs(now - at) > SIGNED_REQUEST_WINDOW_MS) throw unprocessable("stale_request", "the moment signed is not within five minutes of this host's clock");
   let ok = false;
   try {
-    ok = verifyPersonal(canonicalLeave(household, ctx.engine.relyingPartyId), one ? { signature: sent.signature! } : { assertion: sent.assertion! }, pem, ctx.engine.relyingPartyId);
+    ok = verifyPersonal(bytes, one ? { signature: sent.signature! } : { assertion: sent.assertion! }, pem, engine.relyingPartyId);
   } catch { ok = false; }
-  if (!ok) throw unprocessable("bad_signature", `the signature does not cover deleting ${household} at this host`);
+  if (!ok) throw unprocessable("bad_signature", `the signature does not cover this request for ${household} at this host`);
+}
+
+/** §14.3. Checks that the household itself asked to leave, at a moment within the window. */
+export function checkLeaveSignature(ctx: LeaveContext, household: string, at: number, sent: { signature?: string; assertion?: Assertion }, now = Date.now()): void {
+  checkHouseholdSignature(ctx.engine, household, canonicalLeave(household, ctx.engine.relyingPartyId, at), at, sent, now);
 }
 
 /**
