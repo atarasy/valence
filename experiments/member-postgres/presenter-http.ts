@@ -1,5 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {createApp,type Hub} from '../../engine/src/http.ts';
+import {exportMerchant} from '../../engine/src/hub/node.ts';
 import {records} from './records.ts';
 import type {memberRuntime} from './runtime.ts';
 type Runtime=ReturnType<typeof memberRuntime>;
@@ -92,6 +93,16 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
   const sells=r.engine.configsForPresenter(presenter).some(c=>Object.values(c.products).some(p=>p.merchant===b.merchant));
   if(!sells)return reply(403,{error:'merchant_not_in_catalogue',message:'publish a catalogue naming this merchant before its disclosure'});
   return forward('/_disclosures',input);
+ }
+ // VOX-11 (vault `72`): the specification's merchant export for this credential's presenter and no other, returned
+ // unchanged, with the two records this surface keeps beside the engine. A delivery's carrier code resolves to an
+ // address (clause 49, §7.5b), so it is projected to carriage and status exactly as the offer read above does.
+ if(parts.length===1&&parts[0]==='export'&&method==='GET'){
+  if(url.search)return reply(400,{error:'malformed',message:'this route takes no query'});
+  const protocol=exportMerchant(r.engine,presenter,r.now());
+  const deliveries=protocol.offers.flatMap(o=>{const d=r.deliveries.find(o.id);return d?[{offer:o.id,carriage:d.carriage,status:d.status}]:[];});
+  const carriage_quotes=protocol.offers.flatMap(o=>{const q=r.quotes.find(o.id);return q?[q]:[];});
+  return reply(200,{protocol,deliveries,carriage_quotes});
  }
  if(parts[0]!=='offers')return reply(404,{error:'request_unavailable'});
  if(parts.length===1&&method==='GET'){

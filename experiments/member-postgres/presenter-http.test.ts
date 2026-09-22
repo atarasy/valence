@@ -157,3 +157,44 @@ test('digital quotation is scoped, immutable, replayable and never a delivery',a
  await s.unit.run(store=>{const rows=store.map<any>('offers'),row=rows.get(expired.id);row.expires_at=1;rows.set(expired.id,row);});
  expect((await s.send(s.tokenB,'/presenter/offers/'+expired.id+'/carriage-quote',{carriage:500})).status).toBe(409);
 });
+
+// VOX-11, vault `72`. A shop's export is its own presenter's and nobody
+// else's, carries the specification's merchant export unchanged, and projects
+// a delivery to carriage and status because its carrier code resolves to an
+// address (clause 49).
+test('a presenter exports only its own records, without a delivery code',async()=>{
+ const s=await setup();
+ // Two products, because a presenter may offer a household one product once (§5.1).
+ const product=(name:string)=>({merchant:s.a.merchant.id,maker:'maker-a',ships:'carrier-a',price:1200,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}});
+ const twoProducts={version:'export-a',presenter:s.a.presenter.id,products:{'tea-a':product('tea-a'),'tea-a-2':product('tea-a-2')}};
+ expect((await s.send(s.tokenA,'/presenter/configs',{...twoProducts,signature:sign(null,canonicalConfig(twoProducts),s.a.presenter.pair.privateKey).toString('base64')})).status).toBe(201);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ expect((await s.send(s.tokenB,'/presenter/configs',s.b.catalogue('export-b'))).status).toBe(201);
+ expect((await s.send(s.tokenB,'/presenter/disclosures',s.b.disclosure())).status).toBe(201);
+ const box=await (await s.send(s.tokenA,'/presenter/offers',s.offerBody('export-a','tea-a'))).json() as {id:string};
+ expect((await s.send(s.tokenA,'/presenter/offers/'+box.id+'/present',{})).status).toBe(200);
+ expect((await s.send(s.tokenA,'/presenter/offers/'+box.id+'/delivery',{carriage:550,status:'delivered'})).status).toBe(201);
+ const cart=await (await s.send(s.tokenA,'/presenter/offers',{...s.offerBody('export-a','tea-a-2'),binding:'digital'})).json() as {id:string};
+ expect((await s.send(s.tokenA,'/presenter/offers/'+cart.id+'/carriage-quote',{carriage:300})).status).toBe(201);
+ const other=await (await s.send(s.tokenB,'/presenter/offers',{...s.offerBody('export-b','tea-b'),binding:'digital'})).json() as {id:string};
+ expect((await s.send(s.tokenB,'/presenter/offers/'+other.id+'/carriage-quote',{carriage:900})).status).toBe(201);
+
+ const read=await s.send(s.tokenA,'/presenter/export');expect(read.status).toBe(200);
+ const text=await read.text(),body=JSON.parse(text);
+ expect(Object.keys(body).sort()).toEqual(['carriage_quotes','deliveries','protocol']);
+ expect(body.protocol).toMatchObject({format:'valence-merchant/1',presenter:s.a.presenter.id});
+ expect(Object.keys(body.protocol).sort()).toEqual(['configs','exported_at','format','notes','offers','presenter','recoveries','settlements']);
+ expect(body.protocol.offers.map((o:{id:string})=>o.id).sort()).toEqual([box.id,cart.id].sort());
+ expect(body.protocol.configs.map((c:{version:string})=>c.version)).toEqual(['export-a']);
+ expect(body.deliveries).toEqual([{offer:box.id,carriage:550,status:'delivered'}]);
+ expect(body.carriage_quotes).toEqual([expect.objectContaining({offer:cart.id,carriage:300})]);
+ // The carrier code the surface generated, and every trace of shop B.
+ expect(text).not.toContain('dev-');
+ for(const foreign of [other.id,s.b.presenter.id,s.b.merchant.id,'export-b'])expect(text).not.toContain(foreign);
+
+ const theirs=await (await s.send(s.tokenB,'/presenter/export')).json() as any;
+ expect(theirs.protocol.offers.map((o:{id:string})=>o.id)).toEqual([other.id]);
+ expect(theirs.deliveries).toEqual([]);
+ expect((await s.send(s.tokenA,'/presenter/export?presenter='+s.b.presenter.id)).status).toBe(400);
+ expect((await s.send('apr1_'+'x'.repeat(43),'/presenter/export')).status).toBe(401);
+});
