@@ -2,6 +2,7 @@ import type { Offer, Recovery } from "../common/types.js";
 import type { Delivery } from "./delivery.js";
 import { challengeForStatement, statementLines } from "../shared/statement.js";
 import { governing } from "./approval.js";
+import type { DisclosureContact } from "../shared/disclosure.js";
 
 /**
  * §6.5. The screen a household signs a physical settlement from, drawn by
@@ -48,6 +49,8 @@ export type Statement = {
     product: string | null;
     version: string;
     items: { label: string; value: string }[];
+    /** Question 72. Null when the merchant gave none. */
+    contact: DisclosureContact | null;
     signature: string;
   }[];
   /** §7.5b. From the hub's delivery record, null while none is recorded. */
@@ -89,6 +92,7 @@ export function renderStatement(
       product: d.product,
       version: d.version,
       items: d.items.map((i) => ({ label: i.label, value: i.value })),
+      contact: d.contact ?? null,
       signature: d.signature,
     })),
     carriage: delivery ? delivery.carriage : null,

@@ -19,7 +19,13 @@ const object = (shape: Record<string, Check>): Check => v => {
 };
 const unique = <T>(rows: T[], key: (row: T) => string) => { const keys = rows.map(key); if (new Set(keys).size !== keys.length) fail(); };
 const valence = one('offered', 'kept', 'returned', 'consumed', 'defaulted', 'lost');
-const disclosure = object({ merchant: id, product: nullable(id), version: id, signature: text, items: array(object({ label: text, value: text })) });
+// Question 72: a merchant may sign a contact. A block from before it has no
+// such key, so the key is optional; present, it holds exactly a kind and a value.
+const disclosureContact = object({ kind: one('email', 'tel', 'url'), value: text });
+const disclosure: Check = v => {
+  const withContact = !!v && typeof v === 'object' && !Array.isArray(v) && 'contact' in v;
+  object({ merchant: id, product: nullable(id), version: id, signature: text, items: array(object({ label: text, value: text })), ...(withContact ? { contact: nullable(disclosureContact) } : {}) })(v);
+};
 const candidate = object({ id, product: id, quantity: integer, unit_price: integer, merchant: id, maker: id, ships: id, category: nullable(id), predicted_conversion: nullable(v => { if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) fail(); }), is_exploration: bool, given_by: nullable(id), valence, decided_at: nullable(integer), kept_as: nullable(one('self', 'gift', 'order')), lineage: nullable(id) });
 const offer = object({ id, binding: one('physical', 'digital'), household: id, presenter: id, presenter_attested: bool, purpose: one('gift', 'replenish', 'trial', 'ceremonial', 'assortment'), price_band: nullable(object({ min: integer, max: integer })), giver: nullable(id), config_version: id, presented_at: nullable(integer), expires_at: integer, state: one('drafted', 'presented', 'decided', 'expired', 'withdrawn', 'settled'), exploration_floor_met: bool, mandate: id, candidates: array(candidate), disclosures: array(disclosure), reminders_sent: one(0, 1), decided_at: nullable(integer) });
 const settlement = object({ offer: id, settled_at: integer, kept_amount: integer, consumed_amount: integer, lost_amount: integer, charged: integer, disputed_amount: integer, lines: array(object({ candidate: id, product: id, merchant: id, maker: id, ships: id, valence, amount: integer, disputed: bool })), payer: id, signed_by: id, signed_as: one('agent'), receipt: id, confirmation: nullable(text) });

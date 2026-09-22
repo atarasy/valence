@@ -35,6 +35,7 @@ import type {
   NoteParty,
   Recovery,
 } from "./common/types.js";
+import type { DisclosureContact } from "./shared/disclosure.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -55,6 +56,48 @@ const VALENCES = [
 ] as const;
 const KINDS = ["gift", "return", "regift", "thanks"] as const;
 const NOTE_PARTIES = ["recipient", "merchant"] as const;
+const DISCLOSURE_CONTACT_KINDS = ["email", "tel", "url"] as const;
+
+/**
+ * Question 72. Shape only: this engine renders the contact verbatim and
+ * never uses it to reach the merchant, so nothing here needs to know an
+ * email is reachable, only that it looks like one.
+ */
+function parseDisclosureContact(raw: Record<string, unknown>): DisclosureContact | null {
+  if (raw.contact === undefined || raw.contact === null) return null;
+  const c = strict(raw.contact, ["kind", "value"], "disclosure contact");
+  const kind = requireEnum(c, "kind", "disclosure contact", DISCLOSURE_CONTACT_KINDS);
+  const value = requireString(c, "value", "disclosure contact");
+  if (value.length > 256) {
+    throw badRequest("malformed", "disclosure contact: value must be at most 256 characters");
+  }
+  if (kind === "email") {
+    if (/\s/.test(value) || value.split("@").length !== 2) {
+      throw badRequest(
+        "malformed",
+        "disclosure contact: an email must contain exactly one @ and no whitespace"
+      );
+    }
+  } else if (kind === "tel") {
+    if (!/^[0-9 +()-]+$/.test(value)) {
+      throw badRequest(
+        "malformed",
+        "disclosure contact: a tel must contain only digits, spaces, +, -, ( and )"
+      );
+    }
+  } else {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw badRequest("malformed", "disclosure contact: a url must parse");
+    }
+    if (url.protocol !== "https:") {
+      throw badRequest("malformed", "disclosure contact: a url must be https");
+    }
+  }
+  return { kind, value };
+}
 
 /**
  * §6.2. A candidate names its giver when it was given; the field is optional
@@ -143,6 +186,9 @@ function offerView(o: Offer, recovery: Recovery | undefined) {
       product: d.product,
       version: d.version,
       items: d.items.map((i) => ({ label: i.label, value: i.value })),
+      // Question 72. Rendered exactly as the merchant signed it, or null when
+      // the merchant gave none.
+      contact: d.contact ?? null,
       signature: d.signature,
     })),
   };
@@ -1065,7 +1111,11 @@ async function route(
     // §10a. Deployment plumbing, like a catalogue or a key: the specification
     // says who composes a disclosure and what happens when one is missing, and
     // routes none of it. **Nothing here reads an item.**
-    const raw = strict(await body(request), ["merchant", "product", "version", "items", "signature"], "disclosure");
+    const raw = strict(
+      await body(request),
+      ["merchant", "product", "version", "items", "contact", "signature"],
+      "disclosure"
+    );
     const itemsRaw = raw.items;
     if (!Array.isArray(itemsRaw)) {
       throw badRequest("malformed", "items must be an array of label and value");
@@ -1083,6 +1133,8 @@ async function route(
       product: raw.product === undefined || raw.product === null ? null : requireString(raw, "product", "disclosure"),
       version: requireString(raw, "version", "disclosure"),
       items,
+      // Question 72. Absent or null when the merchant gave none.
+      contact: parseDisclosureContact(raw),
       signature: requireString(raw, "signature", "disclosure"),
     });
     return json({ ok: true }, 201);

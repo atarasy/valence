@@ -148,6 +148,11 @@ for (const merchant of ["maker-a", "maker-b"]) {
       { label: "delivery", value: "already placed" },
       { label: "returns", value: "as this merchant published" },
     ],
+    // Question 72, decided 2026-09-22. Given on the first merchant's standing
+    // text alone, so the probes that check a contact travels have a signed
+    // one to compare against, and the probes that predate this field have an
+    // unchanged fixture on every other block.
+    contact: merchant === "maker-a" ? { kind: "email" as const, value: "support@maker-a.example" } : null,
   };
   const block = {
     ...body,

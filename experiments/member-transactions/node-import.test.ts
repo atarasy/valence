@@ -32,6 +32,13 @@ test('unknown nested fields malformed numbers missing dependencies and duplicate
   const changes = [(n: any) => { n.unknown = true; }, (n: any) => { n.offers[0].candidates[0].price_override = 1; }, (n: any) => { delete n.mandates; }, (n: any) => { n.household = 'foreign'; }, (n: any) => { n.offers[0].household = 'foreign'; }, (n: any) => { n.mandates[0].household = 'foreign'; }, (n: any) => { n.offers.push(structuredClone(n.offers[0])); }, (n: any) => { n.offers[0].candidates[0].quantity = 0; }, (n: any) => { n.offers[0].candidates[0].unit_price = 1.5; }, (n: any) => { n.collections = []; }, (n: any) => { n.deliveries[0].offer = 'dangling'; }, (n: any) => { n.collections[0].consumed = ['dangling']; }, (n: any) => { n.offers[0].candidates[0].lineage = 'dangling'; }, (n: any) => { n.receipts = [{ ref: 'r', at: 0, product: 'leak' }]; }, (n: any) => { n.notes = [{ candidate: 'dangling', author: HOUSE, text: 'x', shared_with: [], created_at: 0 }]; }];
   for (const change of changes) { const node = structuredClone(s.node); change(node); expect(() => validateNodeImport(node, HOUSE)).toThrow('Invalid'); }
 });
+test('a disclosure in an archive may carry a signed contact of exactly a kind and a value (question 72)', async () => {
+  const s = await fixture();
+  const withContact = (contact: unknown) => { const node = structuredClone(s.node); for (const o of node.offers) for (const d of o.disclosures) d.contact = contact; return node; };
+  expect(s.node.offers.some((o: any) => o.disclosures.length > 0)).toBe(true);
+  for (const ok of [null, { kind: 'email', value: 'help@shop.example' }]) expect(() => validateNodeImport(withContact(ok), HOUSE)).not.toThrow();
+  for (const bad of [{ kind: 'sms', value: 'x' }, { kind: 'email' }, { kind: 'url', value: 'https://x', extra: 1 }]) expect(() => validateNodeImport(withContact(bad), HOUSE)).toThrow('Invalid');
+});
 test('HTTP preflight rejects malformed archive before touching an existing store', async () => {
   const s = await fixture(), before = rows(s.source), malformed = structuredClone(s.node); malformed.receipts = [{ ref: 'r', at: 0, product: 'leak' }];
   const response = await s.app.fetch(new Request(policy.origin + `/households/${encodeURIComponent(HOUSE)}/import`, { method: 'POST', body: JSON.stringify(malformed) }));
