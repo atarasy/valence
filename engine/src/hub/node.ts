@@ -3,6 +3,7 @@ import type { CarriageQuote, CarriageQuotes } from "./carriage-quote.js";
 import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { FixedProtections, ValenceEngine } from "../engine/offers.js";
+import { claimsToBeAKey } from "../common/names.js";
 import type { LineageEdge, Note, Offer, Payment, Settlement, PresenterConfig, Recovery } from "../common/types.js";
 import type { Permission, Query, PermissionLedger } from "./permissions.js";
 import type { Mandate, MandateRegister } from "./mandates.js";
@@ -57,7 +58,7 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * question 70). A /9 export carries none, and its settlements arrive with
  * no correction, which is what they had before the field existed.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/10";
+export const EXPORT_FORMAT_VERSION = "valence-node/11";
 
 export type NodeExport = {
   format: string;
@@ -73,6 +74,17 @@ export type NodeExport = {
    * this field would drop it.
    */
   confirmations: Record<string, string[]>;
+  /**
+   * §14.2, decided 2026-09-23. **The public keys the carried edges are
+   * verified with**, as a map from key name to PEM. An import verifies every
+   * edge as if it had arrived at `POST /lineage`, which needs the giver's key,
+   * and a giver that has left the sending host (§14.3) has none to give the
+   * receiving one: without this the household that received the gift could not
+   * move the edge at all. A name is the hash of its key, so an entry that does
+   * not name what it carries is refused and a forged one names itself.
+   * New in `valence-node/11`.
+   */
+  keys: Record<string, string>;
   /**
    * §16.5, question 68, decided 2026-09-20. **What each decided set was
    * decided under**: the window and, where it may owe, the ceiling, with the
@@ -297,6 +309,7 @@ export function exportNode(
     settlements,
     notes,
     lineage: engine.edgesTouching(household),
+    keys: keysForEdges(engine, engine.edgesTouching(household)),
     receipts: engine.receiptsFor(household),
     payments: engine.paymentsBy(household),
     gifts_in_flight: engine.giftsInFlightBy(household, now),
@@ -319,6 +332,22 @@ export function exportNode(
     carriage_quotes: quotes?.forOffers(offers.map(o => o.id)) ?? [],
     deliveries: deliveries.forHousehold(offers.map((o) => o.id)),
   };
+}
+
+/** §14.2. Every key a carried edge is verified with, as far as this host holds them. */
+function keysForEdges(engine: ValenceEngine, edges: readonly LineageEdge[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const edge of edges) {
+    for (const name of [edge.from, edge.to]) {
+      // Only a name that is the hash of its key: such a name proves the key it
+      // arrives with, and one that does not (a merchant's, an older
+      // household's) would be a key the receiving host is asked to trust.
+      if (!claimsToBeAKey(name)) continue;
+      const pem = engine.publicKeyFor(name);
+      if (pem !== undefined) out[name] = pem;
+    }
+  }
+  return out;
 }
 
 /**

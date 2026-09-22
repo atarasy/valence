@@ -112,7 +112,7 @@ test('decision protections survive an archive and cannot name an unrelated offer
 
 test('quotation archives require the new register and bind every quote to a digital offer', async () => {
   const s = await fixture();
-  expect(s.node.format).toBe('valence-node/10');
+  expect(s.node.format).toBe('valence-node/11');
   expect(s.node.carriage_quotes).toEqual([]);
   const legacy = structuredClone(s.node); legacy.format = 'valence-node/8'; delete legacy.carriage_quotes;
   expect(validateNodeImport(legacy, HOUSE).carriage_quotes).toEqual([]);

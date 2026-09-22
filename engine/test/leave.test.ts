@@ -500,3 +500,27 @@ describe("§14.3: what the first refutation pass measured (2026-09-22)", () => {
     expect(refuses(() => recordMandate(ctx.engine, owner, mandateFor(owner, [gone.household], now), now))).toBe("co_signer_departed");
   });
 });
+
+describe("§14.2, valence-node/11: an export carries the keys its edges verify with", () => {
+  test("a recipient moves a gift from a giver that has left, and a forged key is refused", async () => {
+    const ctx = setup();
+    const giver = houseFor("keys-giver"), recipient = houseFor("keys-recipient");
+    ctx.engine.registerIdentity(giver.household, giver.pem);
+    ctx.engine.registerIdentity(recipient.household, recipient.pem);
+    const now = Date.now();
+    const edge = addEdge(ctx.engine, giver, recipient, now);
+    leaveHost(ctx, giver.household, now + 1000);
+
+    const exported = exportNode(ctx.engine, ctx.recovery, ctx.permissions, ctx.engine.mandates, ctx.deliveries, recipient.household, now + 2000, ctx.quotes);
+    expect(exported.format).toBe("valence-node/11");
+    expect(exported.keys[giver.household]).toBe(giver.pem);
+
+    // A second host that has never seen the giver still verifies its edge.
+    const target = setup();
+    target.engine.checkImport([], recipient.household, exported.lineage, exported.keys);
+    expect(() => target.engine.checkImport([], recipient.household, exported.lineage, {})).toThrow("does not verify");
+
+    // A key that is not the one its name is made from is another household's to claim.
+    expect(() => target.engine.registerIdentity(giver.household, recipient.pem)).toThrow("is not the name of this key");
+  });
+});

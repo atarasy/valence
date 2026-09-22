@@ -2639,14 +2639,17 @@ export class ValenceEngine {
   }
 
   /** §14.2, question 51. The same refusals as `importEdge`, written nowhere. */
-  checkImportedEdge(edge: LineageEdge, household: string, carrying?: Map<string, LineageEdge>): void {
+  checkImportedEdge(edge: LineageEdge, household: string, carrying?: Map<string, LineageEdge>, supplied?: Readonly<Record<string, string>>): void {
     // Clause 22 holds on a move as it does on arrival: an edge is recognised
     // by the giver's attested key, and an edge that touches neither end of
     // the moving household is not this node's to carry.
     if (edge.from !== household && edge.to !== household) {
       throw unprocessable("wrong_household", `edge ${edge.id} does not touch ${household}`);
     }
-    const publicKey = this.identities.get(edge.from);
+    // §14.2, `valence-node/11`. A key the export carries stands in for one this
+    // host does not hold: the giver may have left the sending host, and its
+    // name is the hash of the key, which the caller has already checked.
+    const publicKey = this.identities.get(edge.from) ?? supplied?.[edge.from];
     if (!publicKey || !verifyEdge(edge, publicKey)) {
       throw unprocessable("bad_signature", `edge ${edge.id} does not verify`);
     }
@@ -2705,7 +2708,7 @@ export class ValenceEngine {
    * written before it and lost the collections and mandates after it, and the
    * retry was refused because those offers were now held.
    */
-  checkImport(offers: readonly Offer[], household: string, edges: readonly LineageEdge[]): void {
+  checkImport(offers: readonly Offer[], household: string, edges: readonly LineageEdge[], supplied?: Readonly<Record<string, string>>): void {
     const carrying = { offers: new Set<string>(), candidates: new Set<string>() };
     for (const offer of offers) {
       this.checkImportedOffer(offer, household, carrying);
@@ -2714,7 +2717,7 @@ export class ValenceEngine {
     }
     const carryingEdges = new Map<string, LineageEdge>();
     for (const edge of edges) {
-      this.checkImportedEdge(edge, household, carryingEdges);
+      this.checkImportedEdge(edge, household, carryingEdges, supplied);
       const key = this.importedEdgeKey(edge, carryingEdges);
       if (key !== null) carryingEdges.set(key, edge);
     }

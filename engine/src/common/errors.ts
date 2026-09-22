@@ -2,7 +2,9 @@ export class ValenceError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
-    message: string
+    message: string,
+    /** Fields the refusal carries beside its message, such as what blocked it. */
+    readonly detail?: Record<string, unknown>
   ) {
     super(message);
     this.name = "ValenceError";
@@ -34,8 +36,8 @@ export const notThisRole = (message: string) =>
 export const unauthenticatedReport = (message: string) =>
   new ValenceError(401, "unauthenticated_report", message);
 
-export const conflict = (code: string, message: string) =>
-  new ValenceError(409, code, message);
+export const conflict = (code: string, message: string, detail?: Record<string, unknown>) =>
+  new ValenceError(409, code, message, detail);
 
 /**
  * 422 is the specification's own status for the exploration floor (§5) and is

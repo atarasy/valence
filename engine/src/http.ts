@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { type Mandate } from "./hub/mandates.js";
 import { challengeForGift } from "./shared/gift.js";
 import { longestCooling, tightestDailyCeiling, tightestOutOfNetworkCeiling } from "./engine/mandate-source.js";
-import { householdOfMandate, isHouseholdName } from "./common/names.js";
+import { householdOfMandate, isHouseholdName, nameOf, claimsToBeAKey } from "./common/names.js";
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole, unauthenticatedReport } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
@@ -259,7 +259,7 @@ export function createApp(
       return await route(engine, hub, roles, request);
     } catch (err) {
       if (err instanceof ValenceError) {
-        return json({ error: err.code, message: err.message }, err.status);
+        return json({ error: err.code, message: err.message, ...(err.detail ?? {}) }, err.status);
       }
       return json(
         { error: "internal", message: (err as Error).message },
@@ -1453,7 +1453,7 @@ async function route(
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
       // A /9 export predates question 70 and carries no `corrections`; its
       // settlements arrive uncorrected, which is what they were.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/10" && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
       if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/9") && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
@@ -1652,7 +1652,27 @@ async function route(
       // its collections and mandates, and could not be retried because those
       // offers were now held. An edge whose giver's key this host has not
       // attested is enough to refuse, so that happened with nobody at fault.
-      engine.checkImport(body_.offers ?? [], moving, body_.lineage ?? []);
+      // §14.2, `valence-node/11`. The keys the carried edges verify with. Each
+      // is checked against its own name before anything uses it, so a forged
+      // entry names itself and is refused; they are registered in the write
+      // phase below, because a refused import writes nothing.
+      const suppliedKeys: Record<string, string> = {};
+      const keysRaw = (body_ as { keys?: unknown }).keys;
+      if (keysRaw !== undefined) {
+        if (typeof keysRaw !== "object" || keysRaw === null || Array.isArray(keysRaw)) {
+          throw badRequest("malformed", "keys is a map from a key's name to its public key");
+        }
+        for (const [name, pem] of Object.entries(keysRaw as Record<string, unknown>)) {
+          if (typeof pem !== "string") throw badRequest("malformed", `the key of ${name} is not a string`);
+          // A name that is not the hash of a key proves nothing about the key
+          // sent under it, so it is refused rather than trusted.
+          let named: string | undefined;
+          try { named = nameOf(pem); } catch { named = undefined; }
+          if (!claimsToBeAKey(name) || named !== name) throw unprocessable("name_is_not_the_key", `${name} is not the name of the key it arrives with`);
+          suppliedKeys[name] = pem;
+        }
+      }
+      engine.checkImport(body_.offers ?? [], moving, body_.lineage ?? [], suppliedKeys);
       deliveries.checkRows(body_.deliveries ?? []);
       // §14.2, question 59. An offer this host holds exactly as it arrives has
       // been carried already, and so have its rows: each must match what this
@@ -1833,6 +1853,11 @@ async function route(
         engine.importCorrections(arrivingCorrections);
         for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
         for (const n of body_.notes ?? []) engine.importNote(n);
+        // The keys first: an edge is written only after the key it verifies
+        // with is here, and a key this host already holds is left as it is.
+        for (const [name, pem] of Object.entries(suppliedKeys)) {
+          if (engine.publicKeyFor(name) === undefined) engine.registerIdentity(name, pem);
+        }
         for (const e of body_.lineage ?? []) engine.importEdge(e, moving);
         engine.importReceipts(moving, body_.receipts ?? []);
         engine.importPayments(moving, body_.payments ?? []);
