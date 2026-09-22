@@ -20,7 +20,10 @@ export class PrivateNodeError extends Error {
 function unavailable(): never { throw new PrivateNodeError(404, 'private_record_unavailable'); }
 function invalid(): never { throw new PrivateNodeError(400, 'invalid_private_record'); }
 function conflict(): never { throw new PrivateNodeError(409, 'private_record_conflict'); }
-function owner(household: string) {
+// Exported for §14.3: leave sweeps `private_node_records` by this same digest,
+// rather than opening a second copy of this map (a Postgres map may be opened
+// only once per transaction; see `records.ts` and `store.ts`).
+export function owner(household: string) {
   return createHash('sha256').update(JSON.stringify(['atarasy.private-node-owner.1', household])).digest('hex');
 }
 function storageKey(ownerDigest: string, id: string) { return `${ownerDigest}:${id}`; }

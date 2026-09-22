@@ -51,6 +51,14 @@ export function openMandateBindings(path: Records, authority: Authority, login: 
       if (!before || !matches(before, evidence.binding)) throw new Error('Mandate binding unavailable');
       return evidence;
     },
+    /** §14.3. Trusted internal call only, after the caller has verified consent and blockers. */
+    deleteHousehold(household: string) {
+      return db.transaction(() => {
+        let n = 0;
+        bindings.deleteWhere(v => { if (v.household === household) { n++; return true; } return false; });
+        return n;
+      }).immediate();
+    },
     close() { db.close(); },
   });
 }

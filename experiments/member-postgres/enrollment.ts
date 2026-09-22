@@ -32,6 +32,15 @@ export function openEnrollment(path: Records, authority: ReturnType<typeof openM
         return dropped;
       }).immediate();
     },
+    /**
+     * §14.3. Trusted administration only, called after `cancelEnrolment` on the
+     * same principal. The WebAuthn user handle is retained by `cancelEnrolment`
+     * because it is what lets an in-progress enrolment resume; a household that
+     * has left has no enrolment to resume, so nothing needs it kept.
+     */
+    dropHandle(principal: string) {
+      handles.delete(principal);
+    },
     /** Trusted administration only. The bearer invitation selects the principal. */
     issueInvitation(principal: string) {
       if (!authority.isActivePrincipal(principal)) throw new Error('Principal unavailable');

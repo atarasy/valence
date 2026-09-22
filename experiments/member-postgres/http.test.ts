@@ -884,3 +884,133 @@ test('question 70: a household reads its own settled offer\'s corrections receip
  });
  expect((await s.send(path,undefined,foreign.token)).status).toBe(404);
 });
+async function enrollFreshHousehold(s:Awaited<ReturnType<typeof setup>>,principal:string){
+ const key=syntheticAuthenticator();
+ await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);r.authority.provisionUnclaimedPrincipal(principal,[]);});
+ const invitation=await s.unit.run(store=>memberRuntime(store,s.c,now).enrollment.issueInvitation(principal));
+ const enrolled=await (await s.send('/auth/enrollment/options',{invitation:invitation.token})).json();
+ const registered=await s.send('/auth/enrollment/verify',{id:enrolled.id,response:key.register(enrolled.publicKey.challenge,s.c.origin,s.c.rpID)});
+ if(registered.status!==201)throw new Error('fixture enrolment failed: '+registered.status);
+ const loginFlow=await (await s.send('/auth/login/options',{})).json(),user=enrolled.publicKey.user.id;
+ const signedIn=await s.send('/auth/login/verify',{id:loginFlow.id,response:key.authenticate(loginFlow.publicKey.challenge,s.c.origin,s.c.rpID,user,1)});
+ if(signedIn.status!==200)throw new Error('fixture login failed: '+signedIn.status);
+ const token=(await signedIn.json()).token as string;
+ const household=await s.unit.run(store=>{
+  const r=memberRuntime(store,s.c,now),name=r.authority.adoptHousehold(principal,key.id),pub=r.login.verifiedPublicKey(key.id)!;
+  r.engine.registerIdentity(name,createPublicKey({key:credentialSPKI(pub),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
+  return name;
+ });
+ return {key,user,token,household};
+}
+test('§14.3: a household with nothing pending can leave, its old session and passkey stop working, and an unrelated household on the host is untouched',async()=>{
+ const s=await setup();
+ const untouchedBefore=await s.unit.run(store=>({
+  principal:store.map<any>('member_principals').get('member'),
+  offer:store.map<any>('offers').get(s.input.statement.offer),
+  identity:store.map<any>('identities').get(s.input.house),
+ }));
+ const a=await enrollFreshHousehold(s,'leaving-member');
+ expect(await (await s.send('/member/account/leave',undefined,a.token)).json()).toEqual({profile:'atarasy.member-leave-status.1',household:a.household,blockers:[]});
+ const review=await (await s.send('/member/account/leave/prepare',{},a.token)).json();
+ expect(review).toMatchObject({profile:'atarasy.member-leave.1',household:a.household,origin:s.c.origin,rpID:s.c.rpID});
+ const assertion=a.key.authenticate(review.publicKey.challenge,s.c.origin,s.c.rpID,a.user,2);
+ const submitted=await s.send('/member/account/leave/submit',{preparation:review.id,assertion},a.token);
+ expect(submitted.status).toBe(200);
+ const left=await submitted.json();
+ expect(left).toMatchObject({profile:'atarasy.member-left.1',household:a.household});
+ expect(left.deleted).toMatchObject({principals:1,credentials:1,sessions:1,passkeys:1,identities:1});
+ expect((await s.send('/auth/session',undefined,a.token)).status).toBe(401);
+ const relogin=await (await s.send('/auth/login/options',{})).json();
+ const retry=await s.send('/auth/login/verify',{id:relogin.id,response:a.key.authenticate(relogin.publicKey.challenge,s.c.origin,s.c.rpID,a.user,3)});
+ expect(retry.status).not.toBe(200);
+ const leftBehind=await s.unit.run(store=>({
+  principal:store.map<any>('member_principals').get('leaving-member'),
+  credential:store.map<any>('member_credentials').get(a.key.id),
+  passkey:store.map<any>('member_passkeys').get(a.key.id),
+  identity:store.map<any>('identities').get(a.household),
+ }));
+ expect(leftBehind).toEqual({principal:undefined,credential:undefined,passkey:undefined,identity:undefined});
+ const untouchedAfter=await s.unit.run(store=>({
+  principal:store.map<any>('member_principals').get('member'),
+  offer:store.map<any>('offers').get(s.input.statement.offer),
+  identity:store.map<any>('identities').get(s.input.house),
+ }));
+ expect(untouchedAfter).toEqual(untouchedBefore);
+});
+test('§14.3: a household with an offer in progress cannot leave, and nothing changes',async()=>{
+ const s=await setup();
+ const status=await (await s.send('/member/account/leave',undefined,s.grant.token)).json();
+ expect(status.household).toBe(s.input.house);
+ expect(status.blockers.some((b:{kind:string})=>b.kind==='offer_in_progress')).toBe(true);
+ const before=await s.unit.run(store=>store.map<any>('member_principals').get('member'));
+ const refused=await s.send('/member/account/leave/prepare',{},s.grant.token);
+ expect(refused.status).toBe(409);
+ const body=await refused.json();
+ expect(body.error).toBe('leave_blocked');
+ expect(Array.isArray(body.blockers)).toBe(true);
+ expect(body.blockers.length).toBeGreaterThan(0);
+ const after=await s.unit.run(store=>store.map<any>('member_principals').get('member'));
+ expect(after).toEqual(before);
+});
+test('§14.3: a session alone cannot delete an account, whether the preparation is unknown, the assertion is over a different review, or the session is another household\'s',async()=>{
+ const s=await setup();
+ const a=await enrollFreshHousehold(s,'leaver-a'),b=await enrollFreshHousehold(s,'leaver-b');
+ const snapshotA=()=>s.unit.run(store=>store.map<any>('member_principals').get('leaver-a'));
+ const beforeA=await snapshotA();
+ const unknown=await s.send('/member/account/leave/submit',{preparation:randomUUID(),assertion:{}},a.token);
+ expect(unknown.status).not.toBe(200);
+ expect(await snapshotA()).toEqual(beforeA);
+ const reviewOne=await (await s.send('/member/account/leave/prepare',{},a.token)).json();
+ const reviewTwo=await (await s.send('/member/account/leave/prepare',{},a.token)).json();
+ const mismatched=await s.send('/member/account/leave/submit',{preparation:reviewOne.id,assertion:a.key.authenticate(reviewTwo.publicKey.challenge,s.c.origin,s.c.rpID,a.user,2)},a.token);
+ expect(mismatched.status).not.toBe(200);
+ expect(await snapshotA()).toEqual(beforeA);
+ const crossHousehold=await s.send('/member/account/leave/submit',{preparation:reviewTwo.id,assertion:{}},b.token);
+ expect(crossHousehold.status).not.toBe(200);
+ expect(await snapshotA()).toEqual(beforeA);
+});
+test('§14.3: a blocker that appears after prepare refuses the submission and deletes nothing',async()=>{
+ const s=await setup();
+ const c=await enrollFreshHousehold(s,'leaver-c');
+ const review=await (await s.send('/member/account/leave/prepare',{},c.token)).json();
+ await s.unit.run(store=>{
+  store.map<any>('member_permission_requests').set('late-request',{terms:{profile:'atarasy.permission-review.1',requestID:'late-request',household:c.household,action:'Check whether you already have it',requester:{id:'merchant-1',name:'Merchant One'},purpose:'Avoid a duplicate gift',fields:[{id:'duplicate_check',label:'Whether you already have a product'}],createdAt:now(),reviewExpiresAt:now()+10000,accessExpiresAt:now()+20000},digest:'unchecked-in-this-fixture',actionID:'late-action',product:'tea-a',privateDigest:'unchecked-in-this-fixture',state:'pending',permissionID:null,decidedAt:null});
+ });
+ const assertion=c.key.authenticate(review.publicKey.challenge,s.c.origin,s.c.rpID,c.user,2);
+ const refused=await s.send('/member/account/leave/submit',{preparation:review.id,assertion},c.token);
+ expect(refused.status).toBe(409);
+ const body=await refused.json();
+ expect(body.error).toBe('leave_blocked');
+ expect(body.blockers.some((b:{kind:string})=>b.kind==='permission_request_pending')).toBe(true);
+ const principal=await s.unit.run(store=>store.map<any>('member_principals').get('leaver-c'));
+ expect(principal).toBeDefined();
+});
+test('§14.3: an unexpired uncommitted operation, a pending mandate change and a pending recovery request each block leaving on their own',async()=>{
+ const s=await setup();
+ const d=await enrollFreshHousehold(s,'leaver-d');
+ expect((await (await s.send('/member/account/leave',undefined,d.token)).json()).blockers).toEqual([]);
+ await s.unit.run(store=>{
+  store.map<any>('member_operations').set('op-1',{id:'op-1',kind:'physical_statement',offer:'offer-1',mandate:'mandate-1',presenter:'merchant-1',canonical:'valence.statement.1\noffer-1\n',reviewedRevision:'r',principal:'leaver-d',credential:d.key.id,household:d.household,keyFingerprint:'f',requestDigest:'d',challenge:'c',createdAt:now(),state:'prepared',assertionFingerprint:null,receiptDigest:null,refusal:null,expiresAt:now()+10000});
+ });
+ const withOperation=await (await s.send('/member/account/leave',undefined,d.token)).json();
+ expect(withOperation.blockers).toEqual([{kind:'operation_pending',id:'op-1'}]);
+ await s.unit.run(store=>{store.map<any>('member_operations').delete('op-1');});
+ await s.unit.run(store=>{
+  store.map<any>('member_mandate_changes').set('change-1',{id:'change-1',before:{},mandate:{household:d.household},requiredSigners:[d.household],assertions:{},state:'pending',createdAt:now(),updatedAt:now()});
+ });
+ const withMandateChange=await (await s.send('/member/account/leave',undefined,d.token)).json();
+ expect(withMandateChange.blockers).toEqual([{kind:'mandate_change_pending',id:'change-1'}]);
+ await s.unit.run(store=>{store.map<any>('member_mandate_changes').delete('change-1');});
+ await s.unit.run(store=>{
+  store.map<any>('member_recovery_requests').set('request-1',{id:'request-1',owner:d.household,recoverer:'another-household',epoch:1,requesterPublicKey:'k',hostShare:'h',recovererPacket:'p',keyDigest:'k',noticeChannel:'anc1_x',state:'pending',release:null,noticeID:null,noticeReceipt:null,createdAt:now(),updatedAt:now()});
+ });
+ const withRecoveryRequest=await (await s.send('/member/account/leave',undefined,d.token)).json();
+ expect(withRecoveryRequest.blockers).toEqual([{kind:'recovery_request_pending',id:'request-1'}]);
+ await s.unit.run(store=>{store.map<any>('member_recovery_requests').delete('request-1');});
+ // Named as another household's recoverer in this service's own recovery.
+ await s.unit.run(store=>{store.map<any>('member_recovery_configurations').set('someone-else',{owner:'someone-else',recoverer:d.household,recovererKeyDigest:'r',keyDigest:'k',hostShare:'h',recovererPacket:'p',noticeChannel:'anc1_x',epoch:1,createdAt:now(),updatedAt:now()});});
+ const asRecoverer=await (await s.send('/member/account/leave',undefined,d.token)).json();
+ expect(asRecoverer.blockers).toEqual([{kind:'recoverer',id:'someone-else'}]);
+ await s.unit.run(store=>{store.map<any>('member_recovery_configurations').delete('someone-else');});
+ expect((await (await s.send('/member/account/leave',undefined,d.token)).json()).blockers).toEqual([]);
+});
