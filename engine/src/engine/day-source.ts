@@ -89,11 +89,20 @@ export class LocalDay implements DaySource {
 export class RemoteDay implements DaySource {
   constructor(
     private readonly base: string,
-    private readonly fetchImpl: typeof fetch = fetch
+    private readonly fetchImpl: typeof fetch = fetch,
+    // §16.3, question 67. The hub takes a report only from the engine, so
+    // the two writes carry this and the read does not.
+    private readonly credential?: string
   ) {}
 
   private url(path: string): string {
     return `${this.base.replace(/\/+$/, "")}${path}`;
+  }
+
+  private reportHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (this.credential) headers.authorization = `Bearer ${this.credential}`;
+    return headers;
   }
 
   async totalSince(household: string, since: number): Promise<number> {
@@ -141,7 +150,7 @@ export class RemoteDay implements DaySource {
     try {
       response = await this.fetchImpl(this.url(path), {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: this.reportHeaders(),
         body: JSON.stringify(row),
       });
     } catch (err) {
@@ -163,7 +172,7 @@ export class RemoteDay implements DaySource {
     try {
       response = await this.fetchImpl(this.url(path), {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: this.reportHeaders(),
         body: JSON.stringify(row),
       });
     } catch (err) {

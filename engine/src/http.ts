@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { CarriageQuotes } from "./hub/carriage-quote.js";
 import { isDeepStrictEqual } from "node:util";
 import { type Mandate } from "./hub/mandates.js";
@@ -5,7 +6,7 @@ import { challengeForGift } from "./shared/gift.js";
 import { longestCooling, tightestDailyCeiling, tightestOutOfNetworkCeiling } from "./engine/mandate-source.js";
 import { householdOfMandate, isHouseholdName } from "./common/names.js";
 import { atomically } from "./common/store.js";
-import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole } from "./common/errors.js";
+import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole, unauthenticatedReport } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
@@ -155,7 +156,26 @@ export type Hub = {
   /** §7.5b. Carriage and where the parcel is, on the person's side of clause 49. */
   deliveries: DeliveryRegister;
   quotes?: CarriageQuotes;
+  /**
+   * §16.3, question 67. The credential the engine presents when it reports a
+   * settlement or a decided offer to this hub. Unset, the hub takes no report
+   * over HTTP at all, which is right where one process presents both roles:
+   * the engine then writes the ledger in-process and nothing else may.
+   */
+  reportCredential?: string;
 };
+
+/**
+ * Whether a request carries the engine's report credential. Compared as
+ * digests of equal length in constant time, so the comparison says nothing
+ * about how much of a guess was right.
+ */
+function reportAuthenticated(hub: Hub, request: Request): boolean {
+  if (!hub.reportCredential) return false;
+  const given = createHash("sha256").update(request.headers.get("authorization") ?? "").digest();
+  const expected = createHash("sha256").update(`Bearer ${hub.reportCredential}`).digest();
+  return timingSafeEqual(given, expected);
+}
 
 /**
  * The composition root, and the only place the three sides meet.
@@ -1082,6 +1102,7 @@ async function route(
   }
 
   if (parts[0] === "households" && parts[2] === "offers" && method === "POST") {
+    if (!reportAuthenticated(hub, request)) throw unauthenticatedReport("only the engine reports a decided offer to the person's copy");
     const household = segment(parts[1]!);
     const raw = strict(
       await body(request),
@@ -1117,6 +1138,7 @@ async function route(
       });
     }
     if (method === "POST") {
+      if (!reportAuthenticated(hub, request)) throw unauthenticatedReport("only the engine reports a settlement to the person's day");
       const raw = strict(
         await body(request),
         ["offer", "household", "amount", "settled_at"],

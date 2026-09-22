@@ -56,16 +56,21 @@ ENGINE_ONLY="http://localhost:${ENGINE_ONLY_PORT}"
 HUB_ONLY_PORT=$((PORT + 300))
 HUB_ONLY="http://localhost:${HUB_ONLY_PORT}"
 
+# §16.3, question 67. The hub takes a settlement or offer report only from the
+# engine, which proves it with a credential both processes are given. A fresh
+# one per run, so no probe can have learned it.
+REPORT_TOKEN="$(openssl rand -hex 32)"
+
 # The engine-only process holds no mandates and is told where the hub is, which
 # is §13.1's interface: it asks over the endpoints rather than reading a store
 # it does not own. The URL is known before either starts, and the engine only
 # calls it when an offer needs a protection, so the order of these two lines
 # does not matter.
-PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_HUB_URL="$HUB_ONLY" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+PORT="$ENGINE_ONLY_PORT" VALENCE_ROLES=engine VALENCE_HUB_URL="$HUB_ONLY" VALENCE_ENGINE_REPORT_TOKEN="$REPORT_TOKEN" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 ENGINE_ONLY_PID=$!
 
-PORT="$HUB_ONLY_PORT" VALENCE_ROLES=hub VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
+PORT="$HUB_ONLY_PORT" VALENCE_ROLES=hub VALENCE_ENGINE_REPORT_TOKEN="$REPORT_TOKEN" VALENCE_RECOVERY_GRACE_DAYS=0 VALENCE_RP_ID=conformance.example VALENCE_EXPLORATION_RATE="${VALENCE_EXPLORATION_RATE:-0.2}" \
   bun src/server.ts &
 HUB_ONLY_PID=$!
 # PIPE matters: piping this script into `tail` kills it before an EXIT-only
