@@ -8,7 +8,7 @@ import { householdOfMandate, isHouseholdName, nameOf, claimsToBeAKey } from "./c
 import { atomically } from "./common/store.js";
 import { ValenceError, badRequest, notFound, conflict, unprocessable, notThisRole, unauthenticatedReport } from "./common/errors.js";
 import type { ValenceEngine } from "./engine/offers.js";
-import { leaveBlockers, leaveHost, checkLeaveSignature } from "./hub/leave.js";
+import { leaveBlockers, leaveHost, checkLeaveSignature, checkHouseholdSignature, canonicalExport } from "./hub/leave.js";
 import { exportNode, EXPORT_FORMAT_VERSION, type NodeExport, type RecoveryRegister, exportMerchant } from "./hub/node.js";
 import { EXCLUSION_RULES, type ApprovalDesk, type ExclusionRule } from "./hub/approval.js";
 import type { PermissionLedger } from "./hub/permissions.js";
@@ -124,6 +124,19 @@ const json = (body: unknown, status = 200) =>
  * passkey cannot sign bytes a caller hands it, so this is the only shape a
  * member holding one can send wherever a person is asked to sign.
  */
+/** §14.3, clause 43. A request a household signs: the moment, and a signature or an assertion over it. */
+async function readSignedRequest(request: Request, where: string): Promise<{ at: number; sent: { signature?: string; assertion?: Assertion } }> {
+  const raw = (await body(request)) as { at?: unknown; signature?: unknown; assertion?: unknown } | null;
+  const sent: { signature?: string; assertion?: Assertion } = {};
+  let at = Number.NaN;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    if (typeof raw.at === "number") at = raw.at;
+    if (typeof raw.signature === "string") sent.signature = raw.signature;
+    if (raw.assertion !== undefined) sent.assertion = readAssertion(raw.assertion, where);
+  }
+  return { at, sent };
+}
+
 function readAssertion(value: unknown, where: string): Assertion {
   const a = strict(value, ["authenticator_data", "client_data_json", "signature"], `${where} assertion`);
   return {
@@ -1403,6 +1416,17 @@ async function route(
   }
 
   if (parts[0] === "households" && parts[1] && parts[2] === "export") {
+    // Clause 43, through a hub that carries engine routes. The household signs
+    // the moment it asks, and only then is its node handed over: the export
+    // carries notes (clause 27) and permissions that no other carried read
+    // does, so a hub may not answer it to anyone who knows the identifier.
+    if (method === "POST") {
+      const household = segment(parts[1]);
+      const { at, sent } = await readSignedRequest(request, "this export");
+      checkHouseholdSignature(engine, household, canonicalExport(household, engine.relyingPartyId, at), at, sent);
+      await engine.settleWhatOwesNothing(household);
+      return json(exportNode(engine, recovery, permissions, engine.mandates, deliveries, household, Date.now(), hub.quotes));
+    }
     // Clause 43. Everything the household holds, whatever a surface shows.
     if (method === "GET") {
       // §13.2, question 55. The segment is decoded, as it is on the import
@@ -1430,13 +1454,8 @@ async function route(
       // §14.3. Over HTTP the household signs; the member API holds its own
       // signature and calls the library instead. Without this the hub in front
       // of the engine would delete any household anyone named.
-      const raw = (await body(request)) as { signature?: unknown; assertion?: unknown };
-      const sent: { signature?: string; assertion?: Assertion } = {};
-      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-        if (typeof raw.signature === "string") sent.signature = raw.signature;
-        if (raw.assertion !== undefined) sent.assertion = readAssertion(raw.assertion, "this deletion");
-      }
-      checkLeaveSignature(leaveContext, household, sent);
+      const { at, sent } = await readSignedRequest(request, "this deletion");
+      checkLeaveSignature(leaveContext, household, at, sent);
       return json(leaveHost(leaveContext, household, Date.now()));
     }
   }

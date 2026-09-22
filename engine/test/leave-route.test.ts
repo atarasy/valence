@@ -7,7 +7,7 @@ import { RecoveryRegister } from "../src/hub/node.js";
 import { PermissionLedger } from "../src/hub/permissions.js";
 import { Registry } from "../src/shared/registry.js";
 import { sign } from "node:crypto";
-import { canonicalLeave } from "../src/hub/leave.js";
+import { canonicalLeave, canonicalExport } from "../src/hub/leave.js";
 import { makeEngine, HOUSEHOLD, MANDATE, CONFIG_VERSION, HOUR, MANDATE_PAIR } from "./helpers.js";
 
 function host() {
@@ -16,7 +16,7 @@ function host() {
   return { engine, app };
 }
 const path = (household: string) => `https://unit.example/households/${encodeURIComponent(household)}/leave`;
-const signedLeave = (household: string, rpID: string) => ({ signature: sign(null, canonicalLeave(household, rpID), MANDATE_PAIR.privateKey).toString("base64") });
+const signedLeave = (household: string, rpID: string, at = Date.now()) => ({ at, signature: sign(null, canonicalLeave(household, rpID, at), MANDATE_PAIR.privateKey).toString("base64") });
 const post = (h: ReturnType<typeof host>, household: string, body: unknown) => h.app(new Request(path(household), { method: "POST", body: JSON.stringify(body) }));
 
 test("§14.3: the route answers the blockers, refuses while one holds, and deletes when none does", async () => {
@@ -58,12 +58,27 @@ test("§14.3: the household in the path is decoded, so an identifier with a colo
 test("§14.3: the route deletes nothing without the household's own signature", async () => {
   const h = host();
   h.engine.registerIdentity(HOUSEHOLD, MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
-  for (const body of [{}, { signature: "" }, { signature: Buffer.from("not a signature").toString("base64") }, { signature: sign(null, canonicalLeave(HOUSEHOLD, "another.example"), MANDATE_PAIR.privateKey).toString("base64") }, { signature: sign(null, canonicalLeave("key:someone-else", h.engine.relyingPartyId), MANDATE_PAIR.privateKey).toString("base64") }]) {
+  for (const body of [{}, { signature: "" }, { signature: Buffer.from("not a signature").toString("base64") }, { at: Date.now(), signature: sign(null, canonicalLeave(HOUSEHOLD, "another.example", Date.now()), MANDATE_PAIR.privateKey).toString("base64") }, { at: Date.now(), signature: sign(null, canonicalLeave("key:someone-else", h.engine.relyingPartyId, Date.now()), MANDATE_PAIR.privateKey).toString("base64") }, signedLeave(HOUSEHOLD, h.engine.relyingPartyId, Date.now() - 10 * 60_000)]) {
     const answer = await post(h, HOUSEHOLD, body);
     expect(answer.status).toBe(422);
-    expect(["unsigned", "bad_signature"]).toContain((await answer.json() as { error: string }).error);
+    expect(["unsigned", "bad_signature", "stale_request"]).toContain((await answer.json() as { error: string }).error);
     expect(h.engine.departures()).toEqual([]);
   }
   const ok = await post(h, HOUSEHOLD, signedLeave(HOUSEHOLD, h.engine.relyingPartyId));
   expect(ok.status).toBe(200);
 });
+
+test("clause 43: the node is handed over through a carried route only on the household's own recent signature", async () => {
+  const h = host();
+  h.engine.registerIdentity(HOUSEHOLD, MANDATE_PAIR.publicKey.export({ type: "spki", format: "pem" }).toString());
+  const url = `https://unit.example/households/${encodeURIComponent(HOUSEHOLD)}/export`;
+  const signedExport = (at: number) => ({ at, signature: sign(null, canonicalExport(HOUSEHOLD, h.engine.relyingPartyId, at), MANDATE_PAIR.privateKey).toString("base64") });
+  for (const body of [{}, signedExport(Date.now() - 10 * 60_000), { at: Date.now(), signature: sign(null, canonicalLeave(HOUSEHOLD, h.engine.relyingPartyId, Date.now()), MANDATE_PAIR.privateKey).toString("base64") }]) {
+    const refused = await h.app(new Request(url, { method: "POST", body: JSON.stringify(body) }));
+    expect(refused.status).toBe(422);
+  }
+  const ok = await h.app(new Request(url, { method: "POST", body: JSON.stringify(signedExport(Date.now())) }));
+  expect(ok.status).toBe(200);
+  expect((await ok.json() as { household: string }).household).toBe(HOUSEHOLD);
+});
+
