@@ -35,3 +35,36 @@ See [the migration lifecycle](OPERATIONAL_SNAPSHOT.md) for candidate identity, a
 ## Build identity
 
 Run `bun deployment/build.ts /absolute/new-output-directory` from this package. The parent must exist and the output directory must not exist. The build refuses overwriting an earlier artifact, bundles the API and writes `runtime-manifest.json` with file sizes, SHA-256 digests, deployment identity, configuration fingerprint and a combined fingerprint. Record that combined value in the migration plan; keep the exact reviewed directory intact. A manifest is content-addressing metadata, not a publisher signature. Any rebuild needs a newly reviewed plan when its fingerprint changes.
+
+## Rebinding a deployment's runtime profile
+
+`http.ts`'s `binding()` refuses every request with `Bound runtime mismatch` once the running build's runtime profile or fingerprint disagrees with the `member_config/current` row a deployment was first bound under. #41 (2026-09-22) raised the profile from `atarasy.member-runtime.1` to `.2` by adding `androidAppOrigins`, and the deployed build answered 503 on every route for about a minute because nothing had moved the stored binding forward first. `migration-command.ts` cannot do this: `restore`/`activate` move a whole deployment between databases, and every one of its commands already refuses a source not bound to the *current* profile, so there was no path from `.1` to `.2` short of an operator hand-editing the row.
+
+Use it when a config.ts change bumps the runtime profile (a new required field, a changed validation rule) and a live deployment must move to it without a database migration:
+
+```bash
+export ATARASY_MIGRATION_SOURCE_URL="postgres://user@host:port/an_isolated_database"
+bun rebind-runtime.ts /secure/rebind-plan.json            # dry run: reports the transition, writes nothing
+bun rebind-runtime.ts /secure/rebind-plan.json --write     # applies it
+```
+
+The plan is a regular JSON file, at most 64 KiB; symbolic links are refused. It contains exactly `identity` (the deployment's existing `{id, environment, origin, epoch}`) and `config` (the complete new `MemberRuntimeConfig`, validated the same way `http.ts` validates one on every start). The connection string comes only from `ATARASY_MIGRATION_SOURCE_URL`; a pooler host (`*-pooler*`) is refused, the same as `migrate.ts`, because the command needs the application's own consistent lock (`postgresStore(...).run(...)`), not a pooled connection.
+
+The command refuses unless the source profile it finds bound is in an explicit allow-list, and today that list has one entry: `atarasy.member-runtime.1` to `.2`, permitted to add exactly `androidAppOrigins: []`. Every other configuration key must already be identical between the bound row and the plan's `config`; a plan that also changes, say, `explorationRate` is refused rather than silently carrying the second change through. Extending the list to a future profile bump is a code change to `rebind-runtime.ts`, reviewed like any other widening of what an operator command is allowed to do; it never grows to permit an unlisted field or a downgrade. If the deployment is already bound to the plan's exact profile and configuration, the command is a no-op that reports `already bound`.
+
+Always run the dry run first and read `differing` before passing `--write`. Take a Neon backup branch of the target database before writing, the same discipline as any other operator command against a live deployment (`OPERATIONAL_SNAPSHOT.md`). Once `--write` succeeds, **promote the new build immediately**: the old build's own `binding()` check now refuses every request against the rebound row (it still expects the old profile), so the window between rebinding and promoting is exactly the outage #41 produced, and rebinding first only means the *next* deploy fixes it rather than every deploy after a rebuild.
+
+The command prints one small JSON summary (`deployment`, `from`, `to`, `action`, `differing`) on success and a fixed, generic message on any refusal; it never prints a connection string, a member row or a driver error, and it always closes its own pool. Tests exercise it against a synthetic deployment and the executable CLI as a subprocess, including redaction of connection failures. No hosted database is part of that test.
+
+### Mutation coverage
+
+This package has a mutation corpus (`scripts/mutate.sh`, `scripts/sweep.sh`) but no separate results ledger, so the three mutations this branch added are recorded here rather than in a file that does not exist. Each was run in isolation with `./scripts/mutate.sh <name>` against a disposable local PostgreSQL, which runs all four experiment packages and reports CAUGHT, SURVIVED, INERT or ABORTED from the run's own pass/fail counts, not from an exit code alone.
+
+| Mutation | Removes | Verdict |
+|---|---|---|
+| `rebind_accepts_any_source_profile` | The allow-list lookup in `runRebindCommand`, so any bound profile (including one this codebase never issued) is treated as eligible for the requested transition | CAUGHT (1 of 279) |
+| `rebind_ignores_other_key_changes` | The check that every configuration key besides the transition's addition is identical between the bound row and the plan | CAUGHT (1 of 279) |
+| `rebind_ignores_dropped_keys` | The union of the bound and planned keys in that comparison, so a key the plan drops is not a difference | CAUGHT (1 of 280) |
+| `failure_reason_leaks_unknown_messages` | `failureReason()`'s fallback to the error's bare name, returning the raw message instead, which is exactly what the safe-message allow-list exists to stop | CAUGHT (3 of 279) |
+
+Each caught mutation restored the source to its committed state on exit, verified by `git status` afterwards. The catching tests are, respectively, `rebind-runtime.test.ts`'s "refuses an outside-the-allow-list source profile even when its stored config already matches the target" (written specifically to isolate the allow-list check from the other-key check, since every prior test happened to trip both at once), "refuses when a key besides androidAppOrigins differs from the bound config", and `deployment/entry.test.ts`'s "an unlisted message is never printed" together with the pg-style redaction test.
