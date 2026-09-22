@@ -25,6 +25,15 @@ export const notFound = (message: string) =>
 export const notThisRole = (message: string) =>
   new ValenceError(404, "not_this_role", message);
 
+/**
+ * §16.3, question 67. A report only the engine may make, from a caller that
+ * did not prove it is the engine. The two routes the engine reports to the
+ * person's copy through took any row from any caller, so a stranger could
+ * empty a household's day or fill it past every settlement.
+ */
+export const unauthenticatedReport = (message: string) =>
+  new ValenceError(401, "unauthenticated_report", message);
+
 export const conflict = (code: string, message: string) =>
   new ValenceError(409, code, message);
 

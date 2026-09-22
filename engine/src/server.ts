@@ -106,7 +106,19 @@ const engine = new ValenceEngine(ledger, {
   },
 }, store);
 
+// §16.3, question 67. The credential the engine presents when it reports a
+// settlement or a decided offer to a hub in another process. Both processes
+// are given the same value. Unset, a hub takes no report over HTTP, and an
+// engine pointed at a remote hub has nothing to present, so it is refused
+// below rather than at the first settlement.
+const reportCredential = process.env.VALENCE_ENGINE_REPORT_TOKEN || undefined;
+if (reportCredential !== undefined && reportCredential.length < 32) {
+  console.error("VALENCE_ENGINE_REPORT_TOKEN must be at least 32 characters (SPEC §16.3).");
+  process.exit(1);
+}
+
 const hub = {
+  reportCredential,
   recovery: new RecoveryRegister(store),
   approvals: new ApprovalDesk(store),
   permissions: new PermissionLedger(store),
@@ -131,7 +143,15 @@ const roles = rolesFrom(process.env.VALENCE_ROLES);
 engine.readDeliveriesFrom(new LocalDeliveries(hub.deliveries));
 if (process.env.VALENCE_HUB_URL) {
   engine.readMandatesFrom(new RemoteMandates(process.env.VALENCE_HUB_URL));
-  engine.readTheDayFrom(new RemoteDay(process.env.VALENCE_HUB_URL));
+  if (!roles.has("hub") && reportCredential === undefined) {
+    console.error(
+      "VALENCE_ROLES presents the engine without the hub, and the hub takes a\n" +
+        "settlement report only from the engine. Set VALENCE_ENGINE_REPORT_TOKEN on\n" +
+        "both processes (SPEC §16.3)."
+    );
+    process.exit(1);
+  }
+  engine.readTheDayFrom(new RemoteDay(process.env.VALENCE_HUB_URL, fetch, reportCredential));
   if (!roles.has("hub")) {
     engine.readDeliveriesFrom(new RemoteDeliveries(process.env.VALENCE_HUB_URL));
   }
