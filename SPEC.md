@@ -903,6 +903,27 @@ An import is an arrival from outside, not a restore of the host's own backup, so
 
 **What an import does not do is verify a decision, and it cannot.** A confirmation is a signature over the canonical bytes or an assertion whose challenge is their hash (§10.5), and an assertion names the host it was made for, so a host cannot check one made at another: the check would have to accept any name, which is worth nothing, or rest on a list of legitimate hub names, which is an authority this specification does not have. **So a move is a claim by the sending host rather than a proof**, and clause 52's promise is that a person can leave with what they hold, not that a receiving host can prove how it came about. Deciding this on 2026-09-11 is what left the rule above as the whole of the answer: who may call this route is the host's business (§13.2), and the reference authenticates nobody, which is why the route was reachable by anyone at all.
 
+### 14.3 A household leaves a host
+
+**Draft, 2026-09-22, not yet decided.** A hub that lets a person create an account lets them delete it (Apple App Review Guideline 5.1.1(v); vault `77`). Leaving is not moving: nothing is imported anywhere, and what the household wants kept it takes with an export first (§14, clause 43). The founder decided the shape on 2026-09-22; the rules below are the proposal for review.
+
+**Deletion is a member operation signed like any other.** An implementation MUST require the household's signature under a user-verified assertion over a request naming the household and this host (§10.5), and MUST NOT delete on a session alone, because a session is what a stolen device carries. A hub SHOULD offer the full export (§14) before it asks for the signature.
+
+**An implementation MUST refuse to delete while anything is in progress**, and MUST name each thing it refused for, so that the person can finish it:
+
+- an offer of the household's at `drafted`, `presented` or `decided`, an `expired` offer with a line that still owes a settlement, or an `expired` physical box whose collection has not happened (the same set §14 leaves behind on a move);
+- a settlement statement awaiting the household's signature (§6.5), a reservation held on its ledger, or a gift it pays for whose money has not finished moving (§12);
+- a pending mandate change, recovery request or permission request it started;
+- **a role it holds for another household**: a co-signer on another household's mandate (§16.1) or a recoverer of another household (clause 53). Deleting a co-signer would leave that mandate impossible to loosen, which clause 47 does not allow to happen by one party's act; stepping down is a loosening the leaving household can sign before it goes.
+
+**What is deleted.** Everything this host holds that is the household's alone: its principals, credentials, passkeys, sessions, mandates and claims, the permission ledger and its queries, its private records, its recovery configuration, and its operations and reviews. And the host's copies of what it shares with merchants: its offers, settlements, corrections, receipts, notes, collections, deliveries and carriage quotes. A merchant keeps its own copy through `valence-merchant/1` (§14.1), and the duty to keep a record of a sale is the seller's, not the host's.
+
+**What another household holds is not the leaving household's to delete.** A gift the household gave or received stays in the other household's records unchanged, with its lineage edge, because the other household's receipt and its exploration floor (§5.1) rest on them, and changing the signed bytes would break the signature §14.2 verifies when that household moves. A hub MUST display the departed party as a member who has left, not by any identifier. **The departed household's public key is retained exactly as long as a remaining household's edge or gift needs it to verify**, and removed with the last such row; a public key without the credentials, sessions and mandates deleted beside it identifies no one to this host.
+
+**Afterwards.** A presenter route naming a deleted offer answers `404 not_found`, the same as an offer that never existed, so a merchant learns nothing about a household from asking; a correction for one (§6.6) is refused the same way and is the merchant's to handle outside the protocol. An implementation MUST keep, for its own audit, the fact that a household identifier was deleted and when, and nothing else about it. The same passkey enrolling again later creates a household again with nothing of the old one's history, because none remains.
+
+**Open for review**: whether §14's export should gain a field saying the node was exported for deletion; how long the audit fact is kept; and whether a host may keep the shared copies for a period when a dispute with a merchant is open.
+
 ----
 
 ## 14b. Deployment parameters
