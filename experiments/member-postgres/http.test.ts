@@ -1014,3 +1014,23 @@ test('§14.3: an unexpired uncommitted operation, a pending mandate change and a
  await s.unit.run(store=>{store.map<any>('member_recovery_configurations').delete('someone-else');});
  expect((await (await s.send('/member/account/leave',undefined,d.token)).json()).blockers).toEqual([]);
 });
+test('clause 43: a member exports its own node in full, another household sees none of it, and the export stops with the account',async()=>{
+ const s=await setup();
+ const own=await s.send('/member/account/export',undefined,s.grant.token);
+ expect(own.status).toBe(200);
+ const exported=await own.json();
+ expect(exported).toMatchObject({profile:'atarasy.member-export.1',household:s.input.house});
+ expect(exported.node.offers.map((o:{id:string})=>o.id)).toContain(s.input.statement.offer);
+ // The host's share never leaves with a personal copy.
+ expect(JSON.stringify(exported)).not.toContain('hostShare');
+ const a=await enrollFreshHousehold(s,'exporting-member');
+ const other=await (await s.send('/member/account/export',undefined,a.token)).json();
+ expect(other.household).toBe(a.household);
+ expect(JSON.stringify(other)).not.toContain(s.input.statement.offer);
+ expect((await s.send('/member/account/export',undefined,'')).status).toBe(401);
+ expect((await s.send('/member/account/export',{},a.token)).status).toBe(405);
+ const review=await (await s.send('/member/account/leave/prepare',{},a.token)).json();
+ const submitted=await s.send('/member/account/leave/submit',{preparation:review.id,assertion:a.key.authenticate(review.publicKey.challenge,s.c.origin,s.c.rpID,a.user,2)},a.token);
+ expect(submitted.status).toBe(200);
+ expect((await s.send('/member/account/export',undefined,a.token)).status).toBe(401);
+},60000);
