@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Textual occurrences of refusal names, for a manual contract review.
 
-Lands as `valence/engine/scripts/refusals.py`, beside `anchors.py`, and is run
-the same way: in seconds, before any coverage figure is quoted.
+Lands as `valence/engine/scripts/refusals.py`, and runs in seconds.
 
 **Why it exists.** §16.6's whole subject is that a person must be able to tell
 one `422` from another, and on 2026-09-13 it was the least covered section in
@@ -15,14 +14,14 @@ probe was pinning the engine's departure from the section it sits nearest to.
 **This is a presence scan, not a proof of definition or assertion.** A name
 can occur in ordinary specification prose, a test comment or a request value.
 The scan also omits codes constructed outside the helper calls below. A probe
-that asserts the response error can catch a mutation that renames it; a
+that asserts the response error can catch a change that renames it; a
 status-only probe cannot. Read the actual trigger and assertion before
 interpreting these columns as coverage.
 
     cd engine && python3 scripts/refusals.py
 
-It judges nothing. It prints three columns for a person to read, the way
-`anchors.py` prints a list of scripts rather than a verdict.
+It judges nothing. It prints three columns for a person to read rather than a
+verdict.
 """
 import os
 import pathlib
