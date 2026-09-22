@@ -38,6 +38,7 @@ import type {
 } from "./common/types.js";
 import type { DisclosureContact } from "./shared/disclosure.js";
 import { CORRECTION_KINDS, type Correction } from "./shared/correction.js";
+import { RETURN_STATES, owedFor, returnsInOrder, type CorrectionReturn } from "./shared/correction-return.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -946,12 +947,42 @@ async function route(
         // The household's receipt: the original, each correction and the net.
         const corrections = engine.correctionsFor(id);
         const corrected = corrections.reduce((sum, c) => sum + c.amount, 0);
+        // §6.6a. `returns` and `owed` are present only where a refund came
+        // back. Clients decode this receipt's keys exactly, so a key that is
+        // always there, even empty or null, would fail every receipt a client
+        // built before §6.6a reads.
+        const returns = engine.returnsFor(id);
         return json({
           offer: id,
           original: { charged: settlement.charged, carriage },
           corrections,
           net: settlement.charged + (carriage ?? 0) - corrected,
+          ...(returns.length ? { returns: returnsInOrder(returns), owed: owedFor(corrections, returns) } : {}),
         });
+      }
+      if (action === "returns" && method === "POST") {
+        // §6.6a. A refund the card issuer returned, and later its repayment
+        // another way, appended beside the correction by the same merchant.
+        // An offer with no settlement has no correction, and answers as the
+        // corrections route does.
+        if (!engine.settlement(id)) throw notFound(`offer ${id} has no settlement`);
+        const raw = strict(await body(request), ["correction", "merchant", "state", "note", "at", "signature"], "return");
+        const note = raw.note === undefined ? "" : raw.note;
+        if (typeof note !== "string" || note.length > 500) {
+          throw badRequest("malformed", "return: note must be a string of at most 500 characters");
+        }
+        const at = requireInteger(raw, "at", "return", 0);
+        if (!Number.isSafeInteger(at)) throw badRequest("malformed", "return: at must be a safe integer");
+        const { record, created } = engine.appendReturn({
+          correction: requireString(raw, "correction", "return"),
+          offer: id,
+          merchant: requireString(raw, "merchant", "return"),
+          state: requireEnum(raw, "state", "return", RETURN_STATES),
+          note,
+          at,
+          signature: requireString(raw, "signature", "return"),
+        });
+        return json(record, created ? 201 : 200);
       }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can
@@ -1472,14 +1503,14 @@ async function route(
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
       // A /9 export predates question 70 and carries no `corrections`; its
       // settlements arrive uncorrected, which is what they were.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/10" && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/11" && body_.format !== "valence-node/10" && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
-      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/9") && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
+      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/11" || body_.format === "valence-node/9") && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
       // §6.6, question 70. The same shape check the other registers get, and
       // stricter: a correction is a signed record, so every row has exactly
       // the fields the merchant signed and names the offer it is filed under.
-      if (body_.format === EXPORT_FORMAT_VERSION && body_.corrections === undefined) throw badRequest("malformed", "current archives must carry corrections");
+      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/11") && body_.corrections === undefined) throw badRequest("malformed", "current archives must carry corrections");
       const arrivingCorrections = body_.corrections ?? {};
       if (arrivingCorrections === null || typeof arrivingCorrections !== "object" || Array.isArray(arrivingCorrections)) {
         throw badRequest("malformed", "corrections must map offer ids to lists of corrections");
@@ -1496,6 +1527,31 @@ async function route(
           if (r.offer !== offerId) throw badRequest("malformed", `a correction filed under ${offerId} names ${String(r.offer)}`);
           if (ids.has(r.id as string)) throw badRequest("malformed", `corrections for ${offerId} name ${String(r.id)} twice`);
           ids.add(r.id as string);
+        }
+      }
+      // §6.6a. Required from /12. An older archive carries none, and its
+      // corrections arrive with no record that a refund came back; one that
+      // does carry the field is held to the same rules as a current one, as
+      // `corrections` is.
+      const returnsRaw = (body_ as { correction_returns?: unknown }).correction_returns;
+      if (body_.format === EXPORT_FORMAT_VERSION && returnsRaw === undefined) throw badRequest("malformed", "current archives must carry correction_returns");
+      const arrivingReturns = (returnsRaw ?? {}) as Record<string, CorrectionReturn[]>;
+      if (arrivingReturns === null || typeof arrivingReturns !== "object" || Array.isArray(arrivingReturns)) {
+        throw badRequest("malformed", "correction_returns must map offer ids to lists of records");
+      }
+      for (const [offerId, list] of Object.entries(arrivingReturns)) {
+        if (!Array.isArray(list) || list.length === 0) throw badRequest("malformed", "each offer's correction_returns are a non-empty list");
+        const seen = new Set<string>();
+        for (const x of list as unknown[]) {
+          const r = strict(x, ["correction", "offer", "merchant", "state", "note", "at", "signature"], "return");
+          requireString(r, "correction", "return"); requireString(r, "merchant", "return"); requireString(r, "signature", "return");
+          requireEnum(r, "state", "return", RETURN_STATES);
+          if (!Number.isSafeInteger(requireInteger(r, "at", "return", 0))) throw badRequest("malformed", "return: at must be a safe integer");
+          if (typeof r.note !== "string" || r.note.length > 500) throw badRequest("malformed", "return: note must be a string of at most 500 characters");
+          if (r.offer !== offerId) throw badRequest("malformed", `a return filed under ${offerId} names ${String(r.offer)}`);
+          const key = `${r.correction as string}\n${r.state as string}`;
+          if (seen.has(key)) throw badRequest("malformed", `returns for ${offerId} name ${String(r.state)} for ${String(r.correction)} twice`);
+          seen.add(key);
         }
       }
       const arrivingQuotes = body_.carriage_quotes ?? [];
@@ -1640,6 +1696,7 @@ async function route(
         if (body_.confirmations) for (const id of leftBehind) delete body_.confirmations[id];
         if (body_.decided_protections) for (const id of leftBehind) delete body_.decided_protections[id];
         for (const id of leftBehind) delete arrivingCorrections[id];
+        for (const id of leftBehind) delete arrivingReturns[id];
       }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
@@ -1658,6 +1715,20 @@ async function route(
       for (const id of Object.keys(arrivingCorrections)) {
         if (!carried.has(id)) {
           throw unprocessable("unscoped_correction", `a correction names ${id}, which this import does not carry`);
+        }
+      }
+      // §6.6a. A return record names an offer and a correction this body
+      // carries: unscoped, a body of nothing but returns would tell a
+      // household a refund it received never arrived, or the reverse.
+      for (const [id, list] of Object.entries(arrivingReturns)) {
+        if (!carried.has(id)) {
+          throw unprocessable("unscoped_return", `a return record names ${id}, which this import does not carry`);
+        }
+        const carriedCorrections = new Set((arrivingCorrections[id] ?? []).map((c) => c.id));
+        for (const r of list) {
+          if (!carriedCorrections.has(r.correction)) {
+            throw unprocessable("unscoped_return", `a return record names correction ${r.correction} on ${id}, which this import does not carry`);
+          }
         }
       }
       for (const id of Object.keys(body_.decided_protections ?? {})) {
@@ -1748,6 +1819,10 @@ async function route(
           const arriving = arrivingCorrections[id];
           if (arriving && !isDeepStrictEqual(engine.correctionsFor(id), arriving)) throw differs("corrections for", id);
           delete arrivingCorrections[id];
+          // §6.6a. The same for what became of them.
+          const arrivingR = arrivingReturns[id];
+          if (arrivingR && !isDeepStrictEqual(engine.returnsFor(id), arrivingR)) throw differs("correction returns for", id);
+          delete arrivingReturns[id];
         }
       }
       // §6.6. Every correction that will be written meets what one appended
@@ -1758,6 +1833,15 @@ async function route(
         if (!settlement) throw unprocessable("correction_without_settlement", `a correction names ${id}, whose settlement this import does not carry`);
         const carriage = (body_.deliveries ?? []).find((d) => d.offer === id)?.carriage ?? null;
         list.forEach((c, i) => engine.checkCorrection(c, settlement, carriage, list.slice(0, i)));
+      }
+      // §6.6a. Every return record that will be written meets what one
+      // appended here does, against the corrections this body carries.
+      for (const [id, list] of Object.entries(arrivingReturns)) {
+        const corrections = arrivingCorrections[id] ?? [];
+        list.forEach((r, i) => {
+          const correction = corrections.find((c) => c.id === r.correction)!;
+          engine.checkReturn(r, correction, list.slice(0, i));
+        });
       }
       // §14.2, question 52. Every row names the household on the path or an
       // offer this body carries, and none replaces a row the host holds. Only
@@ -1870,6 +1954,7 @@ async function route(
         }
         engine.importDecidedProtections(body_.decided_protections ?? {});
         engine.importCorrections(arrivingCorrections);
+        engine.importReturns(arrivingReturns);
         for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
         for (const n of body_.notes ?? []) engine.importNote(n);
         // The keys first: an edge is written only after the key it verifies

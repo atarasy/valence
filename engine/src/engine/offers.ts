@@ -9,6 +9,7 @@ import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
 import { verifyCorrection, type Correction } from "../shared/correction.js";
+import { verifyCorrectionReturn, type CorrectionReturn } from "../shared/correction-return.js";
 import { canonicalStatement, disputable, needsStatement, owesSettlement, statementLines } from "../shared/statement.js";
 import { canonicalGift, type GiftTerms } from "../shared/gift.js";
 import {
@@ -245,6 +246,11 @@ export class ValenceEngine {
    * in the order they arrived. The settlement itself is never rewritten.
    */
   private readonly corrections: Map<string, Correction[]>;
+  /**
+   * §6.6a. What became of a refund correction after it was made: returned by
+   * the card issuer, then repaid another way. By offer, in arrival order.
+   */
+  private readonly correctionReturns: Map<string, CorrectionReturn[]>;
   /** §7.1. Keys an identity root endorsed, as against keys merely registered here. */
   private readonly rootEndorsed: Map<string, true>;
   /**
@@ -502,6 +508,7 @@ export class ValenceEngine {
     this.disclosures = store.map("disclosures");
     this.confirmations = store.map("confirmations");
     this.corrections = store.map("corrections");
+    this.correctionReturns = store.map("correction_returns");
     this.rootEndorsed = store.map("root_endorsed");
     this.departedHouseholds = store.map("departed_households");
     this.recoveries = new RecoveryLedger(store);
@@ -2894,6 +2901,73 @@ export class ValenceEngine {
     }
   }
 
+  /** §6.6a. What became of this offer's refunds, in the order it arrived. */
+  returnsFor(offerId: string): CorrectionReturn[] {
+    return (this.correctionReturns.get(offerId) ?? []).map((r) => ({ ...r }));
+  }
+
+  /**
+   * §6.6a. Append a merchant's signed record that a refund came back, or that
+   * it was repaid another way. At most one of each per correction. The same
+   * record sent twice is one record; the same correction and state with
+   * anything different is refused, so a retry never becomes a second record.
+   */
+  appendReturn(r: CorrectionReturn): { record: CorrectionReturn; created: boolean } {
+    const correction = (this.corrections.get(r.offer) ?? []).find((c) => c.id === r.correction);
+    if (!correction) throw new ValenceError(404, "unknown_correction", `offer ${r.offer} has no correction ${r.correction}`);
+    const existing = this.correctionReturns.get(r.offer) ?? [];
+    const same = existing.find((e) => e.correction === r.correction && e.state === r.state);
+    if (same) {
+      if (isDeepStrictEqual(same, r)) return { record: { ...same }, created: false };
+      throw conflict("return_conflict", `a ${r.state} record for correction ${r.correction} was already recorded with different content`);
+    }
+    this.checkReturn(r, correction, existing);
+    const stored = { ...r };
+    this.correctionReturns.set(r.offer, [...existing, stored]);
+    return { record: { ...stored }, created: true };
+  }
+
+  /**
+   * §6.6a. Every rule a return record is held to beyond its identity, against
+   * the correction it names and the records before it. Shared by the route
+   * and by a move, as `checkCorrection` is.
+   */
+  checkReturn(r: CorrectionReturn, correction: Correction, prior: CorrectionReturn[]): void {
+    // Only a refund can come back. A corrected collection moved no money.
+    if (correction.kind !== "refund") throw unprocessable("not_a_refund", `correction ${correction.id} is not a refund`);
+    if (r.merchant !== correction.merchant) {
+      throw unprocessable("not_merchant_of_record", `correction ${correction.id} is ${correction.merchant}'s, not ${r.merchant}'s`);
+    }
+    const pem = this.identities.get(r.merchant);
+    if (!pem) throw unprocessable("unknown_merchant", `no key is registered for ${r.merchant}`);
+    if (!verifyCorrectionReturn(r, pem)) throw unprocessable("bad_signature", `this record is not signed by ${r.merchant}`);
+    if (r.at < correction.corrected_at) {
+      throw unprocessable("return_before_correction", "a refund cannot come back before it was made");
+    }
+    if (r.state === "repaid") {
+      const returned = prior.find((e) => e.correction === r.correction && e.state === "returned");
+      if (!returned) throw conflict("not_returned", `correction ${r.correction} has no record that its refund came back`);
+      if (r.at < returned.at) throw unprocessable("return_before_correction", "a refund cannot be repaid before it came back");
+    }
+  }
+
+  /** §6.6a, §14.2. The return records of these offers, for a household's export, in arrival order. */
+  returnsForOffers(offerIds: string[]): Record<string, CorrectionReturn[]> {
+    const out: Record<string, CorrectionReturn[]> = {};
+    for (const id of offerIds) {
+      const held = this.correctionReturns.get(id);
+      if (held && held.length) out[id] = held.map((r) => ({ ...r }));
+    }
+    return out;
+  }
+
+  /** §14.2. The receiving end, one offer at a time, never replacing what a host holds. */
+  importReturns(rows: Record<string, CorrectionReturn[]>): void {
+    for (const [id, list] of Object.entries(rows)) {
+      if (!this.correctionReturns.has(id)) this.correctionReturns.set(id, list.map((r) => ({ ...r })));
+    }
+  }
+
   // ---- §14.3, a household leaves a host -------------------------------------
 
   /**
@@ -2943,6 +3017,7 @@ export class ValenceEngine {
     bump("member_statement_confirmations", this.memberStatementConfirmations.delete(offerId));
     bump("confirmations", this.confirmations.delete(offerId));
     bump("corrections", this.corrections.delete(offerId));
+    bump("correction_returns", this.correctionReturns.delete(offerId));
     bump("recoveries", this.recoveries.deleteFor(offerId));
     bump("household_settled", this.householdLedger.deleteSettled(offerId));
     bump("household_offers", this.householdLedger.deleteRecordedOffer(offerId));
