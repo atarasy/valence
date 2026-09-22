@@ -4,8 +4,10 @@ import pathlib
 # offer id, the presenter included, voids a decision the household signed. The
 # pass turned a recipient's written refusal of a gift into a 1,200 charge to
 # its giver that way, five days into a window question 68 had lengthened.
+# Re-anchored 2026-09-22: the check now covers both the member envelope and
+# the bare signature, so removing it lets either route through unsigned.
 p = pathlib.Path("src/engine/offers.ts"); s = p.read_text()
-old = """    if (!verifyPersonal(canonicalWithdrawal(offer.id, offer.decided_at ?? 0), sent, householdKey, this.config.relyingPartyId)) {
+old = """    if (!withdrawalCovered) {
       throw unprocessable("bad_signature", "the signature does not cover taking this set back");
     }"""
 assert s.count(old) == 1, "anchor drifted"
