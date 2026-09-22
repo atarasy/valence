@@ -13,6 +13,7 @@ import {canonicalDecisions} from '../../engine/src/shared/decisions.ts';
 import {canonicalCorrection} from '../../engine/src/shared/correction.ts';
 import {canonicalCorrectionReturn} from '../../engine/src/shared/correction-return.ts';
 import {PermissionLedger} from '../../engine/src/hub/permissions.ts';
+import {ApprovalDesk} from '../../engine/src/hub/approval.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
@@ -268,4 +269,71 @@ test('§14.3: a presenter cannot write an offer to a household this host holds n
  const refused=await s.send(s.tokenA,'/presenter/offers',stranger);
  expect(refused.status).toBe(404);
  expect(await refused.json()).toMatchObject({error:'household_unavailable'});
+});
+
+// Clause 59. A presenter records what it considered and argued against, per
+// candidate; the mandate clause the engine requires is filled from the
+// offer's own mandate record, never taken from what the shop sends.
+test('clause 59: a presenter records a deliberation and the engine fills its mandate, only for its own open offer',async()=>{
+ const s=await setup();
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('delib-1'))).status).toBe(201);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ const created=await s.send(s.tokenA,'/presenter/offers',s.offerBody('delib-1','tea-a'));
+ expect(created.status).toBe(201);
+ const offer=await created.json() as {id:string;candidates:{id:string}[]},candidate=offer.candidates[0]!.id;
+ const path='/presenter/offers/'+offer.id+'/deliberation';
+ const deliberation={per_candidate:{[candidate]:{alternatives:['a rival tea','no tea at all'],argument_against:'this one keeps longer and costs less'}},excluded:[]};
+ // Another presenter's offer answers exactly like one that does not exist.
+ expect((await s.send(s.tokenB,path,deliberation)).status).toBe(404);
+ const rendered=()=>s.unit.run(store=>{const r=memberRuntime(store,config);return new ApprovalDesk(store).render(r.engine,r.engine.mustGet(offer.id,Date.now()),undefined);});
+ // §14.3's own refusal, before anything is recorded.
+ expect(await rendered()).toMatchObject({missing:expect.any(String)});
+ // A shop cannot state the household's mandate itself.
+ expect((await s.send(s.tokenA,path,{...deliberation,mandate:{kind:'standing',scope:'forged',lapses_at:1}})).status).toBe(400);
+ // Missing a candidate.
+ expect((await s.send(s.tokenA,path,{per_candidate:{},excluded:[]})).status).toBe(400);
+ // An extra, unknown candidate.
+ expect((await s.send(s.tokenA,path,{per_candidate:{...deliberation.per_candidate,stranger:{alternatives:['x'],argument_against:'y'}},excluded:[]})).status).toBe(400);
+ // A blank alternative, and a blank argument.
+ expect((await s.send(s.tokenA,path,{per_candidate:{[candidate]:{alternatives:[''],argument_against:'still an argument'}},excluded:[]})).status).toBe(400);
+ expect((await s.send(s.tokenA,path,{per_candidate:{[candidate]:{alternatives:['x'],argument_against:'   '}},excluded:[]})).status).toBe(400);
+ const sent=await s.send(s.tokenA,path,deliberation);
+ expect(sent.status).toBe(201);expect(await sent.json()).toEqual({ok:true});
+ const approval=await rendered() as any;
+ expect(approval.missing).toBeUndefined();
+ expect(approval.mandate).toEqual({kind:'standing',scope:MANDATE,lapses_at:expect.any(Number)});
+ expect(approval.candidates).toEqual([expect.objectContaining({id:candidate,alternatives:deliberation.per_candidate[candidate]!.alternatives,argument_against:deliberation.per_candidate[candidate]!.argument_against})]);
+ // Re-recording on a still-open offer replaces the previous deliberation.
+ const replacement={per_candidate:{[candidate]:{alternatives:['a third option'],argument_against:'cheaper still'}},excluded:[]};
+ expect((await s.send(s.tokenA,path,replacement)).status).toBe(201);
+ expect(((await rendered()) as any).candidates[0].alternatives).toEqual(['a third option']);
+});
+
+test('clause 59: a deliberation refuses on a decided offer',async()=>{
+ const s=await setup();
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('delib-2'))).status).toBe(201);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ const created=await s.send(s.tokenA,'/presenter/offers',{...s.offerBody('delib-2','tea-a'),binding:'digital'});
+ expect(created.status).toBe(201);
+ const offer=await created.json() as {id:string;candidates:{id:string}[]},candidate=offer.candidates[0]!.id;
+ expect((await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/present',{})).status).toBe(200);
+ const decisions=[{candidate,valence:'kept' as const,kept_as:'self' as const}];
+ const decisionSignature=sign(null,canonicalDecisions(offer.id,decisions),HOUSEHOLD_PAIR.privateKey).toString('base64');
+ await s.unit.run(store=>{const r=memberRuntime(store,config);return r.engine.decide(offer.id,decisions,decisionSignature);});
+ const deliberation={per_candidate:{[candidate]:{alternatives:['x'],argument_against:'y'}},excluded:[]};
+ const refused=await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/deliberation',deliberation);
+ expect(refused.status).toBe(409);expect((await refused.json()).error).toBe('offer_not_open');
+});
+
+test('clause 59: a deliberation refuses when the offer names a mandate this host holds no record for',async()=>{
+ const s=await setup();
+ expect((await s.send(s.tokenA,'/presenter/configs',s.a.catalogue('delib-3'))).status).toBe(201);
+ expect((await s.send(s.tokenA,'/presenter/disclosures',s.a.disclosure())).status).toBe(201);
+ // A mandate id shaped like this household's own, and never recorded here.
+ const ghostMandate=HOUSE+'.ghost';
+ const created=await s.send(s.tokenA,'/presenter/offers',{...s.offerBody('delib-3','tea-a'),mandate:ghostMandate});
+ expect(created.status).toBe(201);
+ const offer=await created.json() as {id:string;candidates:{id:string}[]};
+ const unavailable=await s.send(s.tokenA,'/presenter/offers/'+offer.id+'/deliberation',{per_candidate:{[offer.candidates[0]!.id]:{alternatives:['x'],argument_against:'y'}},excluded:[]});
+ expect(unavailable.status).toBe(409);expect((await unavailable.json()).error).toBe('mandate_unavailable');
 });
