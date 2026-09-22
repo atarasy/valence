@@ -1,3 +1,4 @@
+import type { Correction } from "../shared/correction.js";
 import type { CarriageQuote, CarriageQuotes } from "./carriage-quote.js";
 import { inMemoryStore, type Store } from "../common/store.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -51,7 +52,12 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * before the field existed.
  */
 // /9 adds immutable digital quotations; older readers must not silently drop them.
-export const EXPORT_FORMAT_VERSION = "valence-node/9";
+/**
+ * Bumped to /10 on 2026-09-22, when `corrections` was named below (§6.6,
+ * question 70). A /9 export carries none, and its settlements arrive with
+ * no correction, which is what they had before the field existed.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/10";
 
 export type NodeExport = {
   format: string;
@@ -77,6 +83,13 @@ export type NodeExport = {
    * of every decided set gone. New in `valence-node/8`.
    */
   decided_protections: Record<string, FixedProtections>;
+  /**
+   * §6.6, question 70. The corrections appended to each settled offer's
+   * settlement, by offer. They are the household's receipt as much as the
+   * settlement is, so a move that dropped them would bring back the
+   * uncorrected bill. New in `valence-node/10`.
+   */
+  corrections: Record<string, Correction[]>;
   settlements: Settlement[];
   notes: Note[];
   /**
@@ -269,6 +282,7 @@ export function exportNode(
       .filter((r): r is Recovery => r !== undefined),
     confirmations: engine.confirmationsFor(offers.map((o) => o.id)),
     decided_protections: engine.decidedProtectionsFor(offers.map((o) => o.id)),
+    corrections: engine.correctionsForOffers(offers.map((o) => o.id)),
     ...permissions.exportFor(household),
     // §14.2, question 56. The signed rows and the claims together, because the
     // export is the record of what this household has and an offer that moved

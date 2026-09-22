@@ -69,7 +69,7 @@ drafted ──present──▶ presented ──decide───▶ decided ──
 | `settle` | the offer is priced and closed. See §6. |
 | `settle_default` | expiry path for offers that carry a default (§2.2). |
 
-An offer MUST NOT move from `settled` to any other state. Corrections are new offers.
+An offer MUST NOT move from `settled` to any other state. A change to what was offered is a new offer; a reduction of what a signed settlement charged is appended beside it (§6.6), and the offer stays settled.
 
 ### 2.2 Expiry defaults
 
@@ -335,6 +335,38 @@ valence.statement.1
 
 **The cost is named rather than hidden.** A household that used goods and never signs is not charged by the rail, and what it owes is the merchant's to pursue. That is the price of the sale being the household's act rather than the collector's, and the merchant-side platform this specification was written beside had already accepted it before this section was written: its charge refuses without the settlement the household signed for. **The alternative considered and refused** was a clause in the approval, that whatever the collection finds used is bought at the listed price, which satisfies a disclosure statute on its face and signs a rule rather than a set: the household would see the amount after the charge and dispute after it, which is exactly the order clause 35 exists to prevent.
 
+### 6.6 A signed settlement is corrected by appending, never by rewriting
+
+**Question 70, decided 2026-09-22.** A refund after the charge, or a collection found afterwards to have been recorded wrongly, changes what the household ends up paying, and the settlement it signed must still say what it signed. So a settlement is never rewritten. A change is a second record, appended beside it:
+
+```
+correction
+  id             the merchant's own identifier, so a retry is recognisably the same correction
+  offer          the offer whose settlement it corrects
+  merchant       the merchant of record it lowers, which signs it
+  amount         whole units by which what the household pays is lowered, at least 1
+  kind           refund or collection
+  note           the merchant's own words, shown to the household as written, at most 500 characters
+  corrected_at   when, never before the settlement
+  signature      by the merchant's registered key, over the canonical form
+```
+
+The canonical form is `valence-correction/1`, then the id, the offer, the merchant, the amount, the kind, the note and the time, one to a line, **every free part percent-encoded** for §10a's reason. The first line names the form, so the bytes cannot verify as any other signed object.
+
+**The rules are five.**
+
+1. **A correction only lowers.** One that would raise what the household pays is not a correction: it is a new offer, which the household decides and signs like any other (§2.1), and it settles and is charged as its own settlement. An implementation MUST refuse an amount below 1.
+2. **It is the merchant's.** An implementation MUST verify the signature against the key registered for the merchant named, and MUST refuse `422 not_merchant_of_record` from a merchant that was charged nothing on the settlement's lines (a disputed line was never charged, §6.5).
+3. **It needs nothing of the household**, because it only takes something off, and a household is never asked to sign a reduction of its own bill.
+4. **Together they lower no more than was paid.** The sum of one merchant's corrections MUST NOT exceed that merchant's charged lines plus the carriage the household's statement carried; beyond it, `422 correction_exceeds_charge`.
+5. **The same correction twice is one correction.** An identical retry answers `200` with the record already held; the same identifier with anything different answers `409 correction_conflict`, so a retry can never become a second reduction.
+
+**The household's receipt shows the original, each correction and the net**, at `GET /offers/{id}/corrections`: the settlement's `charged` and the carriage as they were signed, every correction in the order it arrived, and what remains. `GET /offers/{id}/settlement` is unchanged, because it is the signed record.
+
+**It moves with the household.** A household's export carries its corrections as `corrections`, by offer, in `valence-node/10` (§14.2). An import MUST hold each one to the rules above against the settlement the same body carries, MUST refuse `422 unscoped_correction` one naming an offer the body does not carry and `422 correction_without_settlement` one whose offer arrives without its settlement, and MUST NOT add to or remove from the corrections of an offer the host already holds.
+
+**What it does not do.** It moves no money: a refund is made on the merchant's own account by the merchant's own provider, and the correction is the record that it was. It does not change the day a daily ceiling is read against (§16.3), which keeps counting what was settled; a reduction that raised the room left in a day would let a merchant's refund authorise the next charge. **And it builds no route by which a household asks for a refund**, which stays the merchant's to give under its own return terms (§10a, requirement 7).
+
 ----
 
 ## 7. Lineage
@@ -481,6 +513,8 @@ POST   /offers/{id}/remind          the one reminder (§10.4, clause 33)
 GET    /offers/{id}                 one offer, with its candidates
 GET    /offers/{id}/statement       the settlement statement a household signs, as proposed by the collection's record (§6.5)
 GET    /offers/{id}/settlement      the settlement, once there is one
+POST   /offers/{id}/corrections     a correction that lowers a signed settlement, signed by the merchant of record (§6.6)
+GET    /offers/{id}/corrections     the household's receipt: the original, each correction and the net (§6.6)
 GET    /offers/{id}/delivery        carriage and where the parcel is (§7.5b). The household's surface, never a merchant's
 GET    /offers?household={id}&presenter={id}   the presenter's vertical view, and only that presenter's (clause 8)
 POST   /candidates/{id}/note        one line, shared with whom the writer says

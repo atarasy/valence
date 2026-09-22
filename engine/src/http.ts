@@ -36,6 +36,7 @@ import type {
   Recovery,
 } from "./common/types.js";
 import type { DisclosureContact } from "./shared/disclosure.js";
+import { CORRECTION_KINDS, type Correction } from "./shared/correction.js";
 
 const BINDINGS = ["physical", "digital"] as const;
 const PURPOSES = [
@@ -916,6 +917,43 @@ async function route(
           201
         );
       }
+      if (action === "corrections" && (method === "POST" || method === "GET")) {
+        // §6.6, question 70. A signed settlement is never rewritten; what
+        // lowers it afterwards is appended beside it, signed by the merchant.
+        const settlement = engine.settlement(id);
+        if (!settlement) throw notFound(`offer ${id} has no settlement`);
+        const carriage = (await engine.deliveryFor(id))?.carriage ?? null;
+        if (method === "POST") {
+          const raw = strict(await body(request), ["id", "merchant", "amount", "kind", "note", "corrected_at", "signature"], "correction");
+          const note = raw.note === undefined ? "" : raw.note;
+          if (typeof note !== "string" || note.length > 500) {
+            throw badRequest("malformed", "correction: note must be a string of at most 500 characters");
+          }
+          const { correction, created } = engine.appendCorrection(
+            {
+              id: requireString(raw, "id", "correction"),
+              offer: id,
+              merchant: requireString(raw, "merchant", "correction"),
+              amount: requireInteger(raw, "amount", "correction", 1),
+              kind: requireEnum(raw, "kind", "correction", CORRECTION_KINDS),
+              note,
+              corrected_at: requireInteger(raw, "corrected_at", "correction", 0),
+              signature: requireString(raw, "signature", "correction"),
+            },
+            carriage
+          );
+          return json(correction, created ? 201 : 200);
+        }
+        // The household's receipt: the original, each correction and the net.
+        const corrections = engine.correctionsFor(id);
+        const corrected = corrections.reduce((sum, c) => sum + c.amount, 0);
+        return json({
+          offer: id,
+          original: { charged: settlement.charged, carriage },
+          corrections,
+          net: settlement.charged + (carriage ?? 0) - corrected,
+        });
+      }
       if (method === "GET" && action === "settlement") {
         // §6. A receipt a household cannot ask for again is a receipt it can
         // lose by closing a tab.
@@ -1404,10 +1442,34 @@ async function route(
       // /6; an offer it does not name reads as unconfirmed (question 50).
       // A /6 export predates question 61 and carries no `payments` and no
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      // A /9 export predates question 70 and carries no `corrections`; its
+      // settlements arrive uncorrected, which is what they were.
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
-      if (body_.format === EXPORT_FORMAT_VERSION && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
+      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/9") && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
+      // §6.6, question 70. The same shape check the other registers get, and
+      // stricter: a correction is a signed record, so every row has exactly
+      // the fields the merchant signed and names the offer it is filed under.
+      if (body_.format === EXPORT_FORMAT_VERSION && body_.corrections === undefined) throw badRequest("malformed", "current archives must carry corrections");
+      const arrivingCorrections = body_.corrections ?? {};
+      if (arrivingCorrections === null || typeof arrivingCorrections !== "object" || Array.isArray(arrivingCorrections)) {
+        throw badRequest("malformed", "corrections must map offer ids to lists of corrections");
+      }
+      for (const [offerId, list] of Object.entries(arrivingCorrections)) {
+        if (!Array.isArray(list) || list.length === 0) throw badRequest("malformed", "each offer's corrections are a non-empty list");
+        const ids = new Set<string>();
+        for (const c of list as unknown[]) {
+          const r = strict(c, ["id", "offer", "merchant", "amount", "kind", "note", "corrected_at", "signature"], "correction");
+          requireString(r, "id", "correction"); requireString(r, "merchant", "correction"); requireString(r, "signature", "correction");
+          requireInteger(r, "amount", "correction", 1); requireInteger(r, "corrected_at", "correction", 0);
+          requireEnum(r, "kind", "correction", CORRECTION_KINDS);
+          if (typeof r.note !== "string" || r.note.length > 500) throw badRequest("malformed", "correction: note must be a string of at most 500 characters");
+          if (r.offer !== offerId) throw badRequest("malformed", `a correction filed under ${offerId} names ${String(r.offer)}`);
+          if (ids.has(r.id as string)) throw badRequest("malformed", `corrections for ${offerId} name ${String(r.id)} twice`);
+          ids.add(r.id as string);
+        }
+      }
       const arrivingQuotes = body_.carriage_quotes ?? [];
       if (!Array.isArray(arrivingQuotes)) throw badRequest("malformed", "carriage_quotes must be a list");
       if (arrivingQuotes.length && !hub.quotes) throw unprocessable("unsupported_carriage_quotes", "this host cannot retain digital quotations");
@@ -1549,6 +1611,7 @@ async function route(
         body_.notes = (body_.notes ?? []).filter((r) => !behindCandidates.has(r.candidate));
         if (body_.confirmations) for (const id of leftBehind) delete body_.confirmations[id];
         if (body_.decided_protections) for (const id of leftBehind) delete body_.decided_protections[id];
+        for (const id of leftBehind) delete arrivingCorrections[id];
       }
       const carried = new Set((body_.offers ?? []).map((o) => o.id));
       for (const id of Object.keys(body_.confirmations ?? {})) {
@@ -1561,6 +1624,14 @@ async function route(
       // `decided_protections` would put a window on an offer the host already
       // holds, and the window is what `DELETE /offers/{id}/decisions` is open
       // inside.
+      // §6.6, §14.2, question 52. Bound to the offers this body carries, as
+      // every register is: unscoped, a body of nothing but corrections would
+      // lower a bill the host already holds without its merchant's rail.
+      for (const id of Object.keys(arrivingCorrections)) {
+        if (!carried.has(id)) {
+          throw unprocessable("unscoped_correction", `a correction names ${id}, which this import does not carry`);
+        }
+      }
       for (const id of Object.keys(body_.decided_protections ?? {})) {
         if (!carried.has(id)) {
           throw unprocessable("unscoped_protections", `a record of what a set was decided under names ${id}, which this import does not carry`);
@@ -1622,6 +1693,23 @@ async function route(
         }
         if (body_.confirmations) for (const id of alreadyHere) delete body_.confirmations[id];
         if (body_.decided_protections) for (const id of alreadyHere) delete body_.decided_protections[id];
+        // §6.6. A carried offer's corrections are compared whole: a host may
+        // have appended one after the move, and an import does not add or
+        // remove any.
+        for (const id of alreadyHere) {
+          const arriving = arrivingCorrections[id];
+          if (arriving && !isDeepStrictEqual(engine.correctionsFor(id), arriving)) throw differs("corrections for", id);
+          delete arrivingCorrections[id];
+        }
+      }
+      // §6.6. Every correction that will be written meets what one appended
+      // here does, against the settlement this body carries for its offer and
+      // the carriage its delivery row signed.
+      for (const [id, list] of Object.entries(arrivingCorrections) as [string, Correction[]][]) {
+        const settlement = (body_.settlements ?? []).find((r) => r.offer === id);
+        if (!settlement) throw unprocessable("correction_without_settlement", `a correction names ${id}, whose settlement this import does not carry`);
+        const carriage = (body_.deliveries ?? []).find((d) => d.offer === id)?.carriage ?? null;
+        list.forEach((c, i) => engine.checkCorrection(c, settlement, carriage, list.slice(0, i)));
       }
       // §14.2, question 52. Every row names the household on the path or an
       // offer this body carries, and none replaces a row the host holds. Only
@@ -1733,6 +1821,7 @@ async function route(
           }
         }
         engine.importDecidedProtections(body_.decided_protections ?? {});
+        engine.importCorrections(arrivingCorrections);
         for (const s_ of body_.settlements ?? []) engine.importSettlement(s_);
         for (const n of body_.notes ?? []) engine.importNote(n);
         for (const e of body_.lineage ?? []) engine.importEdge(e, moving);

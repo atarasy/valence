@@ -8,6 +8,7 @@ import { ValenceError, badRequest, conflict, notFound, unprocessable } from "../
 import type { Ledger } from "./ledger.js";
 import { canonical as canonicalEdge, verifyEdge } from "../shared/lineage.js";
 import { disclosureKey, verifyDisclosure, type Disclosure } from "../shared/disclosure.js";
+import { verifyCorrection, type Correction } from "../shared/correction.js";
 import { canonicalStatement, disputable, needsStatement, owesSettlement, statementLines } from "../shared/statement.js";
 import { canonicalGift, type GiftTerms } from "../shared/gift.js";
 import {
@@ -230,6 +231,11 @@ export class ValenceEngine {
    * withdrawal. Measured on 2026-09-11 before it was closed.
    */
   private readonly confirmations: Map<string, string[]>;
+  /**
+   * §6.6, question 70. Corrections appended to a signed settlement, by offer,
+   * in the order they arrived. The settlement itself is never rewritten.
+   */
+  private readonly corrections: Map<string, Correction[]>;
   /** §7.1. Keys an identity root endorsed, as against keys merely registered here. */
   private readonly rootEndorsed: Map<string, true>;
   /**
@@ -477,6 +483,7 @@ export class ValenceEngine {
     this.identities = store.map("identities");
     this.disclosures = store.map("disclosures");
     this.confirmations = store.map("confirmations");
+    this.corrections = store.map("corrections");
     this.rootEndorsed = store.map("root_endorsed");
     this.recoveries = new RecoveryLedger(store);
     this.mandates = new MandateRegister(store);
@@ -2785,6 +2792,83 @@ export class ValenceEngine {
 
   settlement(offerId: string): Settlement | undefined {
     return this.settlements.get(offerId);
+  }
+
+  /** §6.6, question 70. The corrections appended to this offer's settlement, oldest first. */
+  correctionsFor(offerId: string): Correction[] {
+    return (this.corrections.get(offerId) ?? []).map((c) => ({ ...c }));
+  }
+
+  /**
+   * §6.6, question 70. Append a correction that lowers what the household
+   * pays, signed by the merchant of record. The signed settlement is not
+   * touched. `carriage` is what the household's statement carried for this
+   * offer, from the hub's delivery record, or null where it carried none: a
+   * refund of a box may return the carriage too, and nothing more.
+   *
+   * The same correction sent twice is one correction; the same identifier
+   * with anything different is refused, so a retry can never become a
+   * second reduction.
+   */
+  appendCorrection(c: Correction, carriage: number | null): { correction: Correction; created: boolean } {
+    const settlement = this.settlements.get(c.offer);
+    if (!settlement) throw unprocessable("not_settled", `offer ${c.offer} has no settlement to correct`);
+    const existing = this.corrections.get(c.offer) ?? [];
+    const same = existing.find((e) => e.id === c.id);
+    if (same) {
+      if (isDeepStrictEqual(same, c)) return { correction: { ...same }, created: false };
+      throw conflict("correction_conflict", `correction ${c.id} was already recorded with different content`);
+    }
+    this.checkCorrection(c, settlement, carriage, existing);
+    const stored = { ...c };
+    this.corrections.set(c.offer, [...existing, stored]);
+    return { correction: { ...stored }, created: true };
+  }
+
+  /**
+   * §6.6. Every rule a correction is held to beyond its identity, against the
+   * settlement it corrects and the corrections before it. Shared by the route
+   * and by a move, so a correction arriving from another host meets exactly
+   * what one appended here does.
+   */
+  checkCorrection(c: Correction, settlement: Settlement, carriage: number | null, prior: Correction[]): void {
+    const pem = this.identities.get(c.merchant);
+    if (!pem) throw unprocessable("unknown_merchant", `no key is registered for ${c.merchant}`);
+    if (!verifyCorrection(c, pem)) throw unprocessable("bad_signature", `this correction is not signed by ${c.merchant}`);
+    // Only the merchant of record for a line the household was charged for
+    // can lower what it paid. A disputed line was never charged (§6.5).
+    const charged = settlement.lines
+      .filter((l) => l.merchant === c.merchant && !l.disputed && (l.valence === "kept" || l.valence === "consumed"))
+      .reduce((sum, l) => sum + l.amount, 0);
+    if (charged === 0) throw unprocessable("not_merchant_of_record", `${c.merchant} was charged for nothing on offer ${c.offer}`);
+    if (c.corrected_at < settlement.settled_at) {
+      throw unprocessable("correction_before_settlement", "a correction cannot predate the settlement it corrects");
+    }
+    const already = prior.filter((e) => e.merchant === c.merchant).reduce((sum, e) => sum + e.amount, 0);
+    const ceiling = charged + (carriage ?? 0);
+    if (already + c.amount > ceiling) {
+      throw unprocessable(
+        "correction_exceeds_charge",
+        `corrections of ${already + c.amount} would exceed the ${ceiling} this merchant was paid on offer ${c.offer}`
+      );
+    }
+  }
+
+  /** §6.6, §14.2. The corrections of these offers, for a household's export. */
+  correctionsForOffers(offerIds: string[]): Record<string, Correction[]> {
+    const out: Record<string, Correction[]> = {};
+    for (const id of offerIds) {
+      const held = this.corrections.get(id);
+      if (held && held.length) out[id] = held.map((c) => ({ ...c }));
+    }
+    return out;
+  }
+
+  /** §14.2. The receiving end, one offer at a time, never replacing what a host holds. */
+  importCorrections(rows: Record<string, Correction[]>): void {
+    for (const [id, list] of Object.entries(rows)) {
+      if (!this.corrections.has(id)) this.corrections.set(id, list.map((c) => ({ ...c })));
+    }
   }
 
   mustGet(offerId: string, now?: number): Offer {
