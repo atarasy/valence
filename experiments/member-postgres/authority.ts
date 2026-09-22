@@ -279,6 +279,11 @@ export function openMemberAuthority(path: Records, options: Options) {
      * and re-checked every blocker in this same transaction; this method trusts
      * that and does not check either.
      */
+    /** §14.3: whether this host holds a live member for `household` at all. */
+    holdsHousehold(household: string) {
+      let held = false; principals.each(p => { if (p.household === household && p.disabled === 0) held = true; });
+      return held;
+    },
     deleteHouseholdRecords(household: string) {
       name(household);
       return db.transaction(() => {

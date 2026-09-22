@@ -105,7 +105,6 @@ export function openMemberLeave(r: ReturnTypeMemberRuntime, ctx: LeaveContext, p
     // §14.3: a role held for another household blocks, and this service's own
     // two-of-three recovery names its recoverer here, apart from the engine's.
     recoveryConfigurations.each(c => { if (c.recoverer === household && c.owner !== household) blockers.push({ kind: 'recoverer', id: c.owner }); });
-    permissionRequests.each(row => { if (row.terms.household === household && row.state === 'pending' && row.terms.reviewExpiresAt > at) blockers.push({ kind: 'permission_request_pending', id: row.terms.requestID }); });
     return blockers;
   }
 
@@ -147,7 +146,11 @@ export function openMemberLeave(r: ReturnTypeMemberRuntime, ctx: LeaveContext, p
       // counter bump the verification above just made, along with everything
       // else, so a refusal at this point truly writes nothing.
       const blockers = blockersFor(who.household);
-      if (blockers.length) fail(409, 'leave_blocked', blockers);
+      // Refused after the signature was verified: the review is spent and this
+      // answer commits, so the same assertion cannot delete the account later
+      // once the blocker clears (refutation pass, 2026-09-22, F4). Throwing
+      // here rolled the review's deletion back with everything else.
+      if (blockers.length) return { refused: blockers } as const;
       const leftAt = now(), household = who.household;
       const engineResult = leaveHost(ctx, household, leftAt);
       const deleted: Record<string, number> = { ...engineResult.deleted };

@@ -37,6 +37,9 @@ export type LeaveContext = {
 
 export type Blocker = { kind: string; id: string };
 
+/** §14.3: the period a seller keeps the records of a sale (法人税法施行規則 59条). */
+const SEVEN_YEARS_MS = 7 * 365.25 * 86_400_000;
+
 /** An offer this household pays for: the recipient, or a giver of null or itself. Everything §14.3 deletes is drawn from this set, and nothing else. */
 function ownOffers(all: readonly Offer[], household: string): Offer[] {
   return all.filter((o) => o.household === household && (o.giver === null || o.giver === household));
@@ -49,7 +52,7 @@ function ownOffers(all: readonly Offer[], household: string): Offer[] {
  * whole of what this section asks to be checked.
  */
 export function leaveBlockers(ctx: LeaveContext, household: string, now = Date.now()): Blocker[] {
-  const { engine, recovery, permissions, mandates } = ctx;
+  const { engine, recovery, mandates } = ctx;
   const blockers: Blocker[] = [];
 
   // "an offer of the household's at drafted, presented or decided, an
@@ -83,12 +86,11 @@ export function leaveBlockers(ctx: LeaveContext, household: string, now = Date.n
   }
 
   // "a pending mandate change, recovery request or permission request it
-  // started". A mandate change and a recovery request are both one signed
-  // write with nothing left half-done between requests; a permission request
-  // is the one of the three with a row that can sit open (`openAction`).
-  for (const action of permissions.pendingActionsFor(household, now)) {
-    blockers.push({ kind: "permission_action_pending", id: action.id });
-  }
+  // started". A permission action is opened on a request from a merchant, not
+  // started by the household, and deletion removes it with the rest; counting
+  // it let any merchant keep a household from ever leaving (refutation pass,
+  // 2026-09-22, F3). A mandate change and a recovery request are one signed
+  // write with nothing half-done between requests.
 
   // "a role it holds for another household: a co-signer on another
   // household's mandate (§16.1) or a recoverer of another household (clause
@@ -134,7 +136,9 @@ export function leaveHost(ctx: LeaveContext, household: string, now = Date.now()
     // added to it: what decides whether a row this household shares with
     // another is still needed, or is the last row naming a key nobody who
     // holds it is left to ask for.
-    const departedAlready = new Set(engine.departures().map((d) => d.household));
+    // Only a household that has left and not come back: a departure row stays
+    // seven years as audit and must not decide anything about a returned one.
+    const isGone = (h: string) => engine.isDeparted(h);
 
     // Every offer naming this identifier, on either side, decided once so
     // that deletion and the identity sweep below agree on the same split.
@@ -147,8 +151,11 @@ export function leaveHost(ctx: LeaveContext, household: string, now = Date.now()
     // are what the offer is kept for, and neither survives that party. Once
     // it has already left, this row is the last thing naming it, and §14.3's
     // "removed with the last such row" is about exactly this offer.
-    const orphaned = shared.filter((o) => departedAlready.has(o.household === household ? o.giver! : o.household));
+    const orphaned = shared.filter((o) => isGone(o.household === household ? o.giver! : o.household));
     const kept = shared.filter((o) => !orphaned.includes(o));
+
+    // §7.6b. A row kept for the other party still loses the lines this household wrote on it.
+    for (const offer of kept) bump("notes", engine.deleteNotesBy(offer.id, household));
 
     for (const offer of [...own, ...orphaned]) {
       const counts = engine.deleteOfferRecord(offer.id);
@@ -164,7 +171,7 @@ export function leaveHost(ctx: LeaveContext, household: string, now = Date.now()
     const edges = engine.edgesTouching(household);
     const selfEdges = edges.filter((e) => e.from === household && e.to === household);
     const sharedEdges = edges.filter((e) => !selfEdges.includes(e));
-    const orphanedEdges = sharedEdges.filter((e) => departedAlready.has(e.from === household ? e.to : e.from));
+    const orphanedEdges = sharedEdges.filter((e) => isGone(e.from === household ? e.to : e.from));
     const keptEdges = sharedEdges.filter((e) => !orphanedEdges.includes(e));
     for (const edge of [...selfEdges, ...orphanedEdges]) {
       bumpBool("edges", engine.deleteEdge(edge.id));
@@ -201,19 +208,26 @@ export function leaveHost(ctx: LeaveContext, household: string, now = Date.now()
 
     bumpBool("departed_households", engine.recordDeparture(household, now));
 
-    // The sweep: an *earlier* departure's key, kept only because this
-    // household's own gift or edge still named it, may have just lost its
-    // last reference above.
-    for (const departure of engine.departures()) {
-      if (departure.household === household) continue;
-      const stillNamed =
-        engine.offersNaming(departure.household).length > 0 ||
-        engine.edgesTouching(departure.household).length > 0;
-      if (!stillNamed) {
-        const idRows = engine.deleteIdentity(departure.household);
-        bump("identities", idRows.identities);
-        bump("root_endorsed", idRows.root_endorsed);
-      }
+    // The sweep. Only a row deleted by this call can have been the last to name
+    // an earlier departure's key, so only the other parties of those rows are
+    // looked at, not every departure the host has had (F5).
+    const candidates = new Set<string>();
+    for (const o of orphaned) candidates.add(o.household === household ? o.giver! : o.household);
+    for (const e of orphanedEdges) candidates.add(e.from === household ? e.to : e.from);
+    const named = (h: string) => engine.offersNaming(h).length > 0 || engine.edgesTouching(h).length > 0;
+    for (const other of candidates) {
+      if (other === household || !isGone(other) || named(other)) continue;
+      const idRows = engine.deleteIdentity(other);
+      bump("identities", idRows.identities);
+      bump("root_endorsed", idRows.root_endorsed);
+    }
+
+    // §14.3 keeps the audit fact seven years. A row older than that goes once
+    // nothing names the household; a row still named stays, because it is what
+    // tells a later departure that the other party has left.
+    for (const d of engine.departures()) {
+      if (d.household === household || !isGone(d.household) || d.left_at > now - SEVEN_YEARS_MS || named(d.household)) continue;
+      bumpBool("departed_households_expired", engine.forgetDeparture(d.household));
     }
 
     return { deleted };

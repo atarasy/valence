@@ -969,21 +969,25 @@ test('§14.3: a session alone cannot delete an account, whether the preparation 
  expect(crossHousehold.status).not.toBe(200);
  expect(await snapshotA()).toEqual(beforeA);
 });
-test('§14.3: a blocker that appears after prepare refuses the submission and deletes nothing',async()=>{
+test('§14.3: a blocker that appears after prepare refuses the submission, deletes nothing, and spends the review so the same assertion cannot delete later',async()=>{
  const s=await setup();
  const c=await enrollFreshHousehold(s,'leaver-c');
  const review=await (await s.send('/member/account/leave/prepare',{},c.token)).json();
  await s.unit.run(store=>{
-  store.map<any>('member_permission_requests').set('late-request',{terms:{profile:'atarasy.permission-review.1',requestID:'late-request',household:c.household,action:'Check whether you already have it',requester:{id:'merchant-1',name:'Merchant One'},purpose:'Avoid a duplicate gift',fields:[{id:'duplicate_check',label:'Whether you already have a product'}],createdAt:now(),reviewExpiresAt:now()+10000,accessExpiresAt:now()+20000},digest:'unchecked-in-this-fixture',actionID:'late-action',product:'tea-a',privateDigest:'unchecked-in-this-fixture',state:'pending',permissionID:null,decidedAt:null});
+  store.map<any>('member_operations').set('op-late',{id:'op-late',kind:'physical_statement',offer:'offer-1',mandate:'mandate-1',presenter:'merchant-1',canonical:'valence.statement.1\noffer-1\n',reviewedRevision:'r',principal:'leaver-c',credential:c.key.id,household:c.household,keyFingerprint:'f',requestDigest:'d',challenge:'c',createdAt:now(),state:'prepared',assertionFingerprint:null,receiptDigest:null,refusal:null,expiresAt:now()+10000});
  });
  const assertion=c.key.authenticate(review.publicKey.challenge,s.c.origin,s.c.rpID,c.user,2);
  const refused=await s.send('/member/account/leave/submit',{preparation:review.id,assertion},c.token);
  expect(refused.status).toBe(409);
  const body=await refused.json();
  expect(body.error).toBe('leave_blocked');
- expect(body.blockers.some((b:{kind:string})=>b.kind==='permission_request_pending')).toBe(true);
- const principal=await s.unit.run(store=>store.map<any>('member_principals').get('leaver-c'));
- expect(principal).toBeDefined();
+ expect(body.blockers).toEqual([{kind:'operation_pending',id:'op-late'}]);
+ expect(await s.unit.run(store=>store.map<any>('member_principals').get('leaver-c'))).toBeDefined();
+ // F4: the blocker clears, and the same signed assertion is sent again. The review was spent.
+ await s.unit.run(store=>{store.map<any>('member_operations').delete('op-late');});
+ const replay=await s.send('/member/account/leave/submit',{preparation:review.id,assertion},c.token);
+ expect(replay.status).toBe(404);
+ expect(await s.unit.run(store=>store.map<any>('member_principals').get('leaver-c'))).toBeDefined();
 });
 test('§14.3: an unexpired uncommitted operation, a pending mandate change and a pending recovery request each block leaving on their own',async()=>{
  const s=await setup();

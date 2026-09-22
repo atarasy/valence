@@ -209,18 +209,16 @@ describe("§14.3 leaveBlockers: each reason is refused, named, and writes nothin
     expect(ctx.engine.departures()).toEqual([]);
   });
 
-  test("permission_action_pending: a still-live action refuses", () => {
+  test("a permission action a merchant asked for does not block, and leaves with the household (F3)", () => {
     const ctx = setup();
     const h = houseFor("blk-action");
     ctx.engine.registerIdentity(h.household, h.pem);
     const now = Date.now();
-    const action = ctx.permissions.openAction({ household: h.household, describes: "share basket contents", expiresAt: now + HOUR });
+    ctx.permissions.openAction({ household: h.household, describes: "share basket contents", expiresAt: now + 100 * 365 * 24 * HOUR });
 
-    expect(leaveBlockers(ctx, h.household, now)).toContainEqual({ kind: "permission_action_pending", id: action.id });
-    expect(refuses(() => leaveHost(ctx, h.household, now))).toBe("leave_blocked");
-
-    expect(ctx.permissions.pendingActionsFor(h.household, now).map((a) => a.id)).toEqual([action.id]);
-    expect(ctx.engine.departures()).toEqual([]);
+    expect(leaveBlockers(ctx, h.household, now)).toEqual([]);
+    leaveHost(ctx, h.household, now);
+    expect(ctx.permissions.pendingActionsFor(h.household, now)).toEqual([]);
   });
 
   test("co_signer: a role held on another household's mandate refuses", () => {
@@ -302,7 +300,7 @@ describe("§14.3 leaveHost: a household with a full record", () => {
     expect(ctx.permissions.pendingActionsFor(h.household, leaveNow)).toEqual([]);
     expect(ctx.recovery.recoverersFor(h.household)).toEqual([]);
     expect(ctx.engine.publicKeyFor(h.household)).toBeUndefined();
-    expect(ctx.engine.departures()).toEqual([{ household: h.household, left_at: leaveNow }]);
+    expect(ctx.engine.departures()).toMatchObject([{ household: h.household, left_at: leaveNow, left: [leaveNow], returned_at: null }]);
 
     const exported = exportNode(ctx.engine, ctx.recovery, ctx.permissions, ctx.engine.mandates, ctx.deliveries, h.household, leaveNow, ctx.quotes);
     expect(exported.offers).toEqual([]);
@@ -318,7 +316,7 @@ describe("§14.3 leaveHost: a household with a full record", () => {
     // further, moves nothing, and does not throw.
     const second = leaveHost(ctx, h.household, leaveNow + DAY);
     expect(second.deleted).toEqual({});
-    expect(ctx.engine.departures()).toEqual([{ household: h.household, left_at: leaveNow }]);
+    expect(ctx.engine.departures()).toMatchObject([{ household: h.household, left_at: leaveNow, left: [leaveNow], returned_at: null }]);
   });
 });
 
@@ -352,7 +350,7 @@ describe("§14.3: a gift between two households", () => {
     // "retained exactly as long as a remaining household's edge or gift
     // needs it to verify".
     expect(ctx.engine.publicKeyFor(giver.household)).toBe(giver.pem);
-    expect(ctx.engine.departures()).toEqual([{ household: giver.household, left_at: leaveGiver }]);
+    expect(ctx.engine.departures()).toMatchObject([{ household: giver.household, left_at: leaveGiver, left: [leaveGiver], returned_at: null }]);
 
     // The recipient leaves too. Now nothing at this host needs the giver's
     // copy or its key either, so both go: "removed with the last such row".
@@ -401,7 +399,7 @@ describe("§14.3: no collateral damage", () => {
 
     const after = exportNode(ctx.engine, ctx.recovery, ctx.permissions, ctx.engine.mandates, ctx.deliveries, c.household, snapshotAt, ctx.quotes);
     expect(after).toEqual(before);
-    expect(ctx.engine.departures()).toEqual([{ household: a.household, left_at: snapshotAt }]);
+    expect(ctx.engine.departures()).toMatchObject([{ household: a.household, left_at: snapshotAt, left: [snapshotAt], returned_at: null }]);
   });
 });
 
@@ -414,11 +412,91 @@ describe("§14.3: idempotent departure", () => {
 
     const first = leaveHost(ctx, h.household, now);
     expect(first.deleted.identities).toBe(1);
-    expect(ctx.engine.departures()).toEqual([{ household: h.household, left_at: now }]);
+    expect(ctx.engine.departures()).toMatchObject([{ household: h.household, left_at: now, left: [now], returned_at: null }]);
 
     const second = leaveHost(ctx, h.household, now + 60_000);
     expect(second.deleted).toEqual({});
-    expect(ctx.engine.departures()).toEqual([{ household: h.household, left_at: now }]);
+    expect(ctx.engine.departures()).toMatchObject([{ household: h.household, left_at: now, left: [now], returned_at: null }]);
     expect(leaveBlockers(ctx, h.household, now + 60_000)).toEqual([]);
+  });
+});
+
+describe("§14.3: what the first refutation pass measured (2026-09-22)", () => {
+  test("F1: a household that comes back with the same key is not swept by someone else's departure", async () => {
+    const ctx = setup();
+    const a = houseFor("f1-returner");
+    const b = houseFor("f1-giver");
+    ctx.engine.registerIdentity(a.household, a.pem);
+    ctx.engine.registerIdentity(b.household, b.pem);
+    const now = Date.now();
+    leaveHost(ctx, a.household, now);
+    expect(ctx.engine.isDeparted(a.household)).toBe(true);
+    // The same passkey enrols again: the same identifier.
+    ctx.engine.registerIdentity(a.household, a.pem);
+    expect(ctx.engine.isDeparted(a.household)).toBe(false);
+    // B gives A a gift, then B leaves: A is here, so the gift and A's key stay.
+    const offer = await ceremonial(ctx.engine, b, a, now + 10);
+    await ctx.engine.settle(offer.id, now + 2000);
+    addEdge(ctx.engine, b, a, now + 10);
+    leaveHost(ctx, b.household, now + 3000);
+    expect(ctx.engine.publicKeyFor(a.household)).toBe(a.pem);
+    expect(ctx.engine.settlement(offer.id)).toBeDefined();
+    // The audit row keeps both of A's facts: it left, and it came back.
+    const row = ctx.engine.departures().find((d) => d.household === a.household)!;
+    expect(row.left).toEqual([now]);
+    expect(row.returned_at).not.toBeNull();
+    // Leaving again records the second time.
+    leaveHost(ctx, a.household, now + 4000);
+    expect(ctx.engine.departures().find((d) => d.household === a.household)).toMatchObject({ left: [now, now + 4000], left_at: now + 4000, returned_at: null });
+  });
+
+  test("F2: a note the leaving household wrote on a gift kept for the giver goes", async () => {
+    const ctx = setup();
+    const giver = houseFor("f2-giver");
+    const recipient = houseFor("f2-recipient");
+    ctx.engine.registerIdentity(giver.household, giver.pem);
+    ctx.engine.registerIdentity(recipient.household, recipient.pem);
+    const now = Date.now();
+    const offer = await ceremonial(ctx.engine, giver, recipient, now);
+    await ctx.engine.settle(offer.id, now + 2000);
+    const candidate = offer.candidates[0]!.id;
+    ctx.engine.addNote({ candidate, author: recipient.household, text: "private line", shared_with: [] } as never);
+    const result = leaveHost(ctx, recipient.household, now + 3000);
+    expect(result.deleted.notes).toBe(1);
+    expect(JSON.stringify(ctx.engine.unionForHousehold(recipient.household, now + 3000))).not.toContain("private line");
+    // The gift itself is still the giver's record.
+    expect(ctx.engine.settlement(offer.id)).toBeDefined();
+  });
+
+  test("F5: the audit row goes after seven years once nothing names the household, and stays while something does", async () => {
+    const ctx = setup();
+    const old = houseFor("f5-old");
+    const named = houseFor("f5-named");
+    const keeper = houseFor("f5-keeper");
+    const later = houseFor("f5-later");
+    for (const h of [old, named, keeper, later]) ctx.engine.registerIdentity(h.household, h.pem);
+    const now = Date.now();
+    leaveHost(ctx, old.household, now);
+    const offer = await ceremonial(ctx.engine, keeper, named, now);
+    await ctx.engine.settle(offer.id, now + 2000);
+    leaveHost(ctx, named.household, now + 3000);
+    const eightYears = now + 8 * 365.25 * 86_400_000;
+    const result = leaveHost(ctx, later.household, eightYears);
+    expect(result.deleted.departed_households_expired).toBe(1);
+    const left = ctx.engine.departures().map((d) => d.household);
+    expect(left).not.toContain(old.household);
+    // Still named by the keeper's gift, so its row says the other party has left.
+    expect(left).toContain(named.household);
+  });
+
+  test("F6: a mandate cannot name a household that has left as its co-signer", () => {
+    const ctx = setup();
+    const owner = houseFor("f6-owner");
+    const gone = houseFor("f6-gone");
+    ctx.engine.registerIdentity(owner.household, owner.pem);
+    ctx.engine.registerIdentity(gone.household, gone.pem);
+    const now = Date.now();
+    leaveHost(ctx, gone.household, now);
+    expect(refuses(() => recordMandate(ctx.engine, owner, mandateFor(owner, [gone.household], now), now))).toBe("co_signer_departed");
   });
 });

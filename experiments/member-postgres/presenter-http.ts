@@ -113,6 +113,13 @@ export async function presenterRequest(r:Runtime,hub:Hub,request:Request,input:u
  if(parts.length===1&&method==='POST'){
   if(typeof b.config_version!=='string'||!r.engine.configsForPresenter(presenter).some(c=>c.version===b.config_version))
    return reply(403,{error:'catalogue_not_this_presenter',message:'an offer must use a catalogue this presenter published'});
+  // §14.3. An offer goes only to a household this host holds a member for. A
+  // merchant knows a departed household's identifier from its own export, and
+  // an offer written to it would come back as history if the same key enrolled
+  // again (refutation pass, 2026-09-22). Never-enrolled and departed answer
+  // alike, so the refusal says nothing about whether a household left.
+  if(typeof b.household!=='string'||!r.authority.holdsHousehold(b.household))
+   return reply(404,{error:'household_unavailable',message:'no member for that household is held here'});
   const created=await forward('/offers',input);
   if(created.status===201){
    const offer=JSON.parse(created.body) as {id:string;household:string};

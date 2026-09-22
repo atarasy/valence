@@ -172,6 +172,15 @@ export function explorationFloor(candidateCount: number, rate: number): number {
   return Math.max(1, Math.ceil(candidateCount * rate));
 }
 
+/**
+ * §14.3. The audit fact of a household leaving, kept seven years. `left` is
+ * every time it left; `returned_at` is when the same key was registered again,
+ * because an identifier is the name of a key and the same passkey enrolling
+ * again is the same household (a refutation pass, 2026-09-22, measured the
+ * stale row deleting a returned household's key on someone else's departure).
+ */
+export type Departure = { household: string; left_at: number; left: number[]; returned_at: number | null };
+
 export class ValenceEngine {
   private readonly offers: Map<string, Offer>;
   private readonly notes: Map<string, Note[]>;
@@ -246,7 +255,7 @@ export class ValenceEngine {
    * household identifier, one row per household, never rewritten once it has
    * a `left_at`, so a later call for the same household does not move it.
    */
-  private readonly departedHouseholds: Map<string, { household: string; left_at: number }>;
+  private readonly departedHouseholds: Map<string, Departure>;
   /**
    * §7.6 and clause 19. The value stored beside the time is an opaque token,
    * not the edge's identifier.
@@ -497,6 +506,7 @@ export class ValenceEngine {
     this.departedHouseholds = store.map("departed_households");
     this.recoveries = new RecoveryLedger(store);
     this.mandates = new MandateRegister(store);
+    this.mandates.departed = (k) => this.isDeparted(k);
     this.householdLedger = new HouseholdLedger(store);
     this.mandateSource = new LocalMandates(this.mandates);
     this.daySource = new LocalDay(this.householdLedger);
@@ -669,6 +679,11 @@ export class ValenceEngine {
     // a review pass on 2026-09-16.
     if (existing !== undefined && !ValenceEngine.sameKey(existing, publicKeyPem)) {
       throw conflict("identity_exists", `a key is already registered for ${key}`);
+    }
+    // §14.3. The same key registering again is the same household coming back.
+    if (this.isDeparted(key)) {
+      const row = this.departedHouseholds.get(key)!;
+      this.departedHouseholds.set(key, { ...row, returned_at: Math.max(Date.now(), row.left_at + 1) });
     }
     this.identities.set(key, publicKeyPem);
     if (attested) this.rootEndorsed.set(key, true);
@@ -2970,14 +2985,42 @@ export class ValenceEngine {
    * one. Returns whether this call was the one that wrote it.
    */
   recordDeparture(household: string, at: number): boolean {
-    if (this.departedHouseholds.has(household)) return false;
-    this.departedHouseholds.set(household, { household, left_at: at });
+    const row = this.departedHouseholds.get(household);
+    if (row && this.isDeparted(household)) return false;
+    const left = [...(row?.left ?? []), at];
+    this.departedHouseholds.set(household, { household, left_at: at, left, returned_at: null });
     return true;
   }
 
-  /** §14.3. Every household this host has ever deleted, and when. */
-  departures(): { household: string; left_at: number }[] {
+  /** §14.3. Whether `household` left this host and has not come back since. */
+  isDeparted(household: string): boolean {
+    const row = this.departedHouseholds.get(household);
+    return !!row && (row.returned_at === null || row.returned_at < row.left_at);
+  }
+
+  /** §14.3. Every departure row this host holds, including households that came back. */
+  departures(): Departure[] {
     return [...this.departedHouseholds.values()];
+  }
+
+  /** §14.3. The audit row goes after seven years, once no remaining row names the household. */
+  forgetDeparture(household: string): boolean {
+    return this.departedHouseholds.delete(household);
+  }
+
+  /** §7.6b. A note is the writer's: the leaving household's lines go even from a row kept for another. */
+  deleteNotesBy(offerId: string, author: string): number {
+    const offer = this.offers.get(offerId);
+    let removed = 0;
+    for (const c of offer?.candidates ?? []) {
+      const list = this.notes.get(c.id);
+      if (!list) continue;
+      const keep = list.filter((n) => n.author !== author);
+      removed += list.length - keep.length;
+      if (keep.length === list.length) continue;
+      if (keep.length) this.notes.set(c.id, keep); else this.notes.delete(c.id);
+    }
+    return removed;
   }
 
   mustGet(offerId: string, now?: number): Offer {
