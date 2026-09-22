@@ -456,4 +456,38 @@ export class MandateRegister {
     this.claims.delete(mandate.id);
     return mandate;
   }
+
+  /**
+   * §14.3. Mandates of *another* household naming this key as a co-signer.
+   * Clause 47 does not allow the co-signer to be removed by anyone's act but
+   * the household's own or a loosening it co-signs, so a household holding
+   * this role for someone else cannot be deleted while it still holds it: it
+   * has to step down (sign the loosening that drops it) first.
+   */
+  coSignerOn(key: string): Mandate[] {
+    return [...this.rows.values()].filter((m) => m.household !== key && m.co_signers.includes(key));
+  }
+
+  /**
+   * §14.3. Deletes every mandate and claim of this household's own: "its
+   * mandates and claims" among what a leaving household takes nothing of and
+   * leaves nothing behind.
+   */
+  deleteHousehold(household: string): { mandates: number; claims: number } {
+    let mandates = 0;
+    for (const [id, m] of [...this.rows]) {
+      if (m.household === household) {
+        this.rows.delete(id);
+        mandates++;
+      }
+    }
+    let claims = 0;
+    for (const [id, m] of [...this.claims]) {
+      if (m.household === household) {
+        this.claims.delete(id);
+        claims++;
+      }
+    }
+    return { mandates, claims };
+  }
 }

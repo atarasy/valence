@@ -135,3 +135,23 @@ export function needsStatement(offer: Offer, missing: readonly string[] = []): b
     offer.candidates.some((c) => c.valence === "consumed" || (c.valence === "lost" && missing.includes(c.id)))
   );
 }
+
+/**
+ * §14.2 and §6.4, question 57. Whether an offer can still move money: it can
+ * be decided, it is decided and not settled, or it is a physical box whose
+ * collection has not happened or whose statement is still owed. Such an offer
+ * stays where its reserve is.
+ *
+ * Moved here from `http.ts` on 2026-09-22 (§14.3), so `hub/leave.ts` reuses
+ * the exact rule a move already refuses to leave behind: a household leaving
+ * its host altogether MUST be held to the same "still in progress" test as a
+ * household moving to another one.
+ */
+export function moneyStillToMove(offer: Offer, collection?: { collected_at: number | null; missing?: string[] }): boolean {
+  if (offer.state === "drafted" || offer.state === "presented" || offer.state === "decided") return true;
+  if (offer.state === "expired") {
+    if (owesSettlement(offer)) return true;
+    if (offer.binding === "physical" && (!collection || collection.collected_at === null)) return true;
+  }
+  return false;
+}

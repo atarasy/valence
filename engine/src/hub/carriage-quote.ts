@@ -7,6 +7,8 @@ export class CarriageQuotes {
   private readonly rows:Map<string,CarriageQuote>;
   constructor(store:Store=inMemoryStore()){this.rows=store.map('carriage_quotes');}
   find(offer:string):CarriageQuote|undefined {const row=this.rows.get(offer);return row?{...row}:undefined;}
+  /** §14.3. The quotation for one offer, deleted with it. */
+  deleteOffer(offer:string):boolean {return this.rows.delete(offer);}
   forOffers(offers: string[]): CarriageQuote[] { return offers.flatMap(id => { const row = this.find(id); return row ? [row] : []; }); }
   checkRows(rows: CarriageQuote[]): void {
     const seen = new Set<string>();

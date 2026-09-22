@@ -90,4 +90,14 @@ export class HouseholdLedger {
   importRows(rows: SettledAmount[]): void {
     for (const r of rows) this.rows.set(r.offer, { ...r });
   }
+
+  /** §14.3. This household's own copy of what settled for it, for one offer being deleted with it. */
+  deleteSettled(offerId: string): boolean {
+    return this.rows.delete(offerId);
+  }
+
+  /** §14.3. The recorded offer itself, deleted with the offer. */
+  deleteRecordedOffer(offerId: string): boolean {
+    return this.offers.delete(offerId);
+  }
 }
