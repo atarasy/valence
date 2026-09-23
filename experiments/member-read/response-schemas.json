@@ -237,6 +237,16 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "variant": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
                   }
                 },
                 "required": [
@@ -604,6 +614,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "variant": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
             }
           },
           "required": [
@@ -1005,6 +1025,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "variant": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
             }
           },
           "required": [
@@ -1173,6 +1203,16 @@
                 "null"
               ],
               "maxLength": 500
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "variant": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
             }
           },
           "required": [
@@ -1385,6 +1425,16 @@
             },
             "disputed": {
               "type": "boolean"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "variant": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
             }
           },
           "required": [

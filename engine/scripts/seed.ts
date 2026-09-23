@@ -108,15 +108,20 @@ const post = async (path: string, body: unknown) => {
 // §5.4. A catalogue is signed by the presenter it names. The reference
 // presenter's key is root-endorsed; the second one's is not, which is what a
 // rename looks like from outside: a new identity, visibly not the same one.
-// Independent fixture encoder for catalogue revision 2, not imported from the engine.
-const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, { merchant: string; maker: string; ships: string; price: number; category?: string; physical?: { ambient: boolean; keeps_for_days: number; fits_ten_per_container: boolean; regulated: boolean } }> }) => {
+// Independent fixture encoder for catalogue revisions 2 and 3, not imported
+// from the engine. D-1: revision 3 when any product carries a display `name`
+// or `variant`, byte-identical to revision 2 otherwise.
+type SeedProduct = { merchant: string; maker: string; ships: string; price: number; category?: string; name?: string; variant?: string; physical?: { ambient: boolean; keeps_for_days: number; fits_ten_per_container: boolean; regulated: boolean } };
+const canonicalConfig = (c: { version: string; presenter: string; products: Record<string, SeedProduct> }) => {
+  const named = Object.values(c.products).some((e) => e.name !== undefined || e.variant !== undefined);
   const rows = Object.keys(c.products).sort().map(ref => {
     const e = c.products[ref]!;
     const p = e.physical;
-    return [ref, e.merchant, e.maker, e.ships, e.price, e.category ?? null,
+    const row2 = [ref, e.merchant, e.maker, e.ships, e.price, e.category ?? null,
       p === undefined ? null : [p.ambient, p.keeps_for_days, p.fits_ten_per_container, p.regulated]];
+    return named ? [...row2, e.name ?? null, e.variant ?? null] : row2;
   });
-  return Buffer.from(JSON.stringify(["valence.catalogue.2", c.version, c.presenter, rows]), "utf8");
+  return Buffer.from(JSON.stringify([named ? "valence.catalogue.3" : "valence.catalogue.2", c.version, c.presenter, rows]), "utf8");
 };
 const presenterKeys: Record<string, ReturnType<typeof pairFor>> = {
   "reference-merchant": pairFor("presenter:reference-merchant"),
@@ -271,6 +276,71 @@ await postConfig({
     "nori-a": { merchant: "maker-a", maker: "made-by-nori", ships: "carrier-a", price: 1100, physical: PHYSICAL },
   },
 });
+
+// D-1, decided 2026-09-23. A catalogue version whose one product carries a
+// display `name` and `variant`, so the disclosure suite can check they reach
+// a candidate, an approval and a settlement. **Its own catalogue under
+// `other-merchant`, not `reference-merchant`**, for the same reason
+// `cfg-conformance-undisclosed` is: novelty is counted across every
+// catalogue a presenter has registered (§5), so a product added under
+// `reference-merchant` would have made `floor/`'s "this household has seen
+// everything" fixture untrue the moment this seed ran. It still names
+// `maker-a` as the merchant of record, which is already disclosed and
+// rooted regardless of which presenter's catalogue lists it.
+const NAMED_PRODUCT = "tea-named";
+const DISPLAY_NAME = "Sencha";
+const DISPLAY_VARIANT = "500g bag";
+await postConfig({
+  version: "cfg-conformance-named",
+  presenter: "other-merchant",
+  products: {
+    [NAMED_PRODUCT]: {
+      merchant: "maker-a",
+      maker: "made-by-tea",
+      ships: "carrier-a",
+      price: 1300,
+      physical: PHYSICAL,
+      name: DISPLAY_NAME,
+      variant: DISPLAY_VARIANT,
+    },
+  },
+});
+
+// D-1. **The property that a tampered revision 3 publication is refused is
+// deployment plumbing the same way registering the catalogue is**: only the
+// presenter's own key can produce a publication to tamper with, and no
+// environment variable hands the suite one. So the seed attempts the
+// tamper itself and reports the HTTP status it got, the same shape
+// `UNDISCLOSED_PRODUCT` already reports a seed-time fact through. The
+// signature is computed over the true name and posted under a different
+// one, which is what "altered after signing" means for a publication that
+// is never on the wire before it is signed.
+const tamperConfig = {
+  version: "cfg-conformance-named-tampered",
+  presenter: "other-merchant",
+  products: {
+    "tea-tampered": {
+      merchant: "maker-a",
+      maker: "made-by-tea",
+      ships: "carrier-a",
+      price: 1300,
+      physical: PHYSICAL,
+      name: DISPLAY_NAME,
+    },
+  },
+};
+const tamperSignature = sign(null, canonicalConfig(tamperConfig), presenterKeys["other-merchant"]!.privateKey).toString("base64");
+const tamperedBody = {
+  ...tamperConfig,
+  products: { "tea-tampered": { ...tamperConfig.products["tea-tampered"], name: "Not " + DISPLAY_NAME } },
+  signature: tamperSignature,
+};
+const tamperResponse = await fetch(`${base}/_presenter/configs`, {
+  method: "POST",
+  headers: { "content-type": "application/json", "user-agent": "atarasy-reference/0.0.0" },
+  body: JSON.stringify(tamperedBody),
+});
+const TAMPER_STATUS = tamperResponse.status;
 
 const { publicKey, privateKey } = pairFor("giver");
 // §13.2, question 55. A giver that moves its own node is a household, and a
@@ -481,3 +551,10 @@ console.log(MANDATE);
 // §6.6, §6.6a. The first merchant's private key, twelfth, base64 of the PEM,
 // so the probes can sign a correction and a record that its refund came back.
 console.log(Buffer.from(seedKeys["merchant:maker-a"]!, "utf8").toString("base64"));
+// D-1. The named catalogue's version and product, thirteenth and
+// fourteenth, and the HTTP status the tampered publication got back,
+// fifteenth: deployment plumbing the suite cannot perform itself, since it
+// holds no presenter key.
+console.log("cfg-conformance-named");
+console.log(NAMED_PRODUCT);
+console.log(String(TAMPER_STATUS));

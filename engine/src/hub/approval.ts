@@ -30,6 +30,10 @@ export type ApprovalCandidate = {
   merchant: string;
   maker: string;
   ships: string;
+  /** D-1. Display text from the catalogue, absent when it gave none (see `common/types.ts` `Candidate.name`). */
+  name?: string;
+  /** D-1. See `name`. */
+  variant?: string;
   /**
    * Clause 10, §6.2. Who gave this candidate, or null when it is bought. A
    * gift arrives at its price and is never billed, so a screen showing a
@@ -231,6 +235,9 @@ export class ApprovalDesk {
         maker: c.maker,
         given_by: c.given_by,
         ships: c.ships,
+        // D-1. Absent, not null, where the catalogue gave none.
+        ...(c.name !== undefined ? { name: c.name } : {}),
+        ...(c.variant !== undefined ? { variant: c.variant } : {}),
         is_exploration: c.is_exploration,
         valence: c.valence,
         collected_as: collectedAs(engine.recoveries.for(offer.id), c.id),

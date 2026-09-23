@@ -140,6 +140,12 @@ DISCLOSURE_PRODUCT_JSON="$(printf '%s\n' "$SEED_OUT" | sed -n 9p)"
 SEED_HOUSEHOLD="$(printf '%s\n' "$SEED_OUT" | sed -n 10p)"
 SEED_MANDATE="$(printf '%s\n' "$SEED_OUT" | sed -n 11p)"
 SEED_MERCHANT_KEY="$(printf '%s\n' "$SEED_OUT" | sed -n 12p)"
+# D-1. A catalogue version and product carrying a display name/variant, and
+# the status a tampered revision 3 publication got back: deployment plumbing
+# the suite cannot perform itself, since it holds no presenter key.
+NAMED_CONFIG_VERSION="$(printf '%s\n' "$SEED_OUT" | sed -n 13p)"
+NAMED_PRODUCT="$(printf '%s\n' "$SEED_OUT" | sed -n 14p)"
+CATALOGUE_TAMPER_STATUS="$(printf '%s\n' "$SEED_OUT" | sed -n 15p)"
 # The receiving host needs the same catalogue, or an imported offer names a
 # config version it has never seen.
 # The same keys on the second host, or nothing that moved there would verify.
@@ -181,4 +187,7 @@ VALENCE_CONFIG_VERSION_NARROW="cfg-conformance-narrow" \
 VALENCE_CONFIG_VERSION_UNROOTED="cfg-other-merchant" \
 VALENCE_PRODUCTS_UNROOTED="salt-a,salt-b" \
 VALENCE_PRICES_LATER='{"tea-a":9900,"tea-b":900,"coffee-a":1500,"miso-a":700,"nori-a":1100}' \
+VALENCE_CONFIG_VERSION_NAMED="$NAMED_CONFIG_VERSION" \
+VALENCE_PRODUCT_NAMED="$NAMED_PRODUCT" \
+VALENCE_CATALOGUE_TAMPER_STATUS="$CATALOGUE_TAMPER_STATUS" \
   bun test ${SUITES:-absence floor silence lineage opacity binding machine exit approval permissions registry roles merchant-exit disclosure}

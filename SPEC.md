@@ -97,6 +97,8 @@ candidate
   maker                  who made it (clause 12). The merchant only where the merchant made the goods. From the catalogue.
   ships                  who carries it to the household (clause 12). From the catalogue.
   category               the merchant's own category, or null. From the catalogue, never the request.
+  name                   display text, absent when the catalogue gave none. From the catalogue, never the request (D-1).
+  variant                display text for a size or pack, absent when the catalogue gave none (D-1).
   predicted_conversion   0..1, or null. The presenter's own model output.
   is_exploration         boolean. Counts toward the floor (§5).
   given_by               the key of whoever gave this candidate, or null. A gift is never billed to its recipient (§6.2, clause 10).
@@ -212,6 +214,37 @@ This domain replaces the earlier unversioned catalogue form, which omitted physi
 
 The reference stores its verification-format marker with the catalogue row. A legacy row without that evidence **MUST NOT** be used to create a new offer and **MUST NOT** be silently marked as revision 2. Republish a fresh catalogue version after reviewing eligibility. Already-created offers and historical exports remain readable without rewriting their signed content. A local marker is not an exported authority claim or a replacement for verification on another host.
 
+----
+
+#### Catalogue publication signature revision 3
+
+D-1, decided 2026-09-23. A product entry **MAY** carry `name` (display text, at most 120 Unicode code points) and `variant` (display text for a size or pack, at most 60 Unicode code points), each well-formed nonempty text as revision 2's other required names are. Both are display text only, never presentation (clause 54): no markup, no image, no styling, rendered in the hub's own type, exactly as the merchant's disclosure items are (§10a).
+
+**If any product entry in the publication carries `name` or `variant`, the presenter MUST sign revision 3 instead of revision 2**, the UTF-8 bytes of compact JSON with this exact array shape and no trailing newline:
+
+```text
+["valence.catalogue.3",version,presenter,[productRow,...]]
+productRow = [reference,merchant,maker,ships,price,categoryOrNull,physicalOrNull,nameOrNull,variantOrNull]
+```
+
+Every row in a revision 3 publication carries all nine elements, `nameOrNull`/`variantOrNull` becoming `null` for a product that gave neither, so a single named entry in an otherwise unnamed catalogue still puts every row through the nine-element shape rather than a mix of the two. **If no product entry carries `name` or `variant`, the publication signs revision 2 exactly as before**, byte for byte identical to what it would have signed had revision 3 never been added, so every existing publisher, verifier and signature keeps working unchanged. A revision 3 publication whose `name`, `variant`, or any other signed field is altered after signing fails verification under the revision 3 domain, which is the domain the presenter actually signed; there is no fallback to revision 2 for a publication that used a display field.
+
+Worked example. The config
+
+```text
+{version:"v1",presenter:"p",products:{"b":{merchant:"M",maker:"K",ships:"S",price:100,name:"Tea",variant:"500g"},"a":{merchant:"M",maker:"K",ships:"S",price:50}}}
+```
+
+signs
+
+```text
+["valence.catalogue.3","v1","p",[["a","M","K","S",50,null,null,null,null],["b","M","K","S",100,null,null,"Tea","500g"]]]
+```
+
+The reference's local verification-format marker records 3 for such a publication and 2 for one with no display field, never the other way; a legacy row carrying neither marker **MUST NOT** be treated as either revision, for the reason given above.
+
+A candidate copies `name`/`variant` from the catalogue entry exactly as it copies `merchant`, `maker` and `ships`: never from the request, and absent (not null) on every response surface where the catalogue gave none, because a client that checks a candidate's keys exactly must not see a key it never declared (question 72's `contact` is the precedent). The same fields ride with the candidate onto the approval screen (§10a.5) and the settlement statement (§6.5), for the same reason a person is shown who sold and who made what they are asked to decide on.
+
 
 ## 6. Settlement
 
@@ -306,7 +339,7 @@ valence.statement.1
 
 **What an implementation MUST do.**
 
-- `GET /offers/{id}/statement` MUST return the statement as proposed: each line with its candidate, product, merchant, maker, carrier, giver, valence, quantity, unit price and amount, **the offer's expiry**, the merchants' blocks beside them **as composed** (§10a.2), the carriage from the delivery record where one exists (§7.5b), for a line the collection recorded `missing` the collection's note, and the challenge for a passkey. It is data and never presentation (clause 54); the hub draws it. The expiry is here for the reason §10a.5 puts it on the approval: a merchant's stated application period is measured against something, and a screen that omits it states a period against nothing.
+- `GET /offers/{id}/statement` MUST return the statement as proposed: each line with its candidate, product, merchant, maker, carrier, giver, valence, quantity, unit price and amount, **the offer's expiry**, the merchants' blocks beside them **as composed** (§10a.2), the display `name`/`variant` where the catalogue gave them (D-1), the carriage from the delivery record where one exists (§7.5b), for a line the collection recorded `missing` the collection's note, and the challenge for a passkey. It is data and never presentation (clause 54); the hub draws it. The expiry is here for the reason §10a.5 puts it on the approval: a merchant's stated application period is measured against something, and a screen that omits it states a period against nothing.
 - `POST /offers/{id}/settle` on a physical offer whose collection recorded any consumed or missing line MUST refuse, with `422 statement_unsigned`, unless the body carries a signature or an assertion over the statement, and MUST refuse with `422 bad_signature` one by another key or over other lines. Nothing is written on refusal. The settlement records the signature as `confirmation`.
 - **A disputed line leaves the rail.** It is not charged, `charged` still equals `kept_amount + consumed_amount`, and the line is returned with `disputed: true` and its amount under `disputed_amount`. Only a consumed line, or a line the collection recorded `missing`, can be disputed; `422 not_disputable` otherwise, since a kept line is one the household signed itself. **A disputed missing line moves no money**, because none was charged; it records that the household contests the loss, and the settlement returns it with `disputed: true` and adds nothing to `disputed_amount`.
 
@@ -878,7 +911,9 @@ A household moves its node by exporting it from one host and importing it at ano
 
 **It also carries the keys its edges are verified with**, as `keys`, a map from a key's name to its public key, for every end of a carried edge whose name is the hash of its key (§13.2). Decided 2026-09-23 with §14.3: an import verifies every edge with the giver's key (§14.2), and a giver that has left the sending host has no key at the receiving one, so without this a household that received a gift from a departed giver could not move the edge. The format was `valence-node/11` from then until the records of §6.6a joined it. **A name that is not the hash of its key is never carried**, because it would be a key the receiving host is asked to trust; such a key is one the receiving host must already hold, as before.
 
-**It also carries what became of each refund correction**, as `correction_returns`, a map from an offer's id to its §6.6a records in the order they arrived. Decided 2026-09-23: without it a move would arrive showing a refund the household never received as though it had. The format is `valence-node/12` since then, and an import still reads `valence-node/10` and `/11`, whose corrections arrive with no record that a refund came back.
+**It also carries what became of each refund correction**, as `correction_returns`, a map from an offer's id to its §6.6a records in the order they arrived. Decided 2026-09-23: without it a move would arrive showing a refund the household never received as though it had. The format was `valence-node/12` from then until D-1 joined it, and an import still reads `valence-node/10` and `/11`, whose corrections arrive with no record that a refund came back.
+
+**A carried candidate and settlement line may carry a display `name` and `variant`**, D-1, decided 2026-09-23. Both are optional and absent on every archive before this one: a `/12` export carries neither key on any candidate or line, which is exactly the shape an entry with no catalogue name already has, so nothing is lost by reading it and nothing here invents a display name the sending host never held. The format is `valence-node/13` since then. Where present, an import applies the same text and length rule the catalogue enforces at publication (§3, "Catalogue publication signature revision 3"): well-formed nonempty text, at most 120 code points for `name` and 60 for `variant`. A moved candidate is not re-verified against a catalogue signature, so this is the shape check that stands in for one.
 
 **A household reads its own export through a hub with `POST /households/{id}/export`**, signed as a deletion is, over `["valence.export.1", household, <relying party>, at]`. Decided 2026-09-23, when the reference web hub needed to offer the export before deletion: the export carries the household's notes (clause 27), permissions and recovery log, which no read a hub carries today does, so a hub that carried the unsigned `GET` would hand them to anyone who knew the identifier, and merchants do. The unsigned `GET` stays for a caller that is the household's own hub in the same process.
 
@@ -983,7 +1018,7 @@ An import is an arrival from outside, not a restore of the host's own backup, so
 
 ## 14b. Deployment parameters
 
-Added 2026-09-10, because there was no list. Seven values are the deployment's rather than this specification's, and until they were gathered a reader could not count them or tell which had a default. **A parameter with no recommended figure is a deliberate absence**: a number written here once becomes a standard by being quoted, and the ones below are properties of an operation rather than of the protocol.
+Added 2026-09-10, because there was no list. Eight values are the deployment's rather than this specification's, and until they were gathered a reader could not count them or tell which had a default. **A parameter with no recommended figure is a deliberate absence**: a number written here once becomes a standard by being quoted, and the ones below are properties of an operation rather than of the protocol.
 
 | Parameter | Where | Default | Why the specification names no figure |
 |---|---|---|---|
@@ -994,8 +1029,9 @@ Added 2026-09-10, because there was no list. Seven values are the deployment's r
 | the day boundary | §16.3 | **UTC midnight, declared rather than assumed** | A household's day needs a time zone. Choosing one here would make when a person's day starts this specification's business. A deployment MUST apply the same boundary to every household it holds |
 | the bindings run | §2 | both | A deployment may run the digital binding alone, and §11's probes then have nothing to reach |
 | the relying party | §10.5 | **none. An implementation without one MUST refuse to start** | The name a member's device signs for is the hub's own hostname, a fact about where a deployment is served rather than a figure this specification could supply. Without it an engine cannot tell whom an assertion was made for, and §10.5 requires it to accept assertions, so there is no conforming deployment that does not need one. Added 2026-09-11 |
+| currency | §14 | **none. A host MUST declare exactly one** | The ISO 4217 code every integer amount on this host is denominated in. A deployment's fact rather than the protocol's: the hub displays it beside an amount, and nothing in the engine reads it, since the engine holds and compares integers whatever unit they are in. A figure written here would fix Stage 0's JPY into the specification. D-3, decided 2026-09-23 |
 
-**Three of the seven have no default at all**, and that is the pattern worth seeing: where the value is a judgement about a person's experience, or a fact only the deployment knows, the specification refuses to supply one and an implementation that starts without it is not conformant. Where the value is a limit the constitution already fixes, or something a deployment can be assumed to do, a default is safe. **The count is of the rows that say none**, and it read "three of the six" until 2026-09-11 while the table held two such rows and a third that has a default and stops no start. Count the rows before quoting the sentence.
+**Four of the eight have no default at all**, and that is the pattern worth seeing: where the value is a judgement about a person's experience, or a fact only the deployment knows, the specification refuses to supply one and an implementation that starts without it is not conformant. Where the value is a limit the constitution already fixes, or something a deployment can be assumed to do, a default is safe. **The count is of the rows that say none**, and it read "three of the six" until 2026-09-11 while the table held two such rows and a third that has a default and stops no start. Count the rows before quoting the sentence. Currency is the fourth: unlike the other three, it does not gate an engine's start (nothing in the engine reads it), but a host that never declares one leaves its hub with no unit to show beside a figure.
 
 ----
 

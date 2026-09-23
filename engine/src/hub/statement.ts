@@ -33,6 +33,10 @@ export type Statement = {
     merchant: string;
     maker: string;
     ships: string;
+    /** D-1. Absent, not null, where the catalogue gave none. */
+    name?: string;
+    /** D-1. See `name`. */
+    variant?: string;
     given_by: string | null;
     valence: "kept" | "defaulted" | "consumed" | "lost";
     quantity: number;
@@ -78,6 +82,9 @@ export function renderStatement(
         merchant: c.merchant,
         maker: c.maker,
         ships: c.ships,
+        // D-1. Absent, not null, where the catalogue gave none.
+        ...(c.name !== undefined ? { name: c.name } : {}),
+        ...(c.variant !== undefined ? { variant: c.variant } : {}),
         given_by: c.given_by,
         valence: l.valence,
         quantity: c.quantity,
