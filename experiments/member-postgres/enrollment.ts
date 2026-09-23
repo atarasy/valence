@@ -50,9 +50,17 @@ export function openEnrollment(path: Records, authority: ReturnType<typeof openM
      * A refutation pass on 2026-09-23 measured what leaving the earlier one
      * live bought: two invitations enrolled two different keys under one
      * principal, and whichever signed in second read a live session on the
-     * first's household. One live invitation per principal closes that at
-     * the source; `member-adoption.ts` closes it again at sign-in for every
-     * other route that can still leave two credentials behind.
+     * first's household.
+     *
+     * This closes only the narrower case, where the earlier invitation or
+     * its flow is still outstanding when the second is issued. It does
+     * nothing once the earlier one has already finished enrolling a
+     * credential: a second refutation pass measured that a re-issue after
+     * that point still leaves two credentials on one principal (the row
+     * this method cannot see or drop). **The sign-in gate in
+     * `member-adoption.ts` is what actually stops the mix**, for every
+     * credential regardless of how it got there; this is a narrower,
+     * earlier line of defence, not the one the invariant depends on.
      */
     issueInvitation(principal: string) {
       if (!authority.isActivePrincipal(principal)) throw new Error('Principal unavailable');

@@ -70,6 +70,8 @@ NEON_PROJECT_ID=weathered-violet-85512339 bun --env-file=/absolute/private/atara
 
 It provisions one new principal, unclaimed and with no presenter grants, records it as a review principal, and issues one single-use invitation through the ordinary enrolment service, valid for fourteen days. The passkey is created on the reviewer's device when the invitation is used; this command makes no credential, household, mandate or offer. It has no `--target` and refuses unless all three checks of the guard say production. The code to give App Review is the `token` in the file.
 
+**There is no shipped command that invites an ordinary member.** `review-invite.ts` issues App Review invitations only; `device-acceptance.ts` and `presenter-credential.ts` refuse the production project outright. An operator who provisions an unclaimed principal by hand and calls `enrollment.issueInvitation` directly can still invite a real member this way, but nothing here does that for them, and doing so gives that principal none of the review shop's grant or proposal.
+
 **6. Nothing else to run.** Everything after the invitation happens on the reviewer's own steps, at whatever hour they take them (next section). `review-proposal.ts` is the fallback if a proposal is ever missing:
 
 ```sh
@@ -82,10 +84,10 @@ It takes the household a review principal adopted (`/auth/session` names it, or 
 
 Decided 2026-09-23, in every environment. A household is the name of its key (question 55), and the first moment the service knows a member holds that key is the first sign-in whose assertion verifies. So `login.finish` calls `member-adoption.ts` after the assertion verifies and **before the session is created**:
 
-- if the credential's principal has no household, it adopts the one named by that credential's key, registers the key under that name in the engine, and writes the version-1 mandate as a **claim** (`<household>.1`);
+- if the credential's principal has no household **and holds no other credential**, it adopts the one named by that credential's key, registers the key under that name in the engine, and writes the version-1 mandate as a **claim** (`<household>.1`); a principal carrying a second credential, proven or not, adopts nothing until that credential is gone, because two invitations issued for one principal before either was used could otherwise enrol two different keys and let whichever signed in second inherit the first's household (`member-adoption.ts`, `authority.credentialProof`);
 - registration alone adopts nothing, because enrolment runs with attestation `none` and a registered key is a value the client sent;
-- a household another live principal already holds is refused, and so is the sign-in (401); the refusal writes nothing of the adoption;
-- a later sign-in changes nothing.
+- a household another live principal already holds is refused, and so is the sign-in (401); the refusal writes nothing of the adoption, and neither does a refusal from either rule above: the counter update, the proven mark and the sign-in hook's own decision commit together or not at all (`login.ts`);
+- **a later sign-in of any credential is checked against the household its principal already holds, every time, not only the first**: a key that does not name that household is refused (401), so a second credential that somehow ends up beside an adopted household can never silently share its session (`authority.claimedPrincipalHousehold`). A later sign-in whose key does match changes nothing beyond that check.
 
 The server never signs the claim. It has no effect until the member's own passkey signs it through `/member/mandates/prepare` and `/submit`, which is the same ceremony a moved mandate uses, and the app shows every term before it asks. Its defaults (`member-adoption.ts`, `firstMandateClaim`):
 
