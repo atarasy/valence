@@ -11,7 +11,7 @@ import { openMandateCeremony } from './mandate-ceremony.ts';
 import { openMandateChanges } from './mandate-changes.ts';
 import type { Assertion } from '../../engine/src/shared/decisions.ts';
 import { memberTransport } from '../member-login/transport.ts';
-import { presentAfterSigning } from './review-shop.ts';
+import { presentAfterSigning, retryReviewPresentation } from './review-shop.ts';
 import { memberReadBoundary } from '../member-read/gate.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { Registry } from '../../engine/src/shared/registry.ts';
@@ -326,6 +326,26 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
       }catch{
        // Identifiers only: no error text, which can hold driver or peer detail.
        console.error(JSON.stringify({event:'review_proposal_present_failed',mandate:signed.id,household:signed.household}));
+      }
+     }
+    }
+    // A reviewer stranded by the attempt above (or by a transient failure at
+    // any earlier attempt) gets another one wherever their own live session
+    // next reads something: signing in again, or reading their own offers
+    // list. `retryReviewPresentation` is a no-op for anyone but a review
+    // principal with a signed, unpresented v1 mandate, so this costs an
+    // ordinary member one extra locked unit that reads and writes nothing.
+    const loginVerify=url.pathname==='/auth/login/verify'&&request.method==='POST'&&result.status===200;
+    const offersRead=url.pathname==='/offers'&&request.method==='GET'&&result.status===200;
+    if(loginVerify||offersRead){
+     const retryToken=loginVerify?(JSON.parse(result.body) as {token?:string}).token:request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];
+     if(retryToken){
+      try{
+       await unit.run(store=>{binding(store);return retryReviewPresentation(memberRuntime(store,c,now),retryToken,now());});
+      }catch{
+       // No household or mandate id is known statically here, unlike the
+       // submit-time attempt above; the token names the session, not either.
+       console.error(JSON.stringify({event:'review_proposal_present_retry_failed'}));
       }
      }
     }

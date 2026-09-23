@@ -87,3 +87,26 @@ export async function presentAfterSigning(r:Runtime,token:string,signed:Mandate,
  if(!held||held.household!==who.household||held.offer)return;
  await presentReviewProposal(r,who.principal,signed,at,()=>{r.bindings.bind(token,signed.id);});
 }
+/**
+ * Decided 2026-09-23. `presentAfterSigning` runs in its own transaction after
+ * the mandate route's own commit (`http.ts`), so a repeating failure there
+ * never rolls the member's signature back, but it also left the reviewer
+ * with no route of their own back to a presented proposal: re-preparing the
+ * signed mandate answers 404, and nothing else retried the attempt. This is
+ * retried from any live session that reads something a review household
+ * would want fresh: a later sign-in (`member-adoption.ts`'s already-adopted
+ * branch) and a read of the member's own offers list (`http.ts`). Same
+ * `sessionPrincipal`/`held.offer` guards as `presentAfterSigning`, so it is
+ * at most once overall and only for a review principal whose v1 mandate is
+ * already signed; a still-unsigned claim, or anyone who is not a review
+ * principal, is left exactly alone.
+ */
+export async function retryReviewPresentation(r:Runtime,token:string,at:number){
+ const who=r.authority.sessionPrincipal(token);
+ if(!who||!r.reviewPrincipals.get(who.principal))return;
+ const held=r.reviewProposals.get('principal:'+who.principal) as ReviewProposal|null;
+ if(!held||held.household!==who.household||held.offer)return;
+ const mandate=r.engine.mandates.get(who.household+'.1');
+ if(!mandate)return;
+ await presentReviewProposal(r,who.principal,mandate,at,()=>{r.bindings.bind(token,mandate.id);});
+}

@@ -139,3 +139,57 @@ test('a repeating failure while presenting the review proposal never rolls back 
   await pool.end();
  }
 },60000);
+
+test('a stranded reviewer is presented on the next offers read or the next sign-in, at most once even under concurrent triggers',async()=>{
+ const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
+ const c=TARGETS.production.config;
+ const id={id:'reviewretry_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1};
+ const pool=createPool(url),unit=postgresStore(pool,id);
+ try{
+  await migrateDatabase(url);await initialiseDeployment(pool,id);const app=await openPostgresMemberHTTP(pool,id,c);
+  const send=(path:string,body?:unknown,token?:string)=>app.fetch(new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}),{peer:'review-retry-test'});
+  const invitation=await unit.run(s=>issueReviewInvitation(s,c));
+  const flow=await(await send('/auth/enrollment/options',{invitation:invitation.token})).json(),key=syntheticAuthenticator();
+  expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
+  const handle=flow.publicKey.user.id;
+  const signIn=async(counter:number)=>{
+   const f=await(await send('/auth/login/options',{})).json();
+   const reply=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,handle,counter)});
+   expect(reply.status).toBe(200);return (await reply.json()).token as string;
+  };
+  const offersOf=(token:string)=>send('/offers?household='+encodeURIComponent(household)+'&presenter='+REVIEW_SHOP.presenter,undefined,token).then(r=>r.json());
+  const token=await signIn(1);
+  const session=await(await send('/auth/session',undefined,token)).json();
+  const household=session.household as string,mandate=household+'.1';
+
+  // Sign and submit while presenting is broken, exactly as the test above,
+  // so the reviewer is left with a signed mandate and no proposal.
+  const original=ValenceEngine.prototype.present;
+  ValenceEngine.prototype.present=async function(){throw new Error('synthetic present failure')} as typeof original;
+  try{
+   const named=await(await send('/member/mandates/prepare',{mandate},token)).json();
+   const submitted=await send('/member/mandates/submit',{assertion:assertionFor(key,named.publicKey.challenge,c,2),mandate},token);
+   expect(submitted.status).toBe(200);
+   expect((await offersOf(token)).offers).toEqual([]);
+  }finally{ValenceEngine.prototype.present=original;}
+
+  // Presenting works again, and nothing has retried yet. Fire three triggers
+  // at once: two reads of the offers list and a second sign-in. Every
+  // deployment-wide unit serialises on the control row, so exactly one of
+  // these retries wins the race to present; the rest find `held.offer`
+  // already set and do nothing. Each trigger's own response reflects the
+  // state before its own retry ran (the retry is a separate, later
+  // transaction), so none of these three responses is asserted on directly.
+  const [signedInAgain]=await Promise.all([signIn(3),offersOf(token),offersOf(token)]);
+  expect(typeof signedInAgain).toBe('string');
+  const finalList=await offersOf(token);
+  expect(finalList.offers).toHaveLength(1);
+  const detail=await (await send('/offers/'+finalList.offers[0].id,undefined,token)).json();
+  expect(detail.state).toBe('presented');expect(detail.binding).toBe('digital');
+  // A further read presents nothing more: the gate is `held.offer`, not a one-shot flag.
+  expect((await offersOf(token)).offers).toHaveLength(1);
+ }finally{
+  await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id.id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id.id]);
+  await pool.end();
+ }
+},60000);
