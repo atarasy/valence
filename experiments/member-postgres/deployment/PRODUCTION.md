@@ -16,12 +16,13 @@ Every other runtime value in `production/config.json` equals the development one
 
 ## The guard
 
-Every command that connects takes its target explicitly and checks it twice before writing anything.
+Every command that connects takes its target explicitly and checks it three times before writing anything.
 
-1. **The label.** `NEON_PROJECT_ID` must equal the target's project id, or the command stops before connecting. The development commands that existed before this file (`bootstrap.ts` with no flag, `device-acceptance.ts`, `presenter-credential.ts`) still require `young-pond-73223516`, so none of them runs against production.
-2. **The database.** `bootstrap.ts`, `member-invite.ts` and `review-proposal.ts` then read `atarasy_member.control` and refuse if it already holds a deployment scoped to the other target's environment. This is what catches an environment file whose label and connection string came from different places. A database with no control table yet passes.
+1. **The label.** `NEON_PROJECT_ID` must equal the target's project id, or the command stops before connecting. The development commands that existed before this file (`bootstrap.ts` with no flag, `device-acceptance.ts`, `presenter-credential.ts`) still require `young-pond-73223516`, so none of them runs against production. `NEON_PROJECT_ID` is read from whatever the operator typed or put in `--env-file`, and the command line wins when the two disagree; every command below sets it on the command line, so this check proves what was typed, not what `DATABASE_URL_UNPOOLED` names.
+2. **The connection.** For production only, `DATABASE_URL_UNPOOLED`'s own host must be the real project's Neon endpoint (`ep-curly-sound-b33yhpem`, or its pooled form `-pooler`), or the command stops before connecting. This is what the label check above cannot see: a correct `NEON_PROJECT_ID` typed alongside a `DATABASE_URL_UNPOOLED` from the wrong file still passes the label, and until this check existed it would have connected. No development endpoint id is recorded in this repository, so development keeps only the label and database checks.
+3. **The database.** `bootstrap.ts`, `review-invite.ts` and `review-proposal.ts` then read `atarasy_member.control` and refuse if it already holds a deployment scoped to the other target's environment. This is what catches an environment file whose label and connection string came from different places. A database with no control table yet passes.
 
-`targets.test.ts` and `member-invite.test.ts` prove both halves in both directions on disposable local databases, and each was watched failing with its guard removed.
+`targets.test.ts` and `review-invite.test.ts` prove all three in both directions on disposable local databases, and each was watched failing with its guard removed. A disposable database cannot be given the real endpoint's own hostname, so `review-invite.test.ts` stands one in for production with the test-only `ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL` override (`targets.ts`), which nothing outside a test has reason to set.
 
 ## Order
 
@@ -64,10 +65,10 @@ curl -si https://members.vox.delivery/support                                  #
 **5. Issue the App Review invitation.**
 
 ```sh
-NEON_PROJECT_ID=weathered-violet-85512339 bun --env-file=/absolute/private/atarasy-api.env deployment/member-invite.ts issue /absolute/private/review-invitation.json
+NEON_PROJECT_ID=weathered-violet-85512339 bun --env-file=/absolute/private/atarasy-api.env deployment/review-invite.ts issue /absolute/private/review-invitation.json
 ```
 
-It provisions one new principal, unclaimed and with no presenter grants, records it as a review principal, and issues one single-use invitation through the ordinary enrolment service, valid for fourteen days. The passkey is created on the reviewer's device when the invitation is used; this command makes no credential, household, mandate or offer. It has no `--target` and refuses unless both halves of the guard say production. The code to give App Review is the `token` in the file.
+It provisions one new principal, unclaimed and with no presenter grants, records it as a review principal, and issues one single-use invitation through the ordinary enrolment service, valid for fourteen days. The passkey is created on the reviewer's device when the invitation is used; this command makes no credential, household, mandate or offer. It has no `--target` and refuses unless all three checks of the guard say production. The code to give App Review is the `token` in the file.
 
 **6. Nothing else to run.** Everything after the invitation happens on the reviewer's own steps, at whatever hour they take them (next section). `review-proposal.ts` is the fallback if a proposal is ever missing:
 
@@ -97,11 +98,15 @@ The server never signs the claim. It has no effect until the member's own passke
 | `lapses_at` | 365 days after adoption | A standing mandate lapses unless renewed (clause 58). A year is a round period inside the engine's 400-day bound; the member renews by signing again |
 | `version` | 1 | The first version |
 
+**Plainly: the version-1 claim's ceilings limit nothing on this service yet.** Every merchant reads as in network, because no registry is supplied, so `ceiling_out_of_network`'s 0 bounds no purchase; `ceiling_daily` and `cooling_seconds` are `null`. A member signing this mandate on day one is not agreeing to a spending limit that does anything; they are agreeing to the shape a limit will later take, and can tighten any of the three themselves once it does.
+
 The development device-acceptance commands follow: `statement` uses the household the sign-in adopted rather than adopting one (it still adopts for a principal that signed in before this change), and its box is signed under these terms, so its out-of-network ceiling is now 0 rather than the box's price, which a refutation pass had already measured to bound nothing. `retire` undoes an enrolment whose sign-in adopted a household by revoking the credentials, disabling that principal and preparing a fresh one, because adoption has no route back. `local-household.ts` is unchanged: it never signs in.
 
 ## What the App Reviewer sees
 
-The review principal is granted the review shop **at the sign-in that adopts its household**, before the session exists, so no grant change revokes the reviewer's session later. Signing the version-1 mandate presents the proposal **in the same request** (`review-shop.ts`, `presentAfterSigning`): the review shop (`app_review_shop`, merchant `app_review_merchant`, registered once per deployment with ephemeral keys dropped after signing its catalogue and disclosure) makes one digital proposal of three goods, `green_tea_50g` at 800, `cotton_hand_towel` at 1,200 and `beeswax_candle` at 1,500, open for 30 days, with a carriage quote of 0. The digital binding ships nothing and no provider is called, so a decision on it is an engine record and no money moves. An ordinary member is untouched: no grant at sign-in, nothing presented when they sign.
+The review principal is granted the review shop **at the sign-in that adopts its household**, before the session exists, so no grant change revokes the reviewer's session later. Signing the version-1 mandate presents the proposal **in the same request** when presenting succeeds (`review-shop.ts`, `presentAfterSigning`): the review shop (`app_review_shop`, merchant `app_review_merchant`, registered once per deployment with ephemeral keys dropped after signing its catalogue and disclosure) makes one digital proposal of three goods, `green_tea_50g` at 800, `cotton_hand_towel` at 1,200 and `beeswax_candle` at 1,500, open for 30 days, with a carriage quote of 0. The digital binding ships nothing and no provider is called, so a decision on it is an engine record and no money moves. An ordinary member is untouched: no grant at sign-in, nothing presented when they sign.
+
+**Signing the mandate and presenting the proposal are two transactions, not one** (`http.ts`, decided 2026-09-23). The mandate route commits the signature on its own; presenting is attempted only after that commit, in a transaction of its own. A repeating failure while presenting therefore never rolls the signature back and never reaches the reviewer: the member sees an ordinary 200 with their signed mandate, and the failure is logged with the mandate and household identifiers only, nothing else. Before this change the two shared one transaction, so a deterministic failure in presenting stopped the reviewer from ever signing v1 at all, behind an opaque 404. `review-proposal.ts propose <household>` is what presents the proposal afterwards when the automatic attempt failed.
 
 The steps, with the labels the iOS app shows (`atarasy` `ios/AtarasyPrototype`, read 2026-09-23, not yet run against production):
 
@@ -112,7 +117,7 @@ The steps, with the labels the iOS app shows (`atarasy` `ios/AtarasyPrototype`, 
 
 Whether the proposals section refreshes on its own after step 3, and the label of its refresh control if it does not, has not been checked on a device.
 
-`review-proposal.test.ts` runs this on a disposable database: an ordinary member beside the reviewer, the grant at sign-in, the fallback answering `awaitingSignature`, the signature presenting the proposal in the same request, the same session listing and reading it, a signed decision committing with carriage 0, and the ordinary member signing its own claim with nothing granted or presented. `member-adoption.test.ts` covers adoption itself. Each of these was watched failing with its rule removed: the sign-in hook, the held-elsewhere refusal, the review-principal check, the grant at adoption, the presentation after signing and the invitation lifetime.
+`review-proposal.test.ts` runs this on a disposable database: an ordinary member beside the reviewer, the grant at sign-in, the fallback answering `awaitingSignature`, the signature presenting the proposal in the same request, the same session listing and reading it, a signed decision committing with carriage 0, and the ordinary member signing its own claim with nothing granted or presented. A second test in the same file makes `ValenceEngine.prototype.present` fail every time and shows the signature still commits, the failure is logged with identifiers only, and the fallback presents the proposal once, on the next call, after presenting works again. `member-adoption.test.ts` covers adoption itself, including a principal carrying two credentials before either signs in and a credential whose key does not name its principal's already-adopted household. Each of these was watched failing with its rule removed: the sign-in hook, the held-elsewhere refusal, the review-principal check, the grant at adoption, the presentation after signing, the invitation lifetime, the two-invitation cancellation, and the two new adoption refusals.
 
 ## Static pages
 
