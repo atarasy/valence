@@ -79,3 +79,25 @@ test('the local server answers /presenter/self 401 without a token and 200 with 
   await cleanupLocalDeployment(url);
  }
 },30000);
+
+// OPS-01 widened the https-only origin checks for one case. These pin how
+// narrow it is: the exception needs the environment to be exactly `local` AND
+// the origin to be http on the loopback literal; each half alone still fails.
+test('the http exception is only a `local` environment on http://127.0.0.1',async()=>{
+ const base=(await import('./deployment/config.json')).default as import('./config.ts').MemberRuntimeConfig;
+ const {memberRuntimeIdentity}=await import('./config.ts');
+ const at=(environment:string,origin:string)=>()=>memberRuntimeIdentity({...base,environment,origin,rpID:new URL(origin).hostname});
+ expect(at('local','http://127.0.0.1:8788')).not.toThrow();
+ expect(at('development','http://127.0.0.1:8788')).toThrow();
+ expect(at('production','http://127.0.0.1:8788')).toThrow();
+ expect(at('local','http://localhost:8788')).toThrow();
+ expect(at('local','http://api-dev.vox.delivery')).toThrow();
+ expect(at('local','https://api-dev.vox.delivery')).not.toThrow();
+ const pool=createPool('postgres://127.0.0.1:1/unused');
+ try{
+  const identity=(environment:string,origin:string)=>()=>postgresStore(pool,{id:'x',environment,origin,epoch:1});
+  expect(identity('local','http://127.0.0.1:8788')).not.toThrow();
+  expect(identity('development','http://127.0.0.1:8788')).toThrow();
+  expect(identity('local','http://10.0.0.1:8788')).toThrow();
+ }finally{await pool.end();}
+});
