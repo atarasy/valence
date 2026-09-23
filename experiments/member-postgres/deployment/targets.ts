@@ -36,13 +36,53 @@ export function parseTarget(argv:readonly string[]):{target:Target;rest:string[]
  return {target:targetNamed(argv[1]),rest:argv.slice(2)};
 }
 /**
- * The exact-project guard. `NEON_PROJECT_ID` comes from the same Vercel
- * environment file as the connection string, so a file pulled from the other
- * project names the other project and is refused here before any connection.
+ * The label half of the guard. `NEON_PROJECT_ID` is whatever the operator
+ * typed or put in `--env-file`, not necessarily the same source as the
+ * connection string: PRODUCTION.md's own commands set it on the command
+ * line, and a command-line value beats `--env-file`, so a stray value here
+ * checks what the operator typed rather than proving anything about
+ * `DATABASE_URL_UNPOOLED`. `assertTargetConnection` below is what checks the
+ * connection string itself, and `assertTargetDatabase` checks the database
+ * it opens; all three run before a bootstrap, invitation or proposal command
+ * writes anything.
  */
 export function targetDatabaseURL(target:Target,env:Record<string,string|undefined>):string{
  if(env.NEON_PROJECT_ID!==target.neonProjectID||!env.DATABASE_URL_UNPOOLED)throw new TargetError(`Expected the dedicated Atarasy ${target.name} database (Neon ${target.neonProjectID})`);
  return env.DATABASE_URL_UNPOOLED;
+}
+/**
+ * The connection half of the guard, read from the connection string itself
+ * rather than from a label beside it, so nothing typed on the command line
+ * can defeat it. `weathered-violet-85512339`'s Vercel-managed endpoint is
+ * `ep-curly-sound-b33yhpem` (and its pooled form, `-pooler`); every
+ * production connection string this project has printed names one of the
+ * two, and there is exactly one endpoint on this project, so a connection
+ * string naming a third label is never this deployment's, whatever its
+ * `NEON_PROJECT_ID` claims.
+ *
+ * No development endpoint id is recorded anywhere in this repository: only
+ * the Neon project id (`young-pond-73223516`) and a branch name are
+ * (README.md), and pulling an id from a live environment now, to check
+ * against later, would mean pulling a secret this guard must not hold. Until
+ * one is written down here, development keeps only the label check above and
+ * the database check below.
+ *
+ * `ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL` lets this project's own tests
+ * stand a disposable local database in for production, which cannot be given
+ * the real endpoint's hostname. Nothing but a test ever has reason to set it:
+ * bootstrapping, an invitation or a proposal against the real project
+ * connects over the real endpoint's own connection string, which already
+ * carries the real label.
+ */
+const PRODUCTION_ENDPOINT_LABELS=new Set(['ep-curly-sound-b33yhpem','ep-curly-sound-b33yhpem-pooler']);
+export function assertTargetConnection(target:Target,databaseURL:string,env:Record<string,string|undefined>=process.env):void{
+ if(target.name!=='production')return;
+ let host:string;
+ try{host=new URL(databaseURL).hostname;}catch{throw new TargetError('Malformed database connection string');}
+ const label=host.split('.')[0]??'';
+ const testLabel=env.ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL;
+ const expected=testLabel?new Set([testLabel,testLabel+'-pooler']):PRODUCTION_ENDPOINT_LABELS;
+ if(!expected.has(label))throw new TargetError(`Expected the production Neon endpoint (ep-curly-sound-b33yhpem or its pooler); connection string names ${label||'no host'}`);
 }
 /**
  * The second half of the guard, read from the database itself rather than from

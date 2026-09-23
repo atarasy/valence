@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {randomUUID} from 'node:crypto';
 import {Pool} from 'pg';
-import {TARGETS,parseTarget,targetDatabaseURL,assertTargetDatabase} from './targets.ts';
+import {TARGETS,parseTarget,targetDatabaseURL,assertTargetConnection,assertTargetDatabase} from './targets.ts';
 import {migrateDatabase} from '../migrate.ts';
 import {createPool,initialiseDeployment} from '../store.ts';
 
@@ -13,6 +13,24 @@ test('each target reads only its own Neon project, in both directions',()=>{
  expect(()=>targetDatabaseURL(TARGETS.development,{NEON_PROJECT_ID:'weathered-violet-85512339',DATABASE_URL_UNPOOLED:url})).toThrow('development');
  expect(()=>targetDatabaseURL(TARGETS.production,{DATABASE_URL_UNPOOLED:url})).toThrow();
  expect(()=>targetDatabaseURL(TARGETS.production,{NEON_PROJECT_ID:'weathered-violet-85512339'})).toThrow();
+});
+
+test('the connection guard checks the connection string itself, not the label beside it, and only for production',()=>{
+ const real='postgres://user:pw@ep-curly-sound-b33yhpem.ap-southeast-1.aws.neon.tech/db?sslmode=verify-full';
+ const pooled='postgres://user:pw@ep-curly-sound-b33yhpem-pooler.ap-southeast-1.aws.neon.tech/db';
+ const other='postgres://user:pw@ep-other-label-123.ap-southeast-1.aws.neon.tech/db';
+ // The NEON_PROJECT_ID typed on the command line is not consulted here; only the URL is.
+ expect(()=>assertTargetConnection(TARGETS.production,real,{})).not.toThrow();
+ expect(()=>assertTargetConnection(TARGETS.production,pooled,{})).not.toThrow();
+ expect(()=>assertTargetConnection(TARGETS.production,other,{})).toThrow('production Neon endpoint');
+ expect(()=>assertTargetConnection(TARGETS.production,'not a url',{})).toThrow();
+ // Development is untouched: no endpoint id is recorded for it, so nothing here refuses it.
+ expect(()=>assertTargetConnection(TARGETS.development,other,{})).not.toThrow();
+ expect(()=>assertTargetConnection(TARGETS.development,'not a url',{})).not.toThrow();
+ // The test-only override exists so a disposable database can stand in for
+ // production; it is never read for development, and it is exact, not a prefix.
+ expect(()=>assertTargetConnection(TARGETS.production,other,{ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:'ep-other-label-123'})).not.toThrow();
+ expect(()=>assertTargetConnection(TARGETS.production,real,{ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:'ep-other-label-123'})).toThrow('production Neon endpoint');
 });
 
 test('the targets differ exactly where they must',()=>{

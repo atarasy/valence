@@ -1,11 +1,12 @@
 import { migrateDatabase } from '../migrate.ts';
-import {parseTarget,targetDatabaseURL,assertTargetDatabase} from './targets.ts';
+import {parseTarget,targetDatabaseURL,assertTargetConnection,assertTargetDatabase} from './targets.ts';
 import { createPool,initialiseDeployment } from '../store.ts';
 import { openPostgresMemberHTTP } from '../http.ts';
 // Explicit operator command: `bun deployment/bootstrap.ts [--target development|production]`.
 const {target,rest}=parseTarget(process.argv.slice(2));
 if(rest.length)throw new Error('Usage: bootstrap.ts [--target development|production]');
 const url=targetDatabaseURL(target,process.env);
+assertTargetConnection(target,url);
 const check=createPool(url);
 try{await assertTargetDatabase(check,target);}finally{await check.end();}
 await migrateDatabase(url);
