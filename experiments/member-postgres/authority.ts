@@ -119,6 +119,19 @@ export function openMemberAuthority(path: Records, options: Options) {
         return household;
       }).immediate();
     },
+    /**
+     * The principal a proven credential belongs to, when that principal has no
+     * household yet: the one case in which a sign-in adopts one (2026-09-23).
+     * Registration never gets here, because enrolment runs with attestation
+     * 'none' and proves no key; only an assertion that verified does.
+     */
+    unclaimedPrincipalOf(credentialID: string): string | undefined {
+      name(credentialID);
+      const c = credentials.get(credentialID) as { principal: string; revoked: number; proven?: number } | null;
+      if (!c || c.revoked !== 0 || c.proven !== 1) return;
+      const p = principal(c.principal);
+      return p && p.disabled === 0 && p.household === null ? c.principal : undefined;
+    },
     registerCredential(id: string, principalID: string) {
       name(id); name(principalID);
       db.transaction(() => {

@@ -4,16 +4,16 @@ import {memberRuntimeIdentity,type MemberRuntimeConfig} from './config.ts';
 import {memberRuntime} from './runtime.ts';
 /** This module's own refusals, so the operator command prints them and nothing from the driver. */
 export class ReviewInvitationError extends Error {}
-type ReviewPrincipal={principal:string;issuedAt:number;expiresAt:number};
 /**
- * The production binding both review commands require, and the register of
- * principals issued for review. A PostgreSQL unit opens each namespace once,
- * so callers take the register from here rather than reopening it.
+ * The production binding both review commands require. The registers
+ * themselves are the runtime's (`reviewPrincipals`, `reviewProposals`),
+ * because the sign-in and mandate routes read them too, and a PostgreSQL unit
+ * opens each namespace once.
  */
-export function reviewPrincipals(store:Store,c:MemberRuntimeConfig){
+export function reviewRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now){
  const expected=memberRuntimeIdentity(c),bound=store.map<typeof expected>('member_config').get('current');
  if(c.environment!=='production'||!bound||bound.profile!==expected.profile||bound.fingerprint!==expected.fingerprint||memberRuntimeIdentity(bound.config).fingerprint!==expected.fingerprint)throw new ReviewInvitationError('Review configuration unavailable');
- return store.map<ReviewPrincipal>('member_review_invitations');
+ return memberRuntime(store,c,now);
 }
 /**
  * Trusted operator capability for App Review on the production deployment.
@@ -21,23 +21,20 @@ export function reviewPrincipals(store:Store,c:MemberRuntimeConfig){
  *
  * Each call provisions one fresh principal, unclaimed and with no presenter
  * grants, and issues it one single-use invitation through the ordinary
- * enrolment service. The passkey is created on the reviewer's device by that
- * enrolment; nothing here makes a credential, a household, a mandate or an
- * offer. A household is the name of its key (§13.2, question 55), so none can
- * exist before the reviewer's device registers one.
+ * enrolment service, valid for `invitationLifetimeMs`. The passkey is created
+ * on the reviewer's device by that enrolment; nothing here makes a credential,
+ * a household, a mandate or an offer. The household is adopted at the
+ * reviewer's first sign-in (member-adoption.ts), which also grants the review
+ * shop because the principal is recorded here (review-shop.ts).
  *
- * Unlike device acceptance, nothing is seeded and no second call reuses the
- * first principal: an invitation lives `maximumLifetimeMs`, and a spent or
- * expired one is replaced by issuing again, which leaves the earlier principal
- * as it was. Every principal issued is recorded with its expiry.
+ * A spent or expired invitation is replaced by issuing again, which leaves the
+ * earlier principal as it was.
  */
 export function issueReviewInvitation(store:Store,c:MemberRuntimeConfig){
- const issued=reviewPrincipals(store,c);
- const principal='review_member_'+randomUUID().replaceAll('-','');
- const r=memberRuntime(store,c);
+ const r=reviewRuntime(store,c),principal='review_member_'+randomUUID().replaceAll('-','');
  r.authority.provisionUnclaimedPrincipal(principal,[]);
  if(!r.authority.matchesActivePrincipalScope(principal,null,[]))throw new ReviewInvitationError('Review principal unavailable');
  const invitation=r.enrollment.issueInvitation(principal);
- issued.set(principal,{principal,issuedAt:r.now(),expiresAt:invitation.expiresAt});
+ r.reviewPrincipals.insert(principal,{principal,issuedAt:r.now(),expiresAt:invitation.expiresAt});
  return {principal,...invitation};
 }

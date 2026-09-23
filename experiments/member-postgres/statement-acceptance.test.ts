@@ -36,19 +36,6 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const spentFlow=await (await send('/auth/enrollment/options',{invitation:wrong.token})).json();
   expect((await send('/auth/enrollment/verify',{id:spentFlow.id,response:spent.register(spentFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('0 have signed in and 1 have not');
-  // A second credential beside a signed-in one is the state a fifth pass
-  // measured: the step proceeded silently, adopted whichever had signed in, and
-  // left the other reading the household with nothing proven and no way to
-  // remove it. One credential, and it must have signed.
-  const spentToken=await (async()=>{const f=await (await send('/auth/login/options',{})).json();const r=await send('/auth/login/verify',{id:f.id,response:spent.authenticate(f.publicKey.challenge,c.origin,c.rpID,spentFlow.publicKey.user.id,1)});expect(r.status).toBe(200);return (await r.json()).token as string;})();
-  expect((await send('/auth/session',undefined,spentToken)).status).toBe(401);
-  const extra=syntheticAuthenticator(),extraInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
-  const extraFlow=await (await send('/auth/enrollment/options',{invitation:extraInvite.token})).json();
-  expect((await send('/auth/enrollment/verify',{id:extraFlow.id,response:extra.register(extraFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
-  await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('1 have signed in and 1 have not');
-  // `retire` undoes the whole enrolment step, signed-in credentials included,
-  // because nothing has been adopted yet and a deployment with two signed-in
-  // credentials was one no command could leave.
   // An invitation outstanding when the enrolment is undone becomes a credential
   // afterwards unless it is dropped with the rest.
   const stranded=await unit.run(s=>inviteDeviceAcceptance(s,c));
@@ -57,7 +44,8 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const openCeremony=syntheticAuthenticator(),opening=await unit.run(s=>inviteDeviceAcceptance(s,c));
   const openFlow=await (await send('/auth/enrollment/options',{invitation:opening.token})).json();
   expect(await unit.run(s=>s.map('member_flows').size)).toBe(1);
-  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:2,signedIn:1,unproven:1,cancelled:2});
+  // Nothing has signed in, so nothing was adopted and the principal is kept.
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:1,signedIn:0,unproven:1,cancelled:2,replacedPrincipal:false});
   expect((await send('/auth/enrollment/verify',{id:openFlow.id,response:openCeremony.register(openFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
   expect((await send('/auth/enrollment/options',{invitation:stranded.token})).status).toBe(401);
   // A half-finished ceremony is dropped too, not only the invitation that
@@ -69,29 +57,41 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const reInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
   const reFlow=await (await send('/auth/enrollment/options',{invitation:reInvite.token})).json();
   expect((await send('/auth/enrollment/verify',{id:reFlow.id,response:spent.register(reFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
-  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toMatchObject({retired:1,signedIn:0,unproven:1});
+  // Decided 2026-09-23: the first sign-in whose assertion verifies adopts the
+  // household named by this credential's key, before its session exists, so
+  // the session reads it at once. Registration alone adopted nothing above.
+  const spentToken=await (async()=>{const f=await (await send('/auth/login/options',{})).json();const r=await send('/auth/login/verify',{id:f.id,response:spent.authenticate(f.publicKey.challenge,c.origin,c.rpID,reFlow.publicKey.user.id,1)});expect(r.status).toBe(200);return (await r.json()).token as string;})();
+  const spentHousehold=nameOf(createPublicKey({key:credentialSPKI(new Uint8Array(await unit.run(s=>s.map<{public_key:number[]}>('member_passkeys').get(spent.id)!.public_key))),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
+  const session=await send('/auth/session',undefined,spentToken);
+  expect(session.status).toBe(200);expect((await session.json()).household).toBe(spentHousehold);
+  expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({household:spentHousehold,activeCredentials:1});
+  // A principal with a household takes no further credential, so no further invitation is issued to it.
+  await expect(unit.run(s=>inviteDeviceAcceptance(s,c))).rejects.toThrow('changed or unavailable');
+  // `retire` undoes the enrolment step even after a sign-in adopted the
+  // household: adoption has no route back, so it replaces the principal.
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:1,signedIn:1,unproven:0,cancelled:0,replacedPrincipal:true});
+  expect((await send('/auth/session',undefined,spentToken)).status).toBe(401);
+  const current=(await unit.run(s=>deviceAcceptanceStatus(s,c))) as {principal:string;household:string|null};
+  expect(current.principal).not.toBe(prepared.principal);expect(current.household).toBeNull();
   // The counts are computed before anything is revoked, so the rows are read
   // back: an earlier version returned the same object and revoked less.
   expect(await unit.run(s=>{const rows=s.map<{revoked:number}>('member_credentials');return [...rows.values()].every(v=>v.revoked===1);})).toBe(true);
   const invitation=await unit.run(s=>inviteDeviceAcceptance(s,c)),key=syntheticAuthenticator();
-  const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
-  expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
-  const userHandle=flow.publicKey.user.id,signIn=async(counter:number)=>{const f=await (await send('/auth/login/options',{})).json();const reply=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,userHandle,counter)});expect(reply.status).toBe(200);return (await reply.json()).token as string;};
-  // A device that has enrolled but whose principal has not adopted a household
-  // holds a session it can end. A refutation pass measured the opposite: the
-  // resolver threw, the transport swallowed the throw, and the revoke never
-  // ran, so the session stayed live for its full hour.
-  const unclaimed=await signIn(1);
-  expect((await send('/auth/session',undefined,unclaimed)).status).toBe(401);
-  expect((await send('/auth/logout',{},unclaimed)).status).toBe(204);
-  expect(await unit.run(s=>[...s.map<{revoked:number}>('member_sessions').values()].filter(v=>v.revoked===0).length)).toBe(0);
-  const before=await signIn(2);
-  // A ceremony held open across the step that adopts the household: the check
-  // at the step counts credentials and cannot see one arriving after it, so the
+  // A ceremony held open across the sign-in that adopts the household: the
   // route that adds a credential is where the invariant lives. Measured open by
   // a sixth refutation pass, which then read the household's mandate terms.
   const late=syntheticAuthenticator(),lateInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
   const lateFlow=await (await send('/auth/enrollment/options',{invitation:lateInvite.token})).json();
+  const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
+  expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
+  const userHandle=flow.publicKey.user.id,signIn=async(counter:number)=>{const f=await (await send('/auth/login/options',{})).json();const reply=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,userHandle,counter)});expect(reply.status).toBe(200);return (await reply.json()).token as string;};
+  // A session can always be ended by its token. A refutation pass measured a
+  // resolver that threw for an unclaimed principal, so the revoke never ran.
+  const first=await signIn(1);
+  expect((await send('/auth/session',undefined,first)).status).toBe(200);
+  expect((await send('/auth/logout',{},first)).status).toBe(204);
+  expect(await unit.run(s=>[...s.map<{revoked:number}>('member_sessions').values()].filter(v=>v.revoked===0).length)).toBe(0);
+  const before=await signIn(2);
   // §16.1, question 56. The step writes the mandate as a claim and stops; the
   // device signs it with the passkey its household is named after, and the step
   // presents the box on the second run. Until it is signed, no offer can name it.
@@ -129,20 +129,19 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   await expect(unit.run(s=>memberRuntime(s,c).authority.useCredentialKeys(()=>'not a key'))).rejects.toThrow('already bound');
   expect(householdOfMandate(statement.mandate)).toBe(statement.household);
   expect(await unit.run(s=>deviceAcceptanceStatus(s,c))).toMatchObject({household:statement.household});
-  // Nobody signed this mandate, and it is written under a real key's name. The
-  // ceiling is one box's price, which is what §16.2 bounds: carriage is not in
-  // it. It contains nothing on this service, because no registry is supplied
-  // and every merchant then reads as in network, so this assertion is about the
-  // number being right where it is read and not about anything it stops.
+  // The server wrote this mandate's terms as a claim at the first sign-in
+  // (member-adoption.ts) and the device signed them. The out-of-network ceiling
+  // is 0, and it contains nothing on this service either way: no registry is
+  // supplied, so every merchant reads as in network.
   expect(await unit.run(s=>s.map<{household:string;ceiling_out_of_network:number;ceiling_daily:number|null;co_signers:string[];version:number}>('mandates').get(statement.mandate)))
-   .toMatchObject({household:statement.household,ceiling_out_of_network:1200,co_signers:[],version:1});
-  await expect(unit.run(s=>s.map<{household:string}>('member_principals').get(prepared.principal)?.household)).resolves.toBe(statement.household);
+   .toMatchObject({household:statement.household,ceiling_out_of_network:0,ceiling_daily:null,co_signers:[],version:1});
+  await expect(unit.run(s=>s.map<{household:string}>('member_principals').get(current.principal)?.household)).resolves.toBe(statement.household);
   // The transition runs once, and the name is derived from the key the
   // principal holds rather than taken from the caller. There is no uniqueness
   // check on purpose: one measured earlier let a planted row claim a key's
   // name permanently, which is the registry question 55 abolished.
-  await expect(unit.run(s=>{const r=memberRuntime(s,c);return r.authority.adoptHousehold(prepared.principal,r.authority.activeCredentialIDs(prepared.principal)[0]!);})).rejects.toThrow('Principal has a household');
-  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);return r.authority.adoptHousehold('dev_member_second',r.authority.activeCredentialIDs(prepared.principal)[0]!);})).rejects.toThrow("Credential is not this principal's");
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);return r.authority.adoptHousehold(current.principal,r.authority.activeCredentialIDs(current.principal)[0]!);})).rejects.toThrow('Principal has a household');
+  await expect(unit.run(s=>{const r=memberRuntime(s,c);r.authority.provisionUnclaimedPrincipal('dev_member_second',[]);return r.authority.adoptHousehold('dev_member_second',r.authority.activeCredentialIDs(current.principal)[0]!);})).rejects.toThrow("Credential is not this principal's");
   // And a household that is a key's name can never be assigned, only adopted.
   await expect(unit.run(s=>memberRuntime(s,c).authority.provisionPrincipal('dev_member_assigned',statement.household,[]))).rejects.toThrow('adopted, not assigned');
   await expect(unit.run(s=>prepareStatementAcceptance(s,c))).rejects.toThrow('already prepared');

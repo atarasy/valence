@@ -20,9 +20,16 @@ import {fixtureTime} from '../member-transactions/atomic-fixture.ts';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
 import {MERCHANT_PAIR} from '../../engine/test/helpers.ts';
 import {canonicalCorrection} from '../../engine/src/shared/correction.ts';
+// Since 2026-09-23 the first sign-in whose assertion verifies adopts the household
+// (member-adoption.ts), so a fixture that signed in reads what was adopted rather than adopting it.
+const adoptedAtSignIn=(r:ReturnType<typeof memberRuntime>,credential:string)=>{
+ const pub=r.login.verifiedPublicKey(credential)!,name=nameOf(createPublicKey({key:credentialSPKI(pub),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
+ if(!r.authority.holdsHousehold(name))throw new Error('the sign-in adopted nothing');
+ return name;
+};
 const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Explicit isolated ATARASY_TEST_POSTGRES_URL required');
 const pool=createPool(url),ids:string[]=[];
-const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',androidAppOrigins:[],explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100};
+const config:MemberRuntimeConfig={environment:'test',origin:'https://unit.example',rpID:'unit.example',androidAppOrigins:[],explorationRate:0.2,reminderLimit:1,recoveryGraceDays:3,dayBoundary:'UTC',maximumLifetimeMs:60000,maxSessionLifetimeMs:100000,maximumBodyBytes:20000,bodyTimeoutMs:100,maximumPending:8,budgetWindowMs:60000,maximumRequests:100,maximumTrackedTokens:100,invitationLifetimeMs:1209600000};
 const now=()=>fixtureTime+1;
 const coseOf=(pair:{publicKey:{export:(o:any)=>any}})=>{const jwk=pair.publicKey.export({format:'jwk'});return Buffer.concat([Buffer.from('a5010203262001215820','hex'),Buffer.from(jwk.x!,'base64url'),Buffer.from('225820','hex'),Buffer.from(jwk.y!,'base64url')]);};
 const engineAssertion=(response:{response:{clientDataJSON:string;authenticatorData:string;signature:string}})=>{const value=response.response,b64=(input:string)=>Buffer.from(input,'base64url').toString('base64');return {client_data_json:b64(value.clientDataJSON),authenticator_data:b64(value.authenticatorData),signature:b64(value.signature)};};
@@ -94,7 +101,7 @@ test('member mandate changes read the effective version and wait for every prior
  const login=await (await s.send('/auth/login/options',{})).json(),user=enrollment.publicKey.user.id;
  const signedIn=await s.send('/auth/login/verify',{id:login.id,response:co.authenticate(login.publicKey.challenge,s.c.origin,s.c.rpID,user,1)});
  expect(signedIn.status).toBe(200);const coToken=(await signedIn.json()).token as string;
- const coSigner=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now),name=r.authority.adoptHousehold('mandate-cosigner',co.id),key=r.login.verifiedPublicKey(co.id)!;
+ const coSigner=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now),name=adoptedAtSignIn(r,co.id),key=r.login.verifiedPublicKey(co.id)!;
   r.engine.registerIdentity(name,createPublicKey({key:credentialSPKI(key),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());return name;});
  const effective=await (await s.send('/member/mandates/effective',undefined)).json();
  expect(effective.mandates).toHaveLength(1);const first=effective.mandates[0];
@@ -147,13 +154,13 @@ test('PostgreSQL registration persists login across independent composition and 
  expect(await s.unit.run(store=>store.map<{household:string|null}>('member_principals').get('new-member')?.household)).toBeNull();
  const login=await (await s.send('/auth/login/options',{})).json();const reply=await s.send('/auth/login/verify',{id:login.id,response:key.authenticate(login.publicKey.challenge,config.origin,config.rpID,flow.publicKey.user.id)});expect(reply.status).toBe(200);
  const token=(await reply.json()).token as string;
- // §13.2, question 55. A device that has enrolled holds a session and no
- // household until it adopts one from its own key, so there is nothing yet to
- // read with. The adoption derives the name from the registered credential.
- const fresh=await openPostgresMemberHTTP(pool,s.identity,s.c,now);
- expect((await fresh.fetch(s.request('/auth/session',undefined,token),{peer:'fresh'})).status).toBe(401);
- const adopted=await s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);});
+ // §13.2, question 55, and the decision of 2026-09-23. The sign-in above is the
+ // first assertion this credential verified, so it adopted the household named
+ // by the credential's own key before the session was created, and no second
+ // adoption is possible.
+ const adopted=await s.unit.run(store=>adoptedAtSignIn(memberRuntime(store,s.c,now),key.id));
  expect(isHouseholdName(adopted)).toBe(true);
+ await expect(s.unit.run(store=>{const r=memberRuntime(store,s.c,now);return r.authority.adoptHousehold('new-member',key.id);})).rejects.toThrow('Principal has a household');
  // The authority's own return, not the engine's later refusal: for four commits
  // the name came from the caller, and `name_is_not_the_key` in `registerIdentity`
  // was what stood behind it. Nothing in that path runs here.
@@ -812,7 +819,7 @@ test('lost-device recovery releases no share until a recoverer signs and an inde
  expect((await s.send('/auth/enrollment/verify',{id:enrollment.id,response:recovererDevice.register(enrollment.publicKey.challenge,s.c.origin,s.c.rpID)})).status).toBe(201);
  const login=await(await s.send('/auth/login/options',{})).json(),recovererUser=enrollment.publicKey.user.id;
  const signedIn=await s.send('/auth/login/verify',{id:login.id,response:recovererDevice.authenticate(login.publicKey.challenge,s.c.origin,s.c.rpID,recovererUser,1)});expect(signedIn.status).toBe(200);
- const recovererToken=(await signedIn.json()).token as string,recoverer=await s.unit.run(store=>memberRuntime(store,s.c,now).authority.adoptHousehold('recovery-participant',recovererDevice.id));
+ const recovererToken=(await signedIn.json()).token as string,recoverer=await s.unit.run(store=>adoptedAtSignIn(memberRuntime(store,s.c,now),recovererDevice.id));
  const recoveryPublicKey=Buffer.concat([Buffer.from([4]),randomBytes(64)]).toString('base64url');
  const preparedKey=await(await s.send('/member/recovery/key/prepare',{publicKey:recoveryPublicKey},recovererToken)).json();
  const keyAssertion=recovererDevice.authenticate(preparedKey.publicKey.challenge,s.c.origin,s.c.rpID,recovererUser,2);
@@ -896,7 +903,7 @@ async function enrollFreshHousehold(s:Awaited<ReturnType<typeof setup>>,principa
  if(signedIn.status!==200)throw new Error('fixture login failed: '+signedIn.status);
  const token=(await signedIn.json()).token as string;
  const household=await s.unit.run(store=>{
-  const r=memberRuntime(store,s.c,now),name=r.authority.adoptHousehold(principal,key.id),pub=r.login.verifiedPublicKey(key.id)!;
+  const r=memberRuntime(store,s.c,now),name=adoptedAtSignIn(r,key.id),pub=r.login.verifiedPublicKey(key.id)!;
   r.engine.registerIdentity(name,createPublicKey({key:credentialSPKI(pub),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
   return name;
  });

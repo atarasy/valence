@@ -11,6 +11,7 @@ import { openMandateCeremony } from './mandate-ceremony.ts';
 import { openMandateChanges } from './mandate-changes.ts';
 import type { Assertion } from '../../engine/src/shared/decisions.ts';
 import { memberTransport } from '../member-login/transport.ts';
+import { presentAfterSigning } from './review-shop.ts';
 import { memberReadBoundary } from '../member-read/gate.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { Registry } from '../../engine/src/shared/registry.ts';
@@ -275,6 +276,8 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
        const ceremony=openMandateCeremony(r,{rpID:c.rpID});
        const named=(inputBody as {mandate?:unknown}).mandate;if(named!==undefined&&typeof named!=='string')throw new Error('Invalid mandate');
        const value=action==='mandate-list'?ceremony.list(token):action==='mandate-prepare'?ceremony.prepare(token,named):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion,named);
+       // App Review: a review household's first signed mandate presents its proposal in this same unit (review-shop.ts).
+       if(action==='mandate-submit')await presentAfterSigning(r,token,value as import('../../engine/src/hub/mandates.ts').Mandate,now());
        return {status:200,body:JSON.stringify(value)};
       }
       if(withdrawal || (match && (await r.journal.read(token,match[1]!)).kind==='digital_withdrawal')){

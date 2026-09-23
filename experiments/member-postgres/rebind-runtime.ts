@@ -11,14 +11,18 @@ const refuse = (): never => { throw new Error('Rebind command refused'); };
 
 /**
  * The profile transitions this command may apply, and the fields each one is
- * permitted to add. Only one exists today: #41 raised the profile from .1 to
- * .2 by adding `androidAppOrigins`, so a deployment still bound to .1 needs
- * exactly this move before its build can promote. A future profile bump adds
- * a row; it never widens or removes one already here, and there is no route
+ * permitted to add. #41 raised the profile from .1 to .2 by adding
+ * `androidAppOrigins`; 2026-09-23 raised it from .2 to .3 by adding
+ * `invitationLifetimeMs` at fourteen days. A plan's config is always read as
+ * the current profile, so only the row ending at it can be applied: the .1 row
+ * is kept as the record of that move, and a deployment still bound to .1 is
+ * refused and needs a build of the .2 era first. A future profile bump adds a
+ * row; it never widens or removes one already here, and there is no route
  * back to an earlier profile.
  */
 const ALLOWED_TRANSITIONS: Record<string, { to: string; additions: Record<string, unknown> }> = {
  'atarasy.member-runtime.1': { to: 'atarasy.member-runtime.2', additions: { androidAppOrigins: [] } },
+ 'atarasy.member-runtime.2': { to: 'atarasy.member-runtime.3', additions: { invitationLifetimeMs: 1_209_600_000 } },
 };
 
 export function readRebindPlan(path: string): RebindPlan {

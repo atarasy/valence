@@ -6,7 +6,7 @@ import { credentialSPKI } from '../member-login/credential-key.ts';
 import { acceptedAssertionOrigins, androidAssertionOrigins } from '../member-login/assertion-origins.ts';
 
 type Authority = ReturnType<typeof openMemberAuthority>;
-type Policy = { environment: string; origin: string; rpID: string; androidAppOrigins?: string[]; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number };
+type Policy = { environment: string; origin: string; rpID: string; androidAppOrigins?: string[]; challengeLifetimeMs: number; sessionLifetimeMs: number; now?: () => number; onSignIn?: (credentialID: string) => void };
 export type PreparedAssertion = AuthenticationResponseJSON;
 type Credential = { id: string; public_key: number[]; counter: number; user_handle: string; revision: number };
 function b64(value: unknown): value is string {
@@ -140,6 +140,9 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
       const updated = passkeys.updateWhere(credential.id,v=>v.revision===credential.revision,{counter:result.authenticationInfo.newCounter,revision:credential.revision+1});
       if (updated.changes !== 1) throw new Error('Login changed during verification');
       authority.markCredentialProven(credential.id);
+      // Before the session exists, so that whatever the sign-in adopts or
+      // grants is what the session reads, and no grant change revokes it.
+      policy.onSignIn?.(credential.id);
       const expiry = now() + sessionLifetimeMs; integer(expiry);
       // Authoritative lifecycle checks run again here. If issuance fails, the attempt stays spent.
       return authority.createSessionAfterVerification(credential.id, expiry);
