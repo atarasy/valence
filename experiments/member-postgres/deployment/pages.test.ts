@@ -15,4 +15,6 @@ test('the pages carry the facts the founder supplied',()=>{
  expect(privacy).toContain("Transfers outside Japan. Our database is stored in Singapore by Neon, a service of Databricks, Inc. (United States). Our service runs on Vercel Inc. (United States) in its Singapore region, and Vercel also processes data in the United States. Apple Inc. (United States) delivers push notifications. Singapore has a comprehensive personal data protection law, the Personal Data Protection Act 2012. The United States has no comprehensive federal law on personal information; protection rests on laws for particular sectors and on the laws of individual states. The Personal Information Protection Commission publishes a summary of both systems at https://www.ppc.go.jp/personalinfo/legal/kaiseihogohou/#gaikoku. Vercel processes the data under a data processing addendum that limits it to our instructions, and Neon under Databricks' terms for the Neon platform, which set out its security measures.");
  expect(page('privacy.html')).toContain('<a href="https://www.ppc.go.jp/personalinfo/legal/kaiseihogohou/#gaikoku">');
  for(const t of [privacy,support])expect(t).toContain('support@vox.delivery');
+ // Vault `81` option A, 2026-09-23: the one-device pilot is said where a member looks for help.
+ expect(support).toContain('use it on one device');
 });
