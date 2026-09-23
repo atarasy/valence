@@ -44,6 +44,10 @@ A valence is measured, not judged. Nothing in this specification treats `returne
 
 The state machine is identical. Implementations differ in fulfilment and in one default: for a physical offer, the goods are already there and expiry means recovery. For a digital offer, **silence means nothing happens.** An order is a debt and is never created by default.
 
+## Catalogue revision 3
+
+A product entry **MAY** carry a display `name` (at most 120 Unicode code points) and `variant` (at most 60), D-1, decided 2026-09-23: text only, never presentation (clause 54), rendered in the hub's own type exactly as a merchant's disclosure items are. A publication carrying either signs revision 3 of the catalogue signature (`valence.catalogue.3`); one carrying neither signs revision 2 unchanged, byte for byte. A candidate and a settlement line copy both fields from the catalogue, never the request, and omit the key rather than send it null where the catalogue gave none. See `SPEC.md` §3.
+
 ## Conformance
 
 Valence conformance is a requirement of the [Ataraxia](https://github.com/atarasy/ataraxia) mark, and several clauses of that constitution are enforced here rather than in any user interface:

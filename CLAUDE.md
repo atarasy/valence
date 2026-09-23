@@ -18,7 +18,7 @@ The **Valence Protocol**: a specification for offering goods to a person and rec
 | `~/Documents/GitHub/hacci/Projects/Atarasy/` | the private English strategy documents. `03_Spec_Valence_Engine.md` is the working copy of this specification |
 | `~/Documents/GitHub/meter` | the ledger this specification's §6.4 maps onto. `reserveCredits` → work → `commitReservedUsage` / `releaseCreditReservation` |
 | `engine/` | the reference implementation, in this repository since 2026-09-08. Read `engine/CLAUDE.md` before changing it |
-| `experiments/` | four packages that compose the engine into a member-facing service. `member-postgres` is **deployed**, at `https://api-dev.vox.delivery` (Vercel `voxtech/atarasy-api-dev`, Neon `young-pond-73223516`); the others are the pieces it is built from |
+| `experiments/` | four packages that compose the engine into a member-facing service. `member-postgres` is **deployed twice**: development at `https://api-dev.vox.delivery` (Vercel `voxtech/atarasy-api-dev`, Neon `young-pond-73223516`) and production at `https://members.vox.delivery` (Vercel `atarasy-api`, Neon `weathered-violet-85512339`), which share no data, credentials or passkeys (`experiments/member-postgres/deployment/PRODUCTION.md`); the others are the pieces it is built from |
 
 Change flows one way: **decide in the vault → specify here → implement.** A design decision made only in this repository will be lost.
 
@@ -72,6 +72,8 @@ cd experiments/member-postgres && bun test --timeout 60000   # 20
 ```
 
 A throwaway instance is enough (`initdb` into a temporary directory, `pg_ctl start -o "-p <port>"`, `createdb`); the tests apply their own migrations and remove their own rows. **No conformance probe covers this package**, so its rules are proven in its own tests or nowhere, which is how seven refutation rounds each found a defect under the previous round's fix.
+
+**Building a deployable `member-postgres` bundle needs every sibling package installed too, not only its own**: `bun install --frozen-lockfile` in `engine/` and each `experiments/*/`, or the bundle fails on `@simplewebauthn/server/helpers`.
 
 ## Style
 
