@@ -13,8 +13,11 @@ export function storeSavepoint<T>(store:Store,fn:()=>T):T {const save=savepoints
 type Row = {namespace:string; key:string; value:string};
 const validName = (s:string) => typeof s==='string' && /^[a-z][a-z0-9_]{0,63}$/.test(s);
 function identity(input:Identity) {
- const p=Object.freeze(structuredClone(input));
- if(Object.keys(p).sort().join(',')!=='environment,epoch,id,origin'||!validName(p.id)||!validName(p.environment)||!Number.isSafeInteger(p.epoch)||p.epoch<1||new URL(p.origin).origin!==p.origin||new URL(p.origin).protocol!=='https:')throw new StoreError('Invalid PostgreSQL identity');
+ const p=Object.freeze(structuredClone(input)),originURL=new URL(p.origin);
+ // OPS-01: the only exception to https is a `local` deployment serving http://127.0.0.1,
+ // which never leaves the machine. Every other environment still needs https.
+ const isLocalOrigin=p.environment==='local'&&originURL.protocol==='http:'&&originURL.hostname==='127.0.0.1';
+ if(Object.keys(p).sort().join(',')!=='environment,epoch,id,origin'||!validName(p.id)||!validName(p.environment)||!Number.isSafeInteger(p.epoch)||p.epoch<1||originURL.origin!==p.origin||(originURL.protocol!=='https:'&&!isLocalOrigin))throw new StoreError('Invalid PostgreSQL identity');
  return p;
 }
 export function createPool(connectionString:string) {

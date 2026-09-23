@@ -19,7 +19,10 @@ function grants(values: readonly string[]): string {
 export function openMemberAuthority(path: Records, options: Options) {
   const { environment, audience, maxSessionLifetimeMs } = options;
   name(environment);
-  if (new URL(audience).origin !== audience || !audience.startsWith('https://')) throw new Error('Explicit HTTPS audience required');
+  // OPS-01: the one exception to https is a 'local' environment serving http://127.0.0.1.
+  const audienceURL = new URL(audience);
+  const isLocalAudience = environment === 'local' && audienceURL.protocol === 'http:' && audienceURL.hostname === '127.0.0.1';
+  if (audienceURL.origin !== audience || !(audience.startsWith('https://') || isLocalAudience)) throw new Error('Explicit HTTPS audience required');
   timestamp(maxSessionLifetimeMs);
   if (!maxSessionLifetimeMs) throw new Error('Positive session lifetime required');
   const clock = options.now ?? Date.now;

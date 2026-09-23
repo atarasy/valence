@@ -6,6 +6,74 @@ First implementation stage of Vault decision 58, following the confirmed Vercel 
 
 Install the pinned dependencies with `bun install --frozen-lockfile`. Generate migrations with `bun run generate`. Run `DATABASE_URL_UNPOOLED=... bun migrate.ts` against a dedicated development database using a direct connection. Provisioning identity is an explicit trusted call to `initialiseDeployment`, separate from HTTP and migration execution. Application traffic can use a pooled URL. Neither migration nor bootstrap runs at module import.
 
+## Running it locally (OPS-01)
+
+No Neon, no Vercel, no `api-dev.vox.delivery`. `local.ts` runs the same store and the same HTTP surface as `deployment/entry.ts`, against a throwaway local PostgreSQL, with the peer address read off the TCP connection instead of Vercel's `x-vercel-forwarded-for` header.
+
+Prerequisites: Bun 1.2.19 (`curl -fsSL https://bun.sh/install.sh | bash -s -- bun-v1.2.19`; a newer Bun rewrites `bun.lock`), the four repositories (`valence`, `atarasy`, `ataraxia`, `vox`) cloned side by side in one parent directory, and PostgreSQL 16 or newer from Homebrew, running and reachable at a local address.
+
+```
+brew install postgresql@16
+brew services start postgresql@16
+createdb atarasy_local
+cd experiments/member-postgres
+bun install --frozen-lockfile
+LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local bun local.ts
+```
+
+This applies the tracked migrations, initialises a deployment named `atarasy_local` scoped to `environment: 'local'`, `origin: http://127.0.0.1:8788`, and serves on `127.0.0.1:8788`. Set `PORT` to use a different one; `LOCAL_DATABASE_URL` must point at `127.0.0.1`, `localhost`, `::1` or a unix socket (`assertLocalDatabaseUrl` in `local-shared.ts` refuses anything else, so this can never reach Neon).
+
+With the server running, issue a presenter credential in a second terminal from real ed25519 key pairs:
+
+```
+openssl genpkey -algorithm ed25519 -out /tmp/presenter.pem
+openssl genpkey -algorithm ed25519 -out /tmp/merchant.pem
+LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local \
+  bun local-presenter-credential.ts issue ops01-presenter "OPS-01 presenter" /tmp/presenter.pem ops01-merchant /tmp/merchant.pem /tmp/credential.json
+```
+
+`local-presenter-credential.ts` is the local counterpart of `deployment/presenter-credential.ts issue`, with the same argument order and the same exclusive-create/0600/never-printed handling of the output file, minus the Neon project check and with `assertLocalDatabaseUrl` in its place. It reads the presenter and merchant *public* keys from whatever PEM files are given (a private key PEM works too; `createPublicKey` derives the public half), and it must be run against the same `LOCAL_DATABASE_URL` and `PORT` the server is using, since both read the same fixed deployment id (`atarasy_local`) and build the same origin from `PORT`.
+
+The written file is `{"presenter":"...","displayName":"...","token":"apr1_..."}`; the field Vox's `VOX_PRESENTER_TOKEN` reads is `token`.
+
+```
+curl -i http://127.0.0.1:8788/presenter/self
+# 401 {"error":"unauthorised", ...}
+
+curl -i http://127.0.0.1:8788/presenter/self \
+  -H "authorization: Bearer $(python3 -c "import json;print(json.load(open('/tmp/credential.json'))['token'])")"
+# 200 {"presenter":"ops01-presenter","displayName":"OPS-01 presenter"}
+```
+
+A presenter with no household still has nobody to offer to, and no passkey can enrol one here (see "No passkey ceremony works here" below), so `local-household.ts` makes the one household the presenter side needs before Vox is pointed at this deployment:
+
+```
+LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local PORT=8788 \
+  bun local-household.ts create ops01-presenter /tmp/household.json
+```
+
+It writes the same rows a real enrolment and adoption would (`provisionUnclaimedPrincipal`, `registerCredential`, `login.provisionVerifiedPasskey`, `authority.markCredentialProven`, `authority.adoptHousehold`, the sequence `http.test.ts`'s own fixtures use), against a P-256 key pair generated here instead of a device's, and records a standing mandate signed by that same pair through `engine.mandates.record`; `bindings.importMandate` only writes a claim, and an offer against a claim answers `mandate_unavailable`. The presenter named on the command line is granted at provisioning, so its offers to this household are allowed. Like `local-presenter-credential.ts`, it must run against the same `LOCAL_DATABASE_URL` and `PORT` as `local.ts`, and its output file is exclusive-create, 0600 and never printed beyond what stdout shows:
+
+```
+{"household":"key:...","mandate":"key:....1"}
+```
+
+The file itself also holds `privateKeyPem`, the household's own key, needed to sign a mandate change or a settlement statement later. `presenter-http.test.ts` has the request shapes for the catalogue, disclosure and offer a presenter credential then publishes, deliberates on, presents and reads back against this household and mandate.
+
+**Reset.** Stop the server, then drop *both* schemas the migrator owns, not only `atarasy_member`:
+
+```
+psql postgres://127.0.0.1/atarasy_local -c 'DROP SCHEMA IF EXISTS atarasy_member CASCADE; DROP SCHEMA IF EXISTS drizzle CASCADE;'
+```
+
+Dropping only `atarasy_member` leaves `bun local.ts`'s next run believing every migration is already applied, because drizzle's own migration ledger lives in the separate `drizzle` schema; the server then fails on its first query with `relation "atarasy_member.control" does not exist` (measured 2026-09-23). Dropping both and restarting `bun local.ts` recreates the schema, the control row and an empty engine from nothing.
+
+**What this does not cover.** The https-only checks inside `login.ts`'s portable-assertion verification (host move), `member-host-move.ts`, `operational-snapshot.ts` and `statement-authorisation.ts` (physical-box settlement statements) are unchanged, so host move, the operator migration tooling and physical-box statement acceptance still require a real https origin and are not reachable from a local deployment. The checks in `engine/src/shared/member-decision.ts`, `member-withdrawal.ts` and `member-statement.ts`, and this package's own `authority.ts`, `login.ts`, `config.ts` and `store.ts`, accept the local origin so that the runtime starts and the presenter routes answer.
+
+**No passkey ceremony works here.** WebAuthn does not allow an IP address as a relying party ID, and this deployment's relying party is `127.0.0.1`, so member sign-in, enrolment, digital decisions and withdrawals cannot complete against it; that is what `local-household.ts` stands in for, by writing the rows a passkey ceremony would rather than running one. What the local deployment is for is the presenter side: registering a presenter, synthesising the household its offers go to, and the Vox workbench publishing catalogues and disclosures, creating, deliberating on and presenting offers, and reading them back. A member's own decision is still exercised on the reference engine with the web hub (atarasy's README) or on a device against the development deployment.
+
+Tests: `ATARASY_TEST_POSTGRES_URL=<disposable local PostgreSQL> bun test local.test.ts` covers the `assertLocalDatabaseUrl` guard and a real `/presenter/self` round trip (401 without a token, 200 with the one `local-presenter-credential.ts`'s underlying `registerPresenter` issues) against the same `startLocalServer()` `local.ts` uses, `local-household.ts`'s own guard against a non-local database, and, spawned as the CLI it is, a household it creates being offered to by its granted presenter and presented. A throwaway instance is enough (`initdb`, `pg_ctl start -o "-p <port> -k <short socket dir>"`, `createdb`); on macOS the default socket-directory path under `initdb`'s own data directory can exceed the 103-byte unix-socket limit, so point `-k` at a short path such as `/tmp/pgsock-XXXXXX` instead.
+
 [Blind private-node records](PRIVATE_NODE.md) add authenticated, revisioned ciphertext storage for the native IOS-B19 boundary. The database never receives the native envelope key or record plaintext; recovery and host move remain separate ceremonies.
 
 [Member recovery](MEMBER_RECOVERY.md) adds the authenticated two-participant recovery ceremony, durable pre-release log and trusted independent-notice delivery boundary for IOS-B20. No delivery provider is connected by the deployed entry.

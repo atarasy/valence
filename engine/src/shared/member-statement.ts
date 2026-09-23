@@ -22,7 +22,10 @@ export function verifyMemberStatement(e: MemberStatementEnvelope, assertion: Ass
     if (!scope || Object.keys(e).sort().join(',') !== 'canonical,credential,environment,expiresAt,household,id,keyFingerprint,mandate,offer,origin,presenter,principal,profile,requestDigest,reviewedRevision,rpID') return false;
     if (e.profile !== MEMBER_STATEMENT_PROFILE || e.environment !== scope.environment || e.origin !== scope.origin || e.rpID !== rpID) return false;
     const origin = new URL(scope.origin);
-    if (!scope.environment || origin.origin !== scope.origin || origin.protocol !== 'https:' || origin.hostname !== rpID) return false;
+    // OPS-01: the one exception to https is a scope whose own environment is
+    // exactly 'local', serving http://127.0.0.1; every other check here still applies.
+    const isLocalScopeOrigin = scope.environment === 'local' && origin.protocol === 'http:' && origin.hostname === '127.0.0.1';
+    if (!scope.environment || origin.origin !== scope.origin || (origin.protocol !== 'https:' && !isLocalScopeOrigin) || origin.hostname !== rpID) return false;
     for (const value of [e.id, e.principal, e.credential, e.household, e.mandate, e.offer, e.presenter]) {
       if (typeof value !== 'string' || !value || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value)) return false;
     }

@@ -52,6 +52,18 @@ The rate has no default. §5 of the specification publishes no recommended
 figure, and a default here would become one by accident, so the server refuses
 to start without one.
 
+## Running the unit tests
+
+```
+cd engine
+bun test
+```
+
+No arguments and nothing to seed; this is `bun:test` running the specs under
+`src/` in memory. There is no committed lockfile in this directory, so
+`bun install` here resolves against whatever the pinned Bun version's registry
+holds at install time rather than a fixed set of versions.
+
 ## Running the conformance suites
 
 ```
@@ -61,6 +73,12 @@ to start without one.
 Starts the combined and separate-role servers, seeds their catalogues, and
 runs the suites listed in `scripts/conformance.sh` from the ataraxia repository. Set `ATARAXIA_TESTS` if that
 repository is not beside this one.
+
+`conformance.sh` sets `VALENCE_BINDINGS=digital,physical`, so `HAS_PHYSICAL` is
+true for this run and exactly one suite is skipped rather than run:
+`binding: the physical binding is absent`, in `tests/binding/binding.test.ts`
+(`describe.if(!HAS_PHYSICAL)`), which exists to cover a digital-only
+deployment and is the mirror image of the binding this run has turned on.
 
 ## What this implementation found
 
