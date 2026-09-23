@@ -38,7 +38,7 @@ export function failureReason(error:unknown):string {
  * its own configuration and AASA, so a production bundle carries nothing of the
  * development origin or app identifier, and the reverse.
  */
-export function memberEntry(deploymentID:string,config:MemberRuntimeConfig,aasa:unknown){
+export function memberEntry(deploymentID:string,config:MemberRuntimeConfig,aasa:unknown,pages:Readonly<Record<string,string>>={}){
 const c=config,identity={id:deploymentID,environment:c.environment,origin:c.origin,epoch:1};
 let app:Promise<Awaited<ReturnType<typeof openPostgresMemberHTTP>>>|undefined;
 function runtime(){
@@ -58,6 +58,11 @@ return {async fetch(request:Request){
   if(url.pathname==='/.well-known/apple-app-site-association'){
    if(!['GET','HEAD'].includes(request.method))return new Response(null,{status:405});
    return new Response(request.method==='HEAD'?null:JSON.stringify(aasa),{status:200,headers:{'content-type':'application/json','cache-control':'public, max-age=3600','x-content-type-options':'nosniff'}});
+  }
+  // Static, unauthenticated pages (the App Store privacy and support URLs), answered before the runtime is opened.
+  if(Object.hasOwn(pages,url.pathname)){
+   if(!['GET','HEAD'].includes(request.method))return new Response(null,{status:405});
+   return new Response(request.method==='HEAD'?null:pages[url.pathname]!,{status:200,headers:{'content-type':'text/html; charset=utf-8','cache-control':'public, max-age=3600','x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'"}});
   }
   return await (await runtime()).fetch(request,{peer});
  }catch(error){console.error('Member API unavailable: '+failureReason(error));return unavailable();}

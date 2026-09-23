@@ -35,6 +35,14 @@ test('each target bundles only its own origin and app identifier, and its manife
  expect(manifest.identity).toEqual({id:'atarasy_api_prod',environment:'production',origin:'https://members.vox.delivery',epoch:1});
  const production=(await import('./deployment/production/config.json')).default as MemberRuntimeConfig;
  expect(verifyRuntimeArtifact(prod,manifest.identity,production,manifest.fingerprint).fingerprint).toBe(manifest.fingerprint);
+ // The production bundle serves the two App Store pages itself, before any database is opened.
+ const served=(await import(join(prod,'api/index.js'))).default as {fetch(r:Request):Promise<Response>};
+ for(const [path,text] of [['/privacy','Atarasy privacy policy'],['/support','Membership is by invitation only']] as const){
+  const r=await served.fetch(new Request('https://members.vox.delivery'+path,{headers:{'x-vercel-forwarded-for':'203.0.113.9'}}));
+  expect(r.status).toBe(200);expect(r.headers.get('content-type')).toBe('text/html; charset=utf-8');expect(await r.text()).toContain(text);
+ }
+ expect((await served.fetch(new Request('https://members.vox.delivery/privacy',{method:'POST',headers:{'x-vercel-forwarded-for':'203.0.113.9'}}))).status).toBe(405);
+ expect(devJS).not.toContain('Atarasy privacy policy');
  // A development bundle does not verify as production.
  const devManifest=await Bun.file(join(dev,'runtime-manifest.json')).json();
  expect(()=>verifyRuntimeArtifact(dev,manifest.identity,production,devManifest.fingerprint)).toThrow();

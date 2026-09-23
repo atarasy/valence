@@ -6,6 +6,16 @@ import {memberRuntime} from './runtime.ts';
 export class ReviewInvitationError extends Error {}
 type ReviewPrincipal={principal:string;issuedAt:number;expiresAt:number};
 /**
+ * The production binding both review commands require, and the register of
+ * principals issued for review. A PostgreSQL unit opens each namespace once,
+ * so callers take the register from here rather than reopening it.
+ */
+export function reviewPrincipals(store:Store,c:MemberRuntimeConfig){
+ const expected=memberRuntimeIdentity(c),bound=store.map<typeof expected>('member_config').get('current');
+ if(c.environment!=='production'||!bound||bound.profile!==expected.profile||bound.fingerprint!==expected.fingerprint||memberRuntimeIdentity(bound.config).fingerprint!==expected.fingerprint)throw new ReviewInvitationError('Review configuration unavailable');
+ return store.map<ReviewPrincipal>('member_review_invitations');
+}
+/**
  * Trusted operator capability for App Review on the production deployment.
  * Not imported by the deployed HTTP entry.
  *
@@ -22,9 +32,7 @@ type ReviewPrincipal={principal:string;issuedAt:number;expiresAt:number};
  * as it was. Every principal issued is recorded with its expiry.
  */
 export function issueReviewInvitation(store:Store,c:MemberRuntimeConfig){
- const expected=memberRuntimeIdentity(c),bound=store.map<typeof expected>('member_config').get('current');
- if(c.environment!=='production'||!bound||bound.profile!==expected.profile||bound.fingerprint!==expected.fingerprint||memberRuntimeIdentity(bound.config).fingerprint!==expected.fingerprint)throw new ReviewInvitationError('Review invitation configuration unavailable');
- const issued=store.map<ReviewPrincipal>('member_review_invitations');
+ const issued=reviewPrincipals(store,c);
  const principal='review_member_'+randomUUID().replaceAll('-','');
  const r=memberRuntime(store,c);
  r.authority.provisionUnclaimedPrincipal(principal,[]);

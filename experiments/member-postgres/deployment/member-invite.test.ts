@@ -16,7 +16,7 @@ const run=async(script:string,args:string[],env:Record<string,string|undefined>)
  const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);return {stdout,stderr,code};
 };
 
-test('the review invitation is production-only, single-use and never printed; bootstrap refuses the other target\'s database',async()=>{
+test('the review invitation is production-only, single-use and never printed; bootstrap and the proposal command refuse the other target\'s database',async()=>{
  const base=process.env.ATARASY_TEST_POSTGRES_URL;if(!base)throw new Error('Isolated PostgreSQL URL required');
  const admin=new Pool({connectionString:base}),prodDB='inv_'+randomUUID().replaceAll('-',''),devDB='inv_'+randomUUID().replaceAll('-','');
  const at=(name:string)=>{const u=new URL(base);u.pathname='/'+name;return u.toString();};
@@ -57,6 +57,14 @@ test('the review invitation is production-only, single-use and never printed; bo
   expect(statSync(file).mode&0o777).toBe(0o600);
   expect(issued.stdout).not.toContain(written.token);
   const {principal}=JSON.parse(issued.stdout) as {principal:string};expect(principal).toMatch(/^review_member_/);
+  // The proposal command shares the guard, and refuses a review principal that has not enrolled and signed in.
+  const proposal=(env:Record<string,string|undefined>,who=principal)=>run('./review-proposal.ts',['propose',who],env);
+  expect((await proposal({...prodEnv,NEON_PROJECT_ID:DEV})).code).not.toBe(0);
+  const proposalCrossed=await proposal({NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB)});
+  expect(proposalCrossed.code).not.toBe(0);expect(proposalCrossed.stderr).toContain('another target');
+  expect((await proposal(prodEnv,'dev_member_x')).code).not.toBe(0);
+  const unenrolled=await proposal(prodEnv);
+  expect(unenrolled.code).toBe(1);expect(unenrolled.stdout).toBe('');expect(unenrolled.stderr).toContain('0 have signed in and 0 have not');
   // An existing output file is refused and left as it was.
   const again=await run('./member-invite.ts',['issue',file],prodEnv);
   expect(again.code).not.toBe(0);expect((await Bun.file(file).json()).token).toBe(written.token);
@@ -86,7 +94,7 @@ test('the review invitation is production-only, single-use and never printed; bo
   const devPool=createPool(at(devDB));
   try{
    await initialiseDeployment(devPool,devIdentity);await openPostgresMemberHTTP(devPool,devIdentity,d.config);
-   await expect(postgresStore(devPool,devIdentity).run(s=>issueReviewInvitation(s,d.config))).rejects.toThrow('configuration unavailable');
+   await expect(postgresStore(devPool,devIdentity).run(s=>issueReviewInvitation(s,d.config))).rejects.toThrow('Review configuration unavailable');
   }finally{await devPool.end();}
  }finally{
   rmSync(dir,{recursive:true,force:true});

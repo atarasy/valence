@@ -180,7 +180,7 @@ Measured after the deploy: `/auth/session` 401, `/auth/login/options` 200 with a
 
 ## Production deployment
 
-[Production](deployment/PRODUCTION.md) is a second target of the same code at `https://members.vox.delivery`, in its own Vercel project and its own Neon project. `deployment/targets.ts` holds both targets; `build.ts` and `bootstrap.ts` take `--target production`; `member-invite.ts` issues the single-use App Review invitation. **Production and development share no data, credentials or passkeys**: the Neon projects, the deployment ids and the relying parties all differ. Every command that connects checks the Neon project id and then refuses a database that already holds the other target's deployment.
+[Production](deployment/PRODUCTION.md) is a second target of the same code at `https://members.vox.delivery`, in its own Vercel project and its own Neon project. `deployment/targets.ts` holds both targets; `build.ts` and `bootstrap.ts` take `--target production`; `member-invite.ts` issues the single-use App Review invitation and `review-proposal.ts` puts one digital proposal in front of that reviewer; the production entry also serves `/privacy` and `/support`. **Production and development share no data, credentials or passkeys**: the Neon projects, the deployment ids and the relying parties all differ. Every command that connects checks the Neon project id and then refuses a database that already holds the other target's deployment.
 
 ## Physical-device acceptance preparation
 

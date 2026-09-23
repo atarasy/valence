@@ -57,6 +57,8 @@ VERCEL_ORG_ID=team_jj6IfQQOAkn228T4uamrSFkh VERCEL_PROJECT_ID=prj_sxVkImnskRS6Ex
 ```sh
 curl -si https://members.vox.delivery/.well-known/apple-app-site-association   # 200, application/json, apps ["83W4J65UE6.com.vox.atarasy"], no redirect
 curl -si https://members.vox.delivery/auth/session                             # 401
+curl -si https://members.vox.delivery/privacy                                  # 200 text/html
+curl -si https://members.vox.delivery/support                                  # 200 text/html
 ```
 
 **5. Issue the App Review invitation.**
@@ -67,9 +69,21 @@ NEON_PROJECT_ID=weathered-violet-85512339 bun --env-file=/absolute/private/atara
 
 It provisions one new principal, unclaimed and with no presenter grants, and issues one single-use invitation through the ordinary enrolment service. The passkey is created on the reviewer's device when the invitation is used; this command makes no credential, household, mandate or offer. It has no `--target` and refuses unless both halves of the guard say production.
 
-**The principal has no household after enrolment, and nothing over HTTP gives it one.** A household is the name of its key (question 55), and the only code that adopts one is the development acceptance step and the local fixture. An unclaimed principal can sign in and log out, but `/auth/session` answers 401 to it (`statement-acceptance.test.ts`), so every member read refuses until a household is adopted.
+**6. Put a proposal in front of the reviewer.** Run twice, with the principal `member-invite.ts` printed, after the reviewer's device has enrolled and signed in once.
 
-The output file is created exclusively with mode 0600 and holds `{origin, token, expiresAt}`. The token is never printed; stdout names the principal and the expiry. The invitation expires `maximumLifetimeMs` after issue, which is **five minutes**, so issue it only when the reviewer is ready, and issue again for a new principal once it is spent or expired. Nothing is retried automatically. Do not commit the file, paste the token into a log or send it anywhere other than to the reviewer.
+```sh
+NEON_PROJECT_ID=weathered-violet-85512339 bun --env-file=/absolute/private/atarasy-api.env deployment/review-proposal.ts propose review_member_<32 hex>
+```
+
+The first run adopts the principal's household from its one signed-in passkey, because a household is the name of its key (question 55) and nothing over HTTP adopts one; until then the reviewer can sign in but `/auth/session` answers 401 (`statement-acceptance.test.ts`). It writes the household's mandate as a claim and prints `awaitingSignature: true`. **The reviewer's device then signs the claim** (`/member/mandates/list`, `/prepare`, `/submit`): nobody else can, and an offer cannot name a claim. The second run registers the review shop once per deployment (`app_review_shop`, merchant `app_review_merchant`, ephemeral keys dropped after signing the catalogue and disclosure), grants it to the principal and presents one digital proposal of three goods (`green_tea_50g` 800, `cotton_hand_towel` 1,200, `beeswax_candle` 1,500), open for 30 days under a mandate that lapses in 90. The carriage quote is 0 and the digital binding ships nothing; no provider is called and no money moves. Changing the grant ends the reviewer's session, so the device signs in again before it sees the proposal.
+
+It refuses a principal `member-invite.ts` did not issue, a credential count other than exactly one signed-in passkey, and a second proposal to the same principal. It prints the household, mandate, presenter and offer identifiers and nothing secret.
+
+`review-proposal.test.ts` runs this end to end on a disposable database: enrolment, both refusals before sign-in, the claim, the device's mandate signature, the proposal, the list and detail reads, and a signed decision that commits with carriage 0. Removing the review-principal check, the grant, the mandate binding, the carriage quote or the deliberation each makes it fail.
+
+## Static pages
+
+The production entry serves `GET /privacy` and `GET /support` as `text/html` with status 200 and no redirect, answered before the database is opened, in the same way as the AASA. They are `production/privacy.html` and `production/support.html`, built into the bundle as text. The privacy text is the draft in the vault's `Projects/Atarasy/files/App_Store_Submission_2026-09-23.md` §4, and **its bracketed placeholders ([date], [address], [name], [email] and the transfers paragraph) are still visible and must be filled before submission.** Changing either file changes the bundle and its manifest, so rebuild and redeploy; the runtime configuration and its fingerprint do not change.
 
 ## What stays development-only
 
