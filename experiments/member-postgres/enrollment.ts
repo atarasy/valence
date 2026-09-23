@@ -41,13 +41,26 @@ export function openEnrollment(path: Records, authority: ReturnType<typeof openM
     dropHandle(principal: string) {
       handles.delete(principal);
     },
-    /** Trusted administration only. The bearer invitation selects the principal. */
+    /**
+     * Trusted administration only. The bearer invitation selects the
+     * principal.
+     *
+     * A second call for the same principal drops the earlier invitation and
+     * any open enrolment flow first, the same rows `cancelEnrolment` drops.
+     * A refutation pass on 2026-09-23 measured what leaving the earlier one
+     * live bought: two invitations enrolled two different keys under one
+     * principal, and whichever signed in second read a live session on the
+     * first's household. One live invitation per principal closes that at
+     * the source; `member-adoption.ts` closes it again at sign-in for every
+     * other route that can still leave two credentials behind.
+     */
     issueInvitation(principal: string) {
       if (!authority.isActivePrincipal(principal)) throw new Error('Principal unavailable');
       const at = now(), expiresAt = at + invitationLifetimeMs; integer(expiresAt);
       const token = 'aen1_' + randomBytes(32).toString('base64url');
       db.transaction(() => {
-        invitations.deleteWhere(v=>v.expires<=at);
+        invitations.deleteWhere(v=>v.expires<=at||v.principal===principal);
+        flows.deleteWhere(v=>v.principal===principal);
         invitations.insert(digest(token),{principal,expires:expiresAt});
       }).immediate();
       return { token, expiresAt };

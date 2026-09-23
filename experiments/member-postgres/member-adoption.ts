@@ -25,12 +25,36 @@ export class AdoptionError extends Error {}
  * Called from `login.finish` before its session is created, inside one
  * savepoint, so a refusal leaves no half-adopted principal. A name another
  * live principal already holds is refused, and so the sign-in is.
+ *
+ * Two more refusals were added the same day, from a refutation pass that
+ * measured a route past both: (1) adoption itself runs only when the
+ * principal holds exactly one credential, proven, and it is the one that
+ * just signed in (the shape `device-acceptance.ts` `prepareStatementAcceptance`
+ * already required for its own single-device acceptance); a principal
+ * carrying a second, unrelated credential adopts nothing until that
+ * credential is gone. (2) once a principal has adopted, every later sign-in
+ * of any of its credentials is checked against the household it holds, not
+ * only credentials that arrive after adoption: two invitations issued for
+ * one principal before either was used could enrol two different keys, and
+ * the second key's sign-in read a live session on the first key's household
+ * because the session names the principal's household rather than the
+ * credential's own key.
  */
 export function adoptOnSignIn(r:ReturnType<typeof memberRuntime>,credentialID:string){
  r.path.transaction(()=>{
+  const cose=r.login.verifiedPublicKey(credentialID);
+  const claimed=r.authority.claimedPrincipalHousehold(credentialID);
+  if(claimed!==undefined){
+   if(!cose)throw new AdoptionError('Credential key unavailable');
+   const pem=createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();
+   if(nameOf(pem)!==claimed)throw new AdoptionError('Credential key does not name this principal\'s household');
+   return;
+  }
   const principal=r.authority.unclaimedPrincipalOf(credentialID);
   if(!principal)return;
-  const cose=r.login.verifiedPublicKey(credentialID);if(!cose)throw new AdoptionError('Credential key unavailable');
+  const {proven,unproven}=r.authority.credentialProof(principal);
+  if(proven.length!==1||unproven.length!==0||proven[0]!==credentialID)throw new AdoptionError(`Adoption requires exactly the one credential that just signed in; ${proven.length} have signed in and ${unproven.length} have not`);
+  if(!cose)throw new AdoptionError('Credential key unavailable');
   const pem=createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString();
   if(r.authority.holdsHousehold(nameOf(pem)))throw new AdoptionError('Household is held by another principal');
   const household=r.authority.adoptHousehold(principal,credentialID),at=r.now();

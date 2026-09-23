@@ -45,7 +45,11 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   const openFlow=await (await send('/auth/enrollment/options',{invitation:opening.token})).json();
   expect(await unit.run(s=>s.map('member_flows').size)).toBe(1);
   // Nothing has signed in, so nothing was adopted and the principal is kept.
-  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:1,signedIn:0,unproven:1,cancelled:2,replacedPrincipal:false});
+  // `stranded`'s invitation is not among what `retire` cancels here: issuing
+  // `opening` for the same principal already dropped it (enrollment.ts,
+  // 2026-09-23), which is also why `stranded.token` is refused below. Only
+  // the open flow from `opening` itself is left for `retire` to cancel.
+  expect(await unit.run(s=>retireUnprovenCredentials(s,c))).toEqual({retired:1,signedIn:0,unproven:1,cancelled:1,replacedPrincipal:false});
   expect((await send('/auth/enrollment/verify',{id:openFlow.id,response:openCeremony.register(openFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
   expect((await send('/auth/enrollment/options',{invitation:stranded.token})).status).toBe(401);
   // A half-finished ceremony is dropped too, not only the invitation that
@@ -77,11 +81,6 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   // back: an earlier version returned the same object and revoked less.
   expect(await unit.run(s=>{const rows=s.map<{revoked:number}>('member_credentials');return [...rows.values()].every(v=>v.revoked===1);})).toBe(true);
   const invitation=await unit.run(s=>inviteDeviceAcceptance(s,c)),key=syntheticAuthenticator();
-  // A ceremony held open across the sign-in that adopts the household: the
-  // route that adds a credential is where the invariant lives. Measured open by
-  // a sixth refutation pass, which then read the household's mandate terms.
-  const late=syntheticAuthenticator(),lateInvite=await unit.run(s=>inviteDeviceAcceptance(s,c));
-  const lateFlow=await (await send('/auth/enrollment/options',{invitation:lateInvite.token})).json();
   const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json();
   expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
   const userHandle=flow.publicKey.user.id,signIn=async(counter:number)=>{const f=await (await send('/auth/login/options',{})).json();const reply=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,userHandle,counter)});expect(reply.status).toBe(200);return (await reply.json()).token as string;};
@@ -113,6 +112,18 @@ test('trusted statement acceptance lets the registered passkey approve one physi
   expect((await send('/member/mandates/submit',{assertion:assertionFor(key,named.publicKey.challenge,c,3),mandate:awaiting.mandate},before)).status).toBe(200);
   // And the squatted claim did nothing at any point: the household presents.
   expect(await unit.run(s=>memberRuntime(s,c).engine.mandates.claimsFor(toSign.mandate.household).length)).toBe(1);
+  // A credential registered for this principal after its household is already
+  // adopted is refused at registration, not only kept out of a later sign-in.
+  // `inviteDeviceAcceptance` itself already refuses once a household is set
+  // (tested above); this opens the ceremony with the lower-level primitive an
+  // operator command would use, so what is under test here is
+  // `registerCredential`'s own invariant. Two concurrent ceremonies for one
+  // principal can no longer be held open across the sign-in that adopts
+  // between them (enrollment.ts, 2026-09-23: a second invitation for the same
+  // principal now cancels the first), so this ceremony is opened only after
+  // adoption, not across it.
+  const late=syntheticAuthenticator(),lateInvite=await unit.run(s=>memberRuntime(s,c).enrollment.issueInvitation(current.principal));
+  const lateFlow=await (await send('/auth/enrollment/options',{invitation:lateInvite.token})).json();
   const statement=await unit.run(s=>prepareStatementAcceptance(s,c)) as {household:string;mandate:string;offer:string;presenter:string};
   expect((await send('/auth/enrollment/verify',{id:lateFlow.id,response:late.register(lateFlow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(401);
   expect(await unit.run(s=>s.map('member_passkeys').has(late.id))).toBe(false);
