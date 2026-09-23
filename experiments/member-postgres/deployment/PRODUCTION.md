@@ -139,3 +139,7 @@ The production entry serves `GET /privacy` and `GET /support` as `text/html` wit
 ## What stays development-only
 
 `device-acceptance.ts` and `presenter-credential.ts` refuse production. Device acceptance seeds presenters, catalogues and boxes and writes an unsigned mandate claim for the device to sign, which must never happen to a real member.
+
+## 2026-09-23 evening: redeployed for catalogue revision 3
+
+Redeployed from `9406aae` (catalogue publication signature revision 3, D-1 through D-4), then from `57171db` (the support page now says to use one device for the pilot). Neither commit changed the runtime configuration or the migrations, so no rebind was needed and the deployment stayed bound to `.3`. Checked: `/presenter/self` 401, `/auth/session` 401, AASA 200 with `83W4J65UE6.com.vox.atarasy`.
