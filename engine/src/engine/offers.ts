@@ -163,11 +163,11 @@ function tighterCeiling(a: number | null, b: number | null): number | null {
   return Math.min(a, b);
 }
 
-import { canonicalConfig } from "../shared/catalogue.js";
+import { canonicalConfig, catalogueHasDisplayFields } from "../shared/catalogue.js";
 export { canonicalConfig } from "../shared/catalogue.js";
 
 /** Local verification provenance, never accepted from a publication payload. */
-type StoredPresenterConfig = PresenterConfig & { __catalogueSignatureFormat?: 2 };
+type StoredPresenterConfig = PresenterConfig & { __catalogueSignatureFormat?: 2 | 3 };
 
 export function explorationFloor(candidateCount: number, rate: number): number {
   return Math.max(1, Math.ceil(candidateCount * rate));
@@ -646,8 +646,12 @@ export class ValenceEngine {
     }
     // One persisted row contains the payload and its local verification marker.
     // Separate snapshots prevent callers or exports from changing verified data.
+    // D-1. Revision 3 only when a product entry actually carries a name or a
+    // variant; a publication with neither is marked 2, byte-for-byte the same
+    // marker it held before revision 3 existed.
     const frozen = structuredClone(config);
-    this.configs.set(config.version, { ...frozen, __catalogueSignatureFormat: 2 });
+    const revision = catalogueHasDisplayFields(config) ? 3 : 2;
+    this.configs.set(config.version, { ...frozen, __catalogueSignatureFormat: revision });
     return structuredClone(frozen);
   }
 
@@ -740,8 +744,8 @@ export class ValenceEngine {
     if (!config) {
       throw notFound(`no presenter config ${input.config_version}`);
     }
-    if (config.__catalogueSignatureFormat !== 2) {
-      throw conflict("catalogue_republication_required", "republish a fresh catalogue version using valence.catalogue.2 before creating an offer");
+    if (config.__catalogueSignatureFormat !== 2 && config.__catalogueSignatureFormat !== 3) {
+      throw conflict("catalogue_republication_required", "republish a fresh catalogue version using valence.catalogue.2 or valence.catalogue.3 before creating an offer");
     }
     if (input.candidates.length < 1) {
       throw badRequest("malformed", "an offer needs at least one candidate");
@@ -807,6 +811,15 @@ export class ValenceEngine {
         // §8. The category travels with the price and the merchant, from
         // the catalogue and never from the request.
         category: entry.category ?? null,
+        // D-1. Copied from the catalogue exactly as merchant/maker/ships are;
+        // no request field sets it (validate.ts already refuses one that
+        // tries, as an unknown field). Spread rather than a plain `name:
+        // entry.name` so the key is truly absent when the catalogue gave
+        // none, not present with an `undefined` value: the difference
+        // matters to `isDeepStrictEqual`, which the node-import dedup checks
+        // use to compare a live settlement against a JSON-parsed one.
+        ...(entry.name !== undefined ? { name: entry.name } : {}),
+        ...(entry.variant !== undefined ? { variant: entry.variant } : {}),
         predicted_conversion: c.predicted_conversion,
         is_exploration: c.is_exploration,
         given_by: c.given_by,
@@ -1938,8 +1951,15 @@ export class ValenceEngine {
       );
     }
     const lines: SettlementLine[] = [];
+    // D-1. `name`/`variant` ride with the candidate they describe, absent
+    // when it carried none (see the comment on `Candidate.name`).
     const line = (c: Candidate, amount: number, isDisputed = false) =>
-      lines.push({ candidate: c.id, product: c.product, merchant: c.merchant, maker: c.maker, ships: c.ships, valence: c.valence, amount, disputed: isDisputed });
+      lines.push({
+        candidate: c.id, product: c.product, merchant: c.merchant, maker: c.maker, ships: c.ships,
+        ...(c.name !== undefined ? { name: c.name } : {}),
+        ...(c.variant !== undefined ? { variant: c.variant } : {}),
+        valence: c.valence, amount, disputed: isDisputed,
+      });
     for (const c of offer.candidates) {
       if (c.valence === "kept" || c.valence === "defaulted") {
         // §6.2, clause 10. **A gift is never billed to the person who received

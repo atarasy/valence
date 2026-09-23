@@ -191,7 +191,7 @@ describe("§6.6, §14.2, question 70: corrections move with the household", () =
     // NOTE (mutation check, 2026-09-22): export_drops_corrections and
     // import_drops_corrections.
     const { a, c, node } = await exported();
-    expect(node.format).toBe("valence-node/12");
+    expect(node.format).toBe("valence-node/13");
     expect(node.corrections).toEqual({ [a.offer.id]: [c] });
     const b = freshHost();
     const r = await importInto(b.handle, node);

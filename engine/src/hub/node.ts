@@ -64,7 +64,14 @@ import type { Delivery, DeliveryRegister } from "./delivery.js";
  * (§6.6a). A /10 or /11 export carries none, and its corrections arrive with
  * no record that a refund came back, which is what they had before.
  */
-export const EXPORT_FORMAT_VERSION = "valence-node/12";
+/**
+ * Bumped to /13 on 2026-09-23, when a candidate and a settlement line gained
+ * the optional `name`/`variant` display fields (D-1). A /12 export carries
+ * neither key on any candidate or line, which is exactly the shape an entry
+ * with no catalogue name already has: nothing is lost by reading it, and
+ * nothing here reconstructs a display name the sending host never held.
+ */
+export const EXPORT_FORMAT_VERSION = "valence-node/13";
 
 export type NodeExport = {
   format: string;

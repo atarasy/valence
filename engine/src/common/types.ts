@@ -67,6 +67,16 @@ export type CatalogueEntry = {
   category?: string;
   /** §11.1. Absent for a product that is never placed in a home. */
   physical?: PhysicalEligibility;
+  /**
+   * D-1, decided 2026-09-23. Display text for a member screen: at most 120
+   * Unicode code points, never markup or presentation (clause 54). Optional;
+   * a publication that gives no product a name or a variant signs revision 2
+   * of the catalogue bytes unchanged. From the catalogue only, never the
+   * request (candidate creation copies it, the same as `merchant`).
+   */
+  name?: string;
+  /** D-1. Size, pack or other variant text, at most 60 Unicode code points. */
+  variant?: string;
 };
 
 export type PresenterConfig = {
@@ -141,6 +151,19 @@ export type Candidate = {
   ships: string;
   /** §8. Copied from the catalogue with the price. No request field sets it. */
   category: string | null;
+  /**
+   * D-1. Copied from the catalogue with the price, never from the request.
+   * **Absent, not null, when the catalogue gave none**: unlike `category`,
+   * these travel through the node and merchant exports as raw values with no
+   * per-field view function to hang an omission on, so the key must be truly
+   * absent from this object (not present with an `undefined` value) for
+   * every JSON surface, the two raw exports included, to omit it uniformly.
+   * A client from before revision 3 checks a candidate's keys exactly
+   * (question 72's `contact` is the precedent).
+   */
+  name?: string;
+  /** D-1. See `name`. */
+  variant?: string;
   predicted_conversion: number | null;
   is_exploration: boolean;
   /**
@@ -275,6 +298,10 @@ export type SettlementLine = {
   /** Clause 12: every line of every receipt names who made it. */
   maker: string;
   ships: string;
+  /** D-1. See `Candidate.name`: absent, not null, when the catalogue gave none. */
+  name?: string;
+  /** D-1. See `Candidate.variant`. */
+  variant?: string;
   valence: Valence;
   amount: number;
   /** §6.5. A consumed line the household did not confirm. Not charged. */

@@ -19,6 +19,7 @@ import { renderStatement } from "./hub/statement.js";
 import { moneyStillToMove } from "./shared/statement.js";
 import { collectedAs } from "./shared/collected.js";
 import { PROTOCOLS, type Protocol, type Registry } from "./shared/registry.js";
+import { CATALOGUE_NAME_MAX, CATALOGUE_VARIANT_MAX } from "./shared/catalogue.js";
 import {
   optionalUnitInterval,
   requireBoolean,
@@ -114,6 +115,25 @@ function optionalGiver(entry: Record<string, unknown>, where: string): string | 
   return entry.given_by;
 }
 
+/**
+ * D-1. A catalogue's `name`/`variant`: optional, and when given, well-formed
+ * nonempty text of at most `max` Unicode code points (SPEC §3). `undefined`
+ * is returned rather than the key being set, so an entry with neither reaches
+ * `canonicalConfig` in exactly the shape that keeps it on signature
+ * revision 2.
+ */
+function optionalDisplayText(entry: Record<string, unknown>, key: "name" | "variant", where: string, max: number): string | undefined {
+  const value = entry[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value === "") {
+    throw badRequest("malformed", `${where}: ${key} must be a non-empty string`);
+  }
+  if ([...value].length > max) {
+    throw badRequest("malformed", `${where}: ${key} must be at most ${max} Unicode code points`);
+  }
+  return value;
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body, null, 2), {
     status,
@@ -158,6 +178,11 @@ function candidateView(c: Candidate, recovery: Recovery | undefined) {
     // the record. It is the merchant only where the merchant made the goods.
     maker: c.maker,
     ships: c.ships,
+    // D-1. Absent, not null, where the catalogue gave none: a client from
+    // before revision 3 checks a candidate's keys exactly (question 72's
+    // `contact` is the precedent).
+    ...(c.name !== undefined ? { name: c.name } : {}),
+    ...(c.variant !== undefined ? { variant: c.variant } : {}),
     // §8. The merchant's own category, travelling with the price. It is the
     // merchant's published data rather than anything about the household.
     category: c.category,
@@ -379,7 +404,7 @@ async function route(
       for (const [ref, value] of Object.entries(
         products as Record<string, unknown>
       )) {
-        const entry = strict(value, ["merchant", "maker", "ships", "price", "category", "physical"], `product ${ref}`);
+        const entry = strict(value, ["merchant", "maker", "ships", "price", "category", "physical", "name", "variant"], `product ${ref}`);
         const physicalRaw = entry.physical;
         let physical;
         if (physicalRaw !== undefined) {
@@ -415,6 +440,10 @@ async function route(
               ? undefined
               : requireString(entry, "category", `product ${ref}`),
           physical,
+          // D-1. Display text only; absent leaves this publication on
+          // signature revision 2.
+          name: optionalDisplayText(entry, "name", `product ${ref}`, CATALOGUE_NAME_MAX),
+          variant: optionalDisplayText(entry, "variant", `product ${ref}`, CATALOGUE_VARIANT_MAX),
         };
       }
       return json(
@@ -1503,14 +1532,17 @@ async function route(
       // `gifts_in_flight`; a giver's record of what it paid did not travel.
       // A /9 export predates question 70 and carries no `corrections`; its
       // settlements arrive uncorrected, which is what they were.
-      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/11" && body_.format !== "valence-node/10" && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
+      // A /12 export predates D-1 and carries no `name`/`variant` on any
+      // candidate or line; it reads exactly as an entry with no catalogue
+      // name already does.
+      if (!body_ || (body_.format !== EXPORT_FORMAT_VERSION && body_.format !== "valence-node/12" && body_.format !== "valence-node/11" && body_.format !== "valence-node/10" && body_.format !== "valence-node/9" && body_.format !== "valence-node/8" && body_.format !== "valence-node/7" && body_.format !== "valence-node/6" && body_.format !== "valence-node/5" && body_.format !== "valence-node/4")) {
         throw badRequest("malformed", "unknown export format");
       }
-      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/11" || body_.format === "valence-node/9") && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
+      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/12" || body_.format === "valence-node/11" || body_.format === "valence-node/9") && !Array.isArray(body_.carriage_quotes)) throw badRequest("malformed", "current archives must carry carriage_quotes");
       // §6.6, question 70. The same shape check the other registers get, and
       // stricter: a correction is a signed record, so every row has exactly
       // the fields the merchant signed and names the offer it is filed under.
-      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/11") && body_.corrections === undefined) throw badRequest("malformed", "current archives must carry corrections");
+      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/12" || body_.format === "valence-node/11") && body_.corrections === undefined) throw badRequest("malformed", "current archives must carry corrections");
       const arrivingCorrections = body_.corrections ?? {};
       if (arrivingCorrections === null || typeof arrivingCorrections !== "object" || Array.isArray(arrivingCorrections)) {
         throw badRequest("malformed", "corrections must map offer ids to lists of corrections");
@@ -1534,7 +1566,7 @@ async function route(
       // does carry the field is held to the same rules as a current one, as
       // `corrections` is.
       const returnsRaw = (body_ as { correction_returns?: unknown }).correction_returns;
-      if (body_.format === EXPORT_FORMAT_VERSION && returnsRaw === undefined) throw badRequest("malformed", "current archives must carry correction_returns");
+      if ((body_.format === EXPORT_FORMAT_VERSION || body_.format === "valence-node/12") && returnsRaw === undefined) throw badRequest("malformed", "current archives must carry correction_returns");
       const arrivingReturns = (returnsRaw ?? {}) as Record<string, CorrectionReturn[]>;
       if (arrivingReturns === null || typeof arrivingReturns !== "object" || Array.isArray(arrivingReturns)) {
         throw badRequest("malformed", "correction_returns must map offer ids to lists of records");
@@ -1599,6 +1631,31 @@ async function route(
         // §13.2, question 55.
         if (typeof o.mandate !== "string" || householdOfMandate(o.mandate) !== moving) {
           throw unprocessable("name_is_not_the_key", `offer ${o.id} names a mandate that is not this household's`);
+        }
+        // D-1. Optional, and where present the same text and length rule the
+        // catalogue enforces at publication (SPEC §3): a moved candidate is
+        // not re-verified against a signature, so a display field arriving
+        // from an import gets the same shape check a fresh one gets.
+        for (const c of o.candidates as Record<string, unknown>[]) {
+          for (const [key, max] of [["name", CATALOGUE_NAME_MAX], ["variant", CATALOGUE_VARIANT_MAX]] as const) {
+            const value = c[key];
+            if (value === undefined) continue;
+            if (typeof value !== "string" || value === "" || [...value].length > max) {
+              throw badRequest("malformed", `offer ${String(o.id)}: candidate ${key} must be a non-empty string of at most ${max} Unicode code points`);
+            }
+          }
+        }
+      }
+      // D-1. The same rule for a settlement's lines.
+      for (const s of body_.settlements ?? []) {
+        for (const l of (s.lines ?? []) as Record<string, unknown>[]) {
+          for (const [key, max] of [["name", CATALOGUE_NAME_MAX], ["variant", CATALOGUE_VARIANT_MAX]] as const) {
+            const value = l[key];
+            if (value === undefined) continue;
+            if (typeof value !== "string" || value === "" || [...value].length > max) {
+              throw badRequest("malformed", `settlement ${String(s.offer)}: line ${key} must be a non-empty string of at most ${max} Unicode code points`);
+            }
+          }
         }
       }
       for (const [field, key] of MERGED_KEYS) {

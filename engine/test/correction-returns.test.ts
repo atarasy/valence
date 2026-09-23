@@ -238,9 +238,9 @@ describe("§6.6a, §14.2: the records move with the household", () => {
     return { engine: made.engine, handle };
   }
 
-  test("the export carries them in valence-node/12, and the next host answers the same receipt", async () => {
+  test("the export carries them in valence-node/13, and the next host answers the same receipt", async () => {
     const { a, returned, node } = await exported();
-    expect(node.format).toBe("valence-node/12");
+    expect(node.format).toBe("valence-node/13");
     expect(node.correction_returns).toEqual({ [a.offer.id]: [returned] });
     const b = freshHost();
     expect((await importInto(b.handle, node)).status).toBe(201);
