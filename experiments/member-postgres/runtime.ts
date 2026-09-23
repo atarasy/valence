@@ -27,7 +27,7 @@ export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const login=openVerifiedLogin(path,authority,p),enrollment=openEnrollment(path,authority,login,{...p,rpName:'Atarasy',invitationLifetimeMs:c.invitationLifetimeMs});
  const bindings=openMandateBindings(path,authority,login,engine),journal=openOperationJournal(path,authority,bindings,{maximumLifetimeMs:c.maximumLifetimeMs,now});
  const reviews=records<any>(path,'member_reviews');
- // App Review: the principals member-invite.ts issued, and the review shop and proposals (review-shop.ts).
+ // App Review: the principals review-invite.ts issued, and the review shop and proposals (review-shop.ts).
  const reviewPrincipals=records<any>(path,'member_review_invitations'),reviewProposals=records<any>(path,'member_review_proposals');
  // Journal owns the operation map. Expose only its own scoped read method to avoid a duplicate map.
  const operations={find:journal.findBlocking,findCurrent:journal.findCurrent};

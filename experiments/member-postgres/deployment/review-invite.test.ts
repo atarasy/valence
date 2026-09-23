@@ -21,10 +21,22 @@ test('the review invitation is production-only, single-use and never printed; bo
  const base=process.env.ATARASY_TEST_POSTGRES_URL;if(!base)throw new Error('Isolated PostgreSQL URL required');
  const admin=new Pool({connectionString:base}),prodDB='inv_'+randomUUID().replaceAll('-',''),devDB='inv_'+randomUUID().replaceAll('-','');
  const at=(name:string)=>{const u=new URL(base);u.pathname='/'+name;return u.toString();};
- const dir=mkdtempSync(join(tmpdir(),'member-invite-'));
+ const dir=mkdtempSync(join(tmpdir(),'review-invite-'));
+ // A disposable database cannot be given the real production endpoint's own
+ // hostname, so the tests below that stand it in for production carry this
+ // test-only override (targets.ts); the assertion right after `CREATE
+ // DATABASE` is the one call in this file that deliberately omits it, to
+ // prove the connection guard itself refuses without it.
+ const endpointLabel=new URL(base).hostname.split('.')[0]!;
  try{
   await admin.query(`CREATE DATABASE ${prodDB}`);await admin.query(`CREATE DATABASE ${devDB}`);
-  const prodEnv={NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(prodDB)},devEnv={NEON_PROJECT_ID:DEV,DATABASE_URL_UNPOOLED:at(devDB)};
+  const prodEnv={NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(prodDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel},devEnv={NEON_PROJECT_ID:DEV,DATABASE_URL_UNPOOLED:at(devDB)};
+
+  // The connection guard: a production-labelled command whose connection string
+  // does not name the real production endpoint is refused before it connects,
+  // whatever `NEON_PROJECT_ID` says.
+  const wrongEndpoint=await run('./bootstrap.ts',['--target','production'],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(prodDB)});
+  expect(wrongEndpoint.code).not.toBe(0);expect(wrongEndpoint.stderr).toContain('production Neon endpoint');
 
   // Bootstrap each target into its own database.
   expect(await run('./bootstrap.ts',['--target','production'],prodEnv)).toMatchObject({code:0});
@@ -33,7 +45,7 @@ test('the review invitation is production-only, single-use and never printed; bo
   expect((await run('./bootstrap.ts',['--target','production'],{...prodEnv,NEON_PROJECT_ID:DEV})).code).not.toBe(0);
   expect((await run('./bootstrap.ts',[],{...devEnv,NEON_PROJECT_ID:PROD})).code).not.toBe(0);
   // The database guard: the right label on the other target's database is refused too, and writes nothing.
-  const crossed=await run('./bootstrap.ts',['--target','production'],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB)});
+  const crossed=await run('./bootstrap.ts',['--target','production'],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel});
   expect(crossed.code).not.toBe(0);expect(crossed.stderr).toContain('another target');
   expect((await run('./bootstrap.ts',[],{NEON_PROJECT_ID:DEV,DATABASE_URL_UNPOOLED:at(prodDB)})).code).not.toBe(0);
   for(const [db,expected] of [[prodDB,['production']],[devDB,['development']]] as const){
@@ -43,15 +55,15 @@ test('the review invitation is production-only, single-use and never printed; bo
 
   // The invitation command refuses the development project id, and the development database under the production id.
   const refusedFile=join(dir,'refused.json');
-  const wrongLabel=await run('./member-invite.ts',['issue',refusedFile],{...prodEnv,NEON_PROJECT_ID:DEV});
+  const wrongLabel=await run('./review-invite.ts',['issue',refusedFile],{...prodEnv,NEON_PROJECT_ID:DEV});
   expect(wrongLabel.code).not.toBe(0);expect(existsSync(refusedFile)).toBe(false);
-  const wrongDatabase=await run('./member-invite.ts',['issue',refusedFile],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB)});
+  const wrongDatabase=await run('./review-invite.ts',['issue',refusedFile],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel});
   expect(wrongDatabase.code).not.toBe(0);expect(wrongDatabase.stderr).toContain('another target');expect(existsSync(refusedFile)).toBe(false);
-  expect((await run('./member-invite.ts',['issue','relative.json'],prodEnv)).code).not.toBe(0);
+  expect((await run('./review-invite.ts',['issue','relative.json'],prodEnv)).code).not.toBe(0);
 
   // Issue: exclusive 0600 file, token absent from stdout and stderr.
   const file=join(dir,'invitation.json');
-  const issued=await run('./member-invite.ts',['issue',file],prodEnv);
+  const issued=await run('./review-invite.ts',['issue',file],prodEnv);
   expect(issued).toMatchObject({code:0,stderr:''});
   const written=await Bun.file(file).json() as {origin:string;token:string;expiresAt:number};
   expect(written.origin).toBe('https://members.vox.delivery');expect(written.token).toMatch(/^aen1_/);
@@ -62,13 +74,13 @@ test('the review invitation is production-only, single-use and never printed; bo
   const stranger=nameOf(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}).toString());
   const proposal=(env:Record<string,string|undefined>,who=stranger)=>run('./review-proposal.ts',['propose',who],env);
   expect((await proposal({...prodEnv,NEON_PROJECT_ID:DEV})).code).not.toBe(0);
-  const proposalCrossed=await proposal({NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB)});
+  const proposalCrossed=await proposal({NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel});
   expect(proposalCrossed.code).not.toBe(0);expect(proposalCrossed.stderr).toContain('another target');
   expect((await proposal(prodEnv,principal)).code).not.toBe(0);
   const unadopted=await proposal(prodEnv);
   expect(unadopted.code).toBe(1);expect(unadopted.stdout).toBe('');expect(unadopted.stderr).toContain('Not a review household');
   // An existing output file is refused and left as it was.
-  const again=await run('./member-invite.ts',['issue',file],prodEnv);
+  const again=await run('./review-invite.ts',['issue',file],prodEnv);
   expect(again.code).not.toBe(0);expect((await Bun.file(file).json()).token).toBe(written.token);
 
   // The token enrols a passkey exactly once, on the production relying party.

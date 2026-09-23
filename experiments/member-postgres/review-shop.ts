@@ -36,7 +36,7 @@ export function reviewShop(r:Runtime,at:number):ReviewShop{
  r.reviewProposals.put('shop',shop);return shop;
 }
 /**
- * At adoption, and only for a principal `member-invite.ts` issued for review:
+ * At adoption, and only for a principal `review-invite.ts` issued for review:
  * grant the review shop there and then. The grant is made before the sign-in's
  * session exists, so it revokes nothing and the reviewer's session survives
  * everything that follows. Every other principal is left exactly as it was.
