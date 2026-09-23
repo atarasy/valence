@@ -39,6 +39,28 @@ test('a disclosure in an archive may carry a signed contact of exactly a kind an
   for (const ok of [null, { kind: 'email', value: 'help@shop.example' }]) expect(() => validateNodeImport(withContact(ok), HOUSE)).not.toThrow();
   for (const bad of [{ kind: 'sms', value: 'x' }, { kind: 'email' }, { kind: 'url', value: 'https://x', extra: 1 }]) expect(() => validateNodeImport(withContact(bad), HOUSE)).toThrow('Invalid');
 });
+test('a candidate or a settlement line in an archive may carry a display name/variant of at most 120/60 code points (D-1)', async () => {
+  const s = await fixture();
+  const withDisplay = (over: { name?: string; variant?: string }) => {
+    const node = structuredClone(s.node);
+    Object.assign(node.offers[0].candidates[0], over);
+    return node;
+  };
+  expect(() => validateNodeImport(withDisplay({}), HOUSE)).not.toThrow();
+  expect(() => validateNodeImport(withDisplay({ name: 'Tea', variant: '500g' }), HOUSE)).not.toThrow();
+  expect(() => validateNodeImport(withDisplay({ name: 'a'.repeat(120) }), HOUSE)).not.toThrow();
+  expect(() => validateNodeImport(withDisplay({ name: 'a'.repeat(121) }), HOUSE)).toThrow('Invalid');
+  expect(() => validateNodeImport(withDisplay({ variant: 'a'.repeat(60) }), HOUSE)).not.toThrow();
+  expect(() => validateNodeImport(withDisplay({ variant: 'a'.repeat(61) }), HOUSE)).toThrow('Invalid');
+  expect(() => validateNodeImport(withDisplay({ name: '' }), HOUSE)).toThrow('Invalid');
+  // A /12 archive predates D-1 and carries neither key on any candidate or
+  // line, which reads exactly as an entry with no catalogue name already
+  // does: nothing is lost, and importing it invents no display name.
+  const legacy = structuredClone(s.node); legacy.format = 'valence-node/12';
+  const imported = validateNodeImport(legacy, HOUSE);
+  expect('name' in imported.offers[0]!.candidates[0]!).toBe(false);
+  expect('variant' in imported.offers[0]!.candidates[0]!).toBe(false);
+});
 test('corrections in an archive are filed under a carried offer, with exactly the signed fields (question 70)', async () => {
   const s = await fixture();
   expect(s.node.corrections).toEqual({});
@@ -112,7 +134,7 @@ test('decision protections survive an archive and cannot name an unrelated offer
 
 test('quotation archives require the new register and bind every quote to a digital offer', async () => {
   const s = await fixture();
-  expect(s.node.format).toBe('valence-node/12');
+  expect(s.node.format).toBe('valence-node/13');
   expect(s.node.carriage_quotes).toEqual([]);
   const legacy = structuredClone(s.node); legacy.format = 'valence-node/8'; delete legacy.carriage_quotes;
   expect(validateNodeImport(legacy, HOUSE).carriage_quotes).toEqual([]);
