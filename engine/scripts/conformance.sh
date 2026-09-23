@@ -8,7 +8,17 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TESTS="${ATARAXIA_TESTS:-$HOME/Documents/GitHub/ataraxia/tests}"
+# ATARAXIA_TESTS wins if set. Otherwise prefer a sibling ataraxia checkout
+# beside this repository's parent (the side-by-side layout the top-level
+# README asks for), and fall back to the old hard-coded home path so a
+# checkout at ~/Documents/GitHub keeps working unset.
+if [ -n "${ATARAXIA_TESTS:-}" ]; then
+  TESTS="$ATARAXIA_TESTS"
+elif [ -d "$HERE/../../ataraxia/tests" ]; then
+  TESTS="$(cd "$HERE/../../ataraxia/tests" && pwd)"
+else
+  TESTS="$HOME/Documents/GitHub/ataraxia/tests"
+fi
 PORT="${PORT:-8788}"
 BASE="http://localhost:${PORT}"
 
