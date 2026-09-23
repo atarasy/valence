@@ -37,14 +37,20 @@ export function prepareDeviceAcceptance(store:Store,c:MemberRuntimeConfig){
  memberRuntime(store,c).authority.provisionUnclaimedPrincipal(value.principal,[]);
  entries.set('current',value);return value;
 }
+/** Distinct from a `StatementAcceptance`: only what `rearm` needs to list a departed run apart from `current`. */
+type ArchivedRun={household:string;archivedAt:number};
+function archivedRuns(entries:ReturnType<typeof checked>):ArchivedRun[]{
+ return (entries.get('archived') as unknown as ArchivedRun[]|undefined)??[];
+}
 export function deviceAcceptanceStatus(store:Store,c:MemberRuntimeConfig){
- const entries=checked(store,c),value=entries.get('current');if(!value)return {prepared:false as const};
+ const entries=checked(store,c),value=entries.get('current'),archived=archivedRuns(entries);
+ if(!value)return {prepared:false as const,archived};
  const statement=statementEntry(entries),vox=entries.get('vox') as unknown as {presenter:string}|undefined;
  const grants=vox?[vox.presenter]:statement?[statement.presenter]:[];
  const principal=store.map<{household:string|null;presenters:string;disabled:number}>('member_principals').get(value.principal);
  if(!principal||principal.household!==value.household||principal.presenters!==JSON.stringify(grants)||principal.disabled!==0)throw new AcceptanceError('Acceptance principal changed or unavailable');
  const credentials=store.map<{principal:string;revoked:number}>('member_credentials');
- const base={prepared:true as const,...value,presenterGrants:grants.length,activeCredentials:[...credentials.values()].filter(v=>v.principal===value.principal&&v.revoked===0).length};
+ const base={prepared:true as const,...value,presenterGrants:grants.length,activeCredentials:[...credentials.values()].filter(v=>v.principal===value.principal&&v.revoked===0).length,archived};
  if(!statement)return base;
  // Read the engine's settlement namespace directly: a full runtime would reopen the maps above.
  const settled=store.map('settlements').has(statement.offer);
@@ -207,4 +213,44 @@ export function grantVoxPresenter(store:Store,c:MemberRuntimeConfig,presenter:st
  r.authority.setPresenterGrants(value.principal,[presenter]);
  entries.set('vox',{presenter,createdAt:now()} as unknown as Acceptance);
  return {household:value.household,presenter,mandate:statement.mandate};
+}
+/**
+ * Trusted operator capability that lets this development deployment invite a
+ * household's own key again after that household has genuinely left this
+ * host through §14.3 (`member-leave.ts`, `engine/src/hub/leave.ts`). Nothing
+ * else clears `current`: `prepare` refuses outright while it exists (above),
+ * and `retire` only undoes enrolment before a household is adopted, refusing
+ * once a statement does (`retireUnprovenCredentials`). Without this, a
+ * household that deleted its own account through this device locks the
+ * deployment for ever, because `statement` and `box` go on naming a
+ * household this host no longer holds.
+ *
+ * Refuses unless the departure is real, checked against the engine's and the
+ * authority's own records rather than trusted from the caller: `isDeparted`
+ * (`departed_households`, written by `leaveHost`) must say the household
+ * left, and `holdsHousehold` must say nothing of it remains, which is what
+ * `deleteHouseholdRecords` empties. A `current` that never adopted a
+ * household (`household===null`) has nothing to depart and is refused too;
+ * `retire` is the command for that case.
+ *
+ * The record is archived, not discarded: `current`, `statement` and `vox`
+ * move to `departed:<household>:<at>:<name>` keys in this same locked unit,
+ * so a later reader can still see what an approved box actually settled
+ * under a household that has since left. `status` lists archived runs
+ * (`archived`) apart from `current`, which this leaves empty so `prepare`
+ * can run again for a new principal.
+ */
+export function rearmDeviceAcceptance(store:Store,c:MemberRuntimeConfig,now=Date.now){
+ const entries=checked(store,c),value=entries.get('current');
+ if(!value)throw new AcceptanceError('Acceptance not prepared; nothing to rearm');
+ if(value.household===null)throw new AcceptanceError('Acceptance household was never adopted; retire it instead');
+ const at=now(),r=memberRuntime(store,c,()=>at),household=value.household;
+ if(!r.engine.isDeparted(household))throw new AcceptanceError('Acceptance household has not left this host');
+ if(r.authority.holdsHousehold(household))throw new AcceptanceError('Acceptance household is still live on this host');
+ const prefix=`departed:${household}:${at}:`,statement=statementEntry(entries),vox=entries.get('vox');
+ entries.set(prefix+'current',value);entries.delete('current');
+ if(statement){entries.set(prefix+'statement',statement as unknown as Acceptance);entries.delete('statement');}
+ if(vox){entries.set(prefix+'vox',vox);entries.delete('vox');}
+ entries.set('archived',[...archivedRuns(entries),{household,archivedAt:at}] as unknown as Acceptance);
+ return {rearmed:true as const,household,archivedAt:at};
 }
