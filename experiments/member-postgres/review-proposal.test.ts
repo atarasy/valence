@@ -9,6 +9,7 @@ import {proposeForReview} from './review-proposal.ts';
 import {REVIEW_GOODS,REVIEW_SHOP} from './review-shop.ts';
 import {TARGETS} from './deployment/targets.ts';
 import {syntheticAuthenticator} from '../member-login/fixtures/authenticator.ts';
+import {ValenceEngine} from '../../engine/src/engine/offers.ts';
 import type {MemberRuntimeConfig} from './config.ts';
 // §10.5. The mandate ceremony reads an assertion's three fields as base64; the synthetic authenticator speaks base64url.
 const assertionFor=(key:ReturnType<typeof syntheticAuthenticator>,challenge:string,c:MemberRuntimeConfig,counter:number)=>{
@@ -86,6 +87,55 @@ test('a review household is granted the review shop at its first sign-in and see
   expect(await unit.run(s=>memberRuntime(s,c).reviewProposals.find(v=>(v as {household?:string}).household===ordinarySession.household))).toBeNull();
  }finally{
   for(const d of [id.id,devID.id]){await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[d]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[d]);}
+  await pool.end();
+ }
+},60000);
+
+test('a repeating failure while presenting the review proposal never rolls back the member\'s signature; the fallback presents it once presenting works again',async()=>{
+ const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
+ const c=TARGETS.production.config;
+ const id={id:'reviewfail_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1};
+ const pool=createPool(url),unit=postgresStore(pool,id);
+ try{
+  await migrateDatabase(url);await initialiseDeployment(pool,id);const app=await openPostgresMemberHTTP(pool,id,c);
+  const send=(path:string,body?:unknown,token?:string)=>app.fetch(new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}),{peer:'review-fail-test'});
+  const invitation=await unit.run(s=>issueReviewInvitation(s,c));
+  const flow=await (await send('/auth/enrollment/options',{invitation:invitation.token})).json(),key=syntheticAuthenticator();
+  expect((await send('/auth/enrollment/verify',{id:flow.id,response:key.register(flow.publicKey.challenge,c.origin,c.rpID)})).status).toBe(201);
+  const handle=flow.publicKey.user.id;
+  const f=await (await send('/auth/login/options',{})).json();
+  const signed=await send('/auth/login/verify',{id:f.id,response:key.authenticate(f.publicKey.challenge,c.origin,c.rpID,handle,1)});
+  expect(signed.status).toBe(200);const token=(await signed.json()).token as string;
+  const session=await (await send('/auth/session',undefined,token)).json();
+  const household=session.household as string,mandate=household+'.1';
+
+  // The signature is made to succeed and the presentation that follows it made
+  // to fail every time, the same fault the refuter injected: `present` throws.
+  const original=ValenceEngine.prototype.present;
+  ValenceEngine.prototype.present=async function(){throw new Error('synthetic present failure')} as typeof original;
+  try{
+   const named=await (await send('/member/mandates/prepare',{mandate},token)).json();
+   const submitted=await send('/member/mandates/submit',{assertion:assertionFor(key,named.publicKey.challenge,c,2),mandate},token);
+   // The signature still commits and the member sees success, even though presenting kept failing.
+   expect(submitted.status).toBe(200);
+   const body=await submitted.json();expect(body.id).toBe(mandate);expect(body.version).toBe(1);
+   // Nothing was presented: the failure never reached the client, but it also never wrote an offer.
+   const offers=await (await send('/offers?household='+encodeURIComponent(household)+'&presenter='+REVIEW_SHOP.presenter,undefined,token)).json();
+   expect(offers.offers).toEqual([]);
+   // The mandate itself is genuinely signed, independent of the presenting failure.
+   expect(await unit.run(s=>memberRuntime(s,c).engine.mandates.get(mandate)?.version)).toBe(1);
+  }finally{ValenceEngine.prototype.present=original;}
+
+  // Presenting works again. The fallback presents exactly once.
+  const first=await unit.run(s=>proposeForReview(s,c,household));
+  expect(first).toMatchObject({household,mandate,presented:true});
+  const offer=(first as {offer:string}).offer;
+  const second=await unit.run(s=>proposeForReview(s,c,household));
+  expect(second).toMatchObject({offer,presented:false});
+  const list=await (await send('/offers?household='+encodeURIComponent(household)+'&presenter='+REVIEW_SHOP.presenter,undefined,token)).json();
+  expect(list.offers).toHaveLength(1);
+ }finally{
+  await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id.id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id.id]);
   await pool.end();
  }
 },60000);
