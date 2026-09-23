@@ -1,4 +1,5 @@
 import type {Pool} from 'pg';
+import {parse as parsePostgresConnectionString} from 'pg-connection-string';
 import {DEPLOYMENT_ID,PRODUCTION_DEPLOYMENT_ID} from './identity.ts';
 import type {MemberRuntimeConfig} from '../config.ts';
 import developmentConfig from './config.json';
@@ -51,14 +52,23 @@ export function targetDatabaseURL(target:Target,env:Record<string,string|undefin
  return env.DATABASE_URL_UNPOOLED;
 }
 /**
- * The connection half of the guard, read from the connection string itself
- * rather than from a label beside it, so nothing typed on the command line
- * can defeat it. `weathered-violet-85512339`'s Vercel-managed endpoint is
- * `ep-curly-sound-b33yhpem` (and its pooled form, `-pooler`); every
- * production connection string this project has printed names one of the
- * two, and there is exactly one endpoint on this project, so a connection
- * string naming a third label is never this deployment's, whatever its
- * `NEON_PROJECT_ID` claims.
+ * The connection half of the guard, read from the connection string the way
+ * `pg` itself reads it (`pg-connection-string`, the same parser `Pool` uses
+ * internally), not from `new URL(...).hostname`. A round of this guard did
+ * exactly that and a refutation pass found it proved nothing: a `?host=`
+ * query parameter overrides the host `pg` actually connects to while leaving
+ * the URL's own authority (and so `.hostname`) unchanged, so a connection
+ * string could name the real project in its authority and a different host
+ * entirely in `?host=`, pass, and connect to the second host. Comparing only
+ * the first DNS label had the same shape of gap: any host beginning
+ * `ep-curly-sound-b33yhpem.` passed, real endpoint or not.
+ *
+ * `weathered-violet-85512339`'s Vercel-managed endpoint is
+ * `ep-curly-sound-b33yhpem.c-4.ap-southeast-1.aws.neon.tech` (and its pooled
+ * form, `-pooler`); the whole hostname is compared, case-insensitively, and a
+ * `?host=`/`hostaddr` override or a multi-host connection string is refused
+ * outright for production, because none of those describes one traceable
+ * connection to the one endpoint this project holds.
  *
  * No development endpoint id is recorded anywhere in this repository: only
  * the Neon project id (`young-pond-73223516`) and a branch name are
@@ -67,22 +77,34 @@ export function targetDatabaseURL(target:Target,env:Record<string,string|undefin
  * one is written down here, development keeps only the label check above and
  * the database check below.
  *
- * `ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL` lets this project's own tests
- * stand a disposable local database in for production, which cannot be given
- * the real endpoint's hostname. Nothing but a test ever has reason to set it:
- * bootstrapping, an invitation or a proposal against the real project
- * connects over the real endpoint's own connection string, which already
- * carries the real label.
+ * A disposable local database this project's own tests stand in for
+ * production cannot be given the real endpoint's hostname, and a local
+ * connection is otherwise refused above like any other non-matching host.
+ * `allowLocalTestConnection` widens the accepted set to a bare local address
+ * (`127.0.0.1`, `localhost`, or a socket path) and nothing else: it can never
+ * admit a remote hostname, real or not, so it cannot be used to launder the
+ * mismatch this guard exists to catch. A unit test passes it directly, as a
+ * value nothing outside the test constructs; `review-invite.test.ts` drives
+ * `bootstrap.ts`/`review-invite.ts`/`review-proposal.ts` as separate
+ * processes and so has no function call to pass it through, and sets
+ * `ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION=1` in that subprocess's own
+ * environment instead — a boolean switch, not a value that could name an
+ * arbitrary label, so setting it can still only unlock a local address.
  */
-const PRODUCTION_ENDPOINT_LABELS=new Set(['ep-curly-sound-b33yhpem','ep-curly-sound-b33yhpem-pooler']);
-export function assertTargetConnection(target:Target,databaseURL:string,env:Record<string,string|undefined>=process.env):void{
+const PRODUCTION_ENDPOINT_HOSTS=new Set(['ep-curly-sound-b33yhpem.c-4.ap-southeast-1.aws.neon.tech','ep-curly-sound-b33yhpem-pooler.c-4.ap-southeast-1.aws.neon.tech']);
+function isLocalConnectionHost(host:string):boolean{
+ return host==='127.0.0.1'||host==='localhost'||host.startsWith('/');
+}
+export function assertTargetConnection(target:Target,databaseURL:string,options:{allowLocalTestConnection?:boolean}={}):void{
  if(target.name!=='production')return;
- let host:string;
- try{host=new URL(databaseURL).hostname;}catch{throw new TargetError('Malformed database connection string');}
- const label=host.split('.')[0]??'';
- const testLabel=env.ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL;
- const expected=testLabel?new Set([testLabel,testLabel+'-pooler']):PRODUCTION_ENDPOINT_LABELS;
- if(!expected.has(label))throw new TargetError(`Expected the production Neon endpoint (ep-curly-sound-b33yhpem or its pooler); connection string names ${label||'no host'}`);
+ const parsed=parsePostgresConnectionString(databaseURL);
+ const host=(parsed.host??'').toLowerCase();
+ if(!host)throw new TargetError('Expected the production Neon endpoint; connection string names no host');
+ if(host.includes(','))throw new TargetError('Expected the production Neon endpoint; connection string names multiple hosts');
+ if((parsed as Record<string,unknown>).hostaddr)throw new TargetError('Expected the production Neon endpoint; connection string sets hostaddr');
+ const allowLocal=options.allowLocalTestConnection??process.env.ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION==='1';
+ if(allowLocal&&isLocalConnectionHost(host))return;
+ if(!PRODUCTION_ENDPOINT_HOSTS.has(host))throw new TargetError(`Expected the production Neon endpoint (${[...PRODUCTION_ENDPOINT_HOSTS].join(' or ')}); connection string names ${host}`);
 }
 /**
  * The second half of the guard, read from the database itself rather than from

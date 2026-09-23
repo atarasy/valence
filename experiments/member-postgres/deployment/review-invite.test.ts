@@ -22,15 +22,16 @@ test('the review invitation is production-only, single-use and never printed; bo
  const admin=new Pool({connectionString:base}),prodDB='inv_'+randomUUID().replaceAll('-',''),devDB='inv_'+randomUUID().replaceAll('-','');
  const at=(name:string)=>{const u=new URL(base);u.pathname='/'+name;return u.toString();};
  const dir=mkdtempSync(join(tmpdir(),'review-invite-'));
- // A disposable database cannot be given the real production endpoint's own
- // hostname, so the tests below that stand it in for production carry this
- // test-only override (targets.ts); the assertion right after `CREATE
- // DATABASE` is the one call in this file that deliberately omits it, to
- // prove the connection guard itself refuses without it.
- const endpointLabel=new URL(base).hostname.split('.')[0]!;
+ // A disposable database's connection string is a local address (127.0.0.1,
+ // localhost or a socket path in `?host=`), which the connection guard
+ // refuses for production like any other non-matching host unless this
+ // process-level, boolean-only switch is set (targets.ts): it can widen the
+ // guard to a local address, never to a remote host, real endpoint or not.
+ // The assertion right after `CREATE DATABASE` deliberately omits it, to
+ // prove the connection guard itself refuses a local database without it.
+ const prodEnv={NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(prodDB),ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION:'1'},devEnv={NEON_PROJECT_ID:DEV,DATABASE_URL_UNPOOLED:at(devDB)};
  try{
   await admin.query(`CREATE DATABASE ${prodDB}`);await admin.query(`CREATE DATABASE ${devDB}`);
-  const prodEnv={NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(prodDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel},devEnv={NEON_PROJECT_ID:DEV,DATABASE_URL_UNPOOLED:at(devDB)};
 
   // The connection guard: a production-labelled command whose connection string
   // does not name the real production endpoint is refused before it connects,
@@ -45,7 +46,7 @@ test('the review invitation is production-only, single-use and never printed; bo
   expect((await run('./bootstrap.ts',['--target','production'],{...prodEnv,NEON_PROJECT_ID:DEV})).code).not.toBe(0);
   expect((await run('./bootstrap.ts',[],{...devEnv,NEON_PROJECT_ID:PROD})).code).not.toBe(0);
   // The database guard: the right label on the other target's database is refused too, and writes nothing.
-  const crossed=await run('./bootstrap.ts',['--target','production'],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel});
+  const crossed=await run('./bootstrap.ts',['--target','production'],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION:'1'});
   expect(crossed.code).not.toBe(0);expect(crossed.stderr).toContain('another target');
   expect((await run('./bootstrap.ts',[],{NEON_PROJECT_ID:DEV,DATABASE_URL_UNPOOLED:at(prodDB)})).code).not.toBe(0);
   for(const [db,expected] of [[prodDB,['production']],[devDB,['development']]] as const){
@@ -57,7 +58,7 @@ test('the review invitation is production-only, single-use and never printed; bo
   const refusedFile=join(dir,'refused.json');
   const wrongLabel=await run('./review-invite.ts',['issue',refusedFile],{...prodEnv,NEON_PROJECT_ID:DEV});
   expect(wrongLabel.code).not.toBe(0);expect(existsSync(refusedFile)).toBe(false);
-  const wrongDatabase=await run('./review-invite.ts',['issue',refusedFile],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel});
+  const wrongDatabase=await run('./review-invite.ts',['issue',refusedFile],{NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION:'1'});
   expect(wrongDatabase.code).not.toBe(0);expect(wrongDatabase.stderr).toContain('another target');expect(existsSync(refusedFile)).toBe(false);
   expect((await run('./review-invite.ts',['issue','relative.json'],prodEnv)).code).not.toBe(0);
 
@@ -74,7 +75,7 @@ test('the review invitation is production-only, single-use and never printed; bo
   const stranger=nameOf(generateKeyPairSync('ed25519').publicKey.export({type:'spki',format:'pem'}).toString());
   const proposal=(env:Record<string,string|undefined>,who=stranger)=>run('./review-proposal.ts',['propose',who],env);
   expect((await proposal({...prodEnv,NEON_PROJECT_ID:DEV})).code).not.toBe(0);
-  const proposalCrossed=await proposal({NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:endpointLabel});
+  const proposalCrossed=await proposal({NEON_PROJECT_ID:PROD,DATABASE_URL_UNPOOLED:at(devDB),ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION:'1'});
   expect(proposalCrossed.code).not.toBe(0);expect(proposalCrossed.stderr).toContain('another target');
   expect((await proposal(prodEnv,principal)).code).not.toBe(0);
   const unadopted=await proposal(prodEnv);

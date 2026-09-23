@@ -15,22 +15,64 @@ test('each target reads only its own Neon project, in both directions',()=>{
  expect(()=>targetDatabaseURL(TARGETS.production,{NEON_PROJECT_ID:'weathered-violet-85512339'})).toThrow();
 });
 
-test('the connection guard checks the connection string itself, not the label beside it, and only for production',()=>{
- const real='postgres://user:pw@ep-curly-sound-b33yhpem.ap-southeast-1.aws.neon.tech/db?sslmode=verify-full';
- const pooled='postgres://user:pw@ep-curly-sound-b33yhpem-pooler.ap-southeast-1.aws.neon.tech/db';
- const other='postgres://user:pw@ep-other-label-123.ap-southeast-1.aws.neon.tech/db';
+test('the connection guard checks the connection string the way pg itself reads it, not new URL(...).hostname',()=>{
+ const real='postgres://user:pw@ep-curly-sound-b33yhpem.c-4.ap-southeast-1.aws.neon.tech/db?sslmode=verify-full';
+ const pooled='postgres://user:pw@EP-Curly-Sound-B33yhpem-Pooler.c-4.ap-southeast-1.aws.neon.tech/db';
+ const other='postgres://user:pw@ep-other-label-123.c-4.ap-southeast-1.aws.neon.tech/db';
+ const shorterHost='postgres://user:pw@ep-curly-sound-b33yhpem.ap-southeast-1.aws.neon.tech/db';
  // The NEON_PROJECT_ID typed on the command line is not consulted here; only the URL is.
- expect(()=>assertTargetConnection(TARGETS.production,real,{})).not.toThrow();
- expect(()=>assertTargetConnection(TARGETS.production,pooled,{})).not.toThrow();
- expect(()=>assertTargetConnection(TARGETS.production,other,{})).toThrow('production Neon endpoint');
- expect(()=>assertTargetConnection(TARGETS.production,'not a url',{})).toThrow();
+ expect(()=>assertTargetConnection(TARGETS.production,real)).not.toThrow();
+ // Case-insensitive, and the pooled form is accepted too.
+ expect(()=>assertTargetConnection(TARGETS.production,pooled)).not.toThrow();
+ expect(()=>assertTargetConnection(TARGETS.production,other)).toThrow('production Neon endpoint');
+ expect(()=>assertTargetConnection(TARGETS.production,'not a url')).toThrow('production Neon endpoint');
+ // A prefix match is not a match: only the real, whole hostname passes.
+ expect(()=>assertTargetConnection(TARGETS.production,shorterHost)).toThrow('production Neon endpoint');
  // Development is untouched: no endpoint id is recorded for it, so nothing here refuses it.
- expect(()=>assertTargetConnection(TARGETS.development,other,{})).not.toThrow();
- expect(()=>assertTargetConnection(TARGETS.development,'not a url',{})).not.toThrow();
- // The test-only override exists so a disposable database can stand in for
- // production; it is never read for development, and it is exact, not a prefix.
- expect(()=>assertTargetConnection(TARGETS.production,other,{ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:'ep-other-label-123'})).not.toThrow();
- expect(()=>assertTargetConnection(TARGETS.production,real,{ATARASY_TEST_PRODUCTION_ENDPOINT_LABEL:'ep-other-label-123'})).toThrow('production Neon endpoint');
+ expect(()=>assertTargetConnection(TARGETS.development,other)).not.toThrow();
+ expect(()=>assertTargetConnection(TARGETS.development,'not a url')).not.toThrow();
+});
+
+test('the connection guard reads the connection the way pg actually connects, not the URL authority beside it',()=>{
+ // The exact escape a refutation pass measured: `?host=` overrides the host
+ // `pg` connects to while `new URL(...).hostname` still shows the authority.
+ // A version of this guard using `new URL` passed this string and the pool
+ // then connected to the local socket the query names, not the authority.
+ const socketOverride='postgres://postgres@ep-curly-sound-b33yhpem.c-4.ap-southeast-1.aws.neon.tech:5432/t?host=/tmp/some-socket-dir';
+ expect(()=>assertTargetConnection(TARGETS.production,socketOverride)).toThrow('production Neon endpoint');
+ // The same shape with a second Neon host in the authority: an earlier version
+ // of this guard compared only the first DNS label, so anything beginning
+ // `ep-curly-sound-b33yhpem.` passed.
+ const wrongRegion='postgres://user@ep-curly-sound-b33yhpem.evil.example/t';
+ expect(()=>assertTargetConnection(TARGETS.production,wrongRegion)).toThrow('production Neon endpoint');
+ const hostaddr='postgres://user@ep-curly-sound-b33yhpem.c-4.ap-southeast-1.aws.neon.tech/t?hostaddr=10.0.0.1';
+ expect(()=>assertTargetConnection(TARGETS.production,hostaddr)).toThrow('hostaddr');
+ const multiHost='postgres://user@ep-curly-sound-b33yhpem.c-4.ap-southeast-1.aws.neon.tech,evil.example/t';
+ expect(()=>assertTargetConnection(TARGETS.production,multiHost)).toThrow('multiple hosts');
+});
+
+test('allowLocalTestConnection widens the guard to a local address only, never a remote host',()=>{
+ const local='postgres://postgres@localhost:55481/t';
+ const loopback='postgres://postgres@127.0.0.1:55481/t';
+ const socket='postgres://postgres@ignored/t?host=/tmp/some-socket-dir';
+ const remote='postgres://user@ep-other-label-123.c-4.ap-southeast-1.aws.neon.tech/db';
+ for(const url of [local,loopback,socket]){
+  expect(()=>assertTargetConnection(TARGETS.production,url)).toThrow();
+  expect(()=>assertTargetConnection(TARGETS.production,url,{allowLocalTestConnection:true})).not.toThrow();
+ }
+ // The flag cannot launder a remote host, real endpoint or not.
+ expect(()=>assertTargetConnection(TARGETS.production,remote,{allowLocalTestConnection:true})).toThrow('production Neon endpoint');
+ // The env-var form of the same switch exists only for the spawned-CLI test,
+ // which has no function call to pass the option through; it is a boolean,
+ // not a value that could name an arbitrary label.
+ const env=process.env.ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION;
+ try{
+  process.env.ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION='1';
+  expect(()=>assertTargetConnection(TARGETS.production,local)).not.toThrow();
+  expect(()=>assertTargetConnection(TARGETS.production,remote)).toThrow('production Neon endpoint');
+ }finally{
+  if(env===undefined)delete process.env.ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION;else process.env.ATARASY_TEST_ALLOW_LOCAL_PRODUCTION_CONNECTION=env;
+ }
 });
 
 test('the targets differ exactly where they must',()=>{
