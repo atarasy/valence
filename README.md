@@ -58,6 +58,10 @@ Conformance tests live in the Ataraxia repository. **The suites are written**, a
 
 [`engine/`](engine/) implements the digital and physical bindings. It exists so the conformance suites have a subject, and it is not the hub: a member opens Atarasy, and this is the engine underneath an offer. Storage is in memory by default, with persistence available through `VALENCE_DB`. It has no authentication or identity root and should not be deployed.
 
+**Bun 1.2.19**, installed from [bun.sh](https://bun.sh) with that exact version (`curl -fsSL https://bun.sh/install.sh | bash -s -- bun-v1.2.19`), everywhere this repository or its siblings are run: a newer Bun rewrites `bun.lock` on install, which is a change to the repository. `bun install --frozen-lockfile` in each package that has a lockfile refuses to make that change silently.
+
+Working across the Atarasy concept means four repositories, and they are read as siblings: clone `valence`, `atarasy`, `ataraxia` and `vox` side by side in one parent directory. `engine/scripts/conformance.sh` defaults `ATARAXIA_TESTS` to `~/Documents/GitHub/ataraxia/tests`, and `engine/CLAUDE.md`'s `ATARAXIA_TESTS` and `experiments/`'s relative imports across packages assume the same layout.
+
 **The specification is the normative half.** Where the two disagree, `SPEC.md` wins, and a change to the engine that would make the specification false is a change to the specification that has not been written yet.
 
 Writing it found three holes in this document, each corrected in the same pass:
