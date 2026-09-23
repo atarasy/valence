@@ -17,7 +17,9 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
   const { environment, origin, rpID, challengeLifetimeMs, sessionLifetimeMs } = policy;
   const androidOrigins = androidAssertionOrigins(policy.androidAppOrigins ?? []), expectedOrigins = acceptedAssertionOrigins(origin, androidOrigins);
   const url = new URL(origin);
-  if (!environment || url.origin !== origin || url.protocol !== 'https:' || url.hostname !== rpID || authority.scope.environment !== environment || authority.scope.audience !== origin) throw new Error('Explicit matching login scope required');
+  // OPS-01: the one exception to https is a 'local' environment serving http://127.0.0.1.
+  const isLocalLoginOrigin = environment === 'local' && url.protocol === 'http:' && url.hostname === '127.0.0.1';
+  if (!environment || url.origin !== origin || (url.protocol !== 'https:' && !isLocalLoginOrigin) || url.hostname !== rpID || authority.scope.environment !== environment || authority.scope.audience !== origin) throw new Error('Explicit matching login scope required');
   for (const duration of [challengeLifetimeMs, sessionLifetimeMs]) { integer(duration); if (!duration) throw new Error('Positive login lifetime required'); }
   const clock = policy.now ?? Date.now;
   const now = () => { const at = clock(); integer(at); return at; };

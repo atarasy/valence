@@ -544,10 +544,16 @@ export class ValenceEngine {
     if (!Number.isInteger(config.recoveryGraceDays) || config.recoveryGraceDays < 0) {
       throw new Error("recoveryGraceDays must be an integer of at least zero");
     }
+    // OPS-01: the one exception to https is a scope whose own environment is
+    // exactly 'local', serving http://127.0.0.1. Nothing else weakens; every
+    // other check (exact origin match, hostname equal to relyingPartyId) still
+    // applies, and a hostname of anything but the loopback literal still fails.
+    const isLocalScopeOrigin = (scope: { environment: string }, origin: URL) =>
+      scope.environment === 'local' && origin.protocol === 'http:' && origin.hostname === '127.0.0.1';
     const memberScope = config.memberStatementScope;
     if (memberScope !== undefined) {
       const origin = new URL(memberScope.origin);
-      if (Object.keys(memberScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || origin.protocol !== 'https:' || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(memberScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof memberScope.environment !== 'string' || !memberScope.environment || (origin.protocol !== 'https:' && !isLocalScopeOrigin(memberScope, origin)) || origin.origin !== memberScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member statement deployment scope');
       }
       try { validateAndroidAppOrigins(memberScope.androidAppOrigins); } catch { throw new Error('Invalid member statement deployment scope'); }
@@ -555,7 +561,7 @@ export class ValenceEngine {
     const decisionScope = config.memberDecisionScope;
     if (decisionScope !== undefined) {
       const origin = new URL(decisionScope.origin);
-      if (Object.keys(decisionScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof decisionScope.environment !== 'string' || !decisionScope.environment || origin.protocol !== 'https:' || origin.origin !== decisionScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(decisionScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof decisionScope.environment !== 'string' || !decisionScope.environment || (origin.protocol !== 'https:' && !isLocalScopeOrigin(decisionScope, origin)) || origin.origin !== decisionScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member decision deployment scope');
       }
       try { validateAndroidAppOrigins(decisionScope.androidAppOrigins); } catch { throw new Error('Invalid member decision deployment scope'); }
@@ -563,7 +569,7 @@ export class ValenceEngine {
     const withdrawalScope = config.memberWithdrawalScope;
     if (withdrawalScope !== undefined) {
       const origin = new URL(withdrawalScope.origin);
-      if (Object.keys(withdrawalScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof withdrawalScope.environment !== 'string' || !withdrawalScope.environment || origin.protocol !== 'https:' || origin.origin !== withdrawalScope.origin || origin.hostname !== config.relyingPartyId) {
+      if (Object.keys(withdrawalScope).sort().join(',') !== 'androidAppOrigins,environment,origin' || typeof withdrawalScope.environment !== 'string' || !withdrawalScope.environment || (origin.protocol !== 'https:' && !isLocalScopeOrigin(withdrawalScope, origin)) || origin.origin !== withdrawalScope.origin || origin.hostname !== config.relyingPartyId) {
         throw new Error('Invalid member withdrawal deployment scope');
       }
       try { validateAndroidAppOrigins(withdrawalScope.androidAppOrigins); } catch { throw new Error('Invalid member withdrawal deployment scope'); }
