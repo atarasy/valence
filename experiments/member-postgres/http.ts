@@ -11,6 +11,7 @@ import { openMandateCeremony } from './mandate-ceremony.ts';
 import { openMandateChanges } from './mandate-changes.ts';
 import type { Assertion } from '../../engine/src/shared/decisions.ts';
 import { memberTransport } from '../member-login/transport.ts';
+import { presentAfterSigning, retryReviewPresentation } from './review-shop.ts';
 import { memberReadBoundary } from '../member-read/gate.ts';
 import { createApp } from '../../engine/src/http.ts';
 import { Registry } from '../../engine/src/shared/registry.ts';
@@ -275,6 +276,13 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
        const ceremony=openMandateCeremony(r,{rpID:c.rpID});
        const named=(inputBody as {mandate?:unknown}).mandate;if(named!==undefined&&typeof named!=='string')throw new Error('Invalid mandate');
        const value=action==='mandate-list'?ceremony.list(token):action==='mandate-prepare'?ceremony.prepare(token,named):ceremony.submit(token,(inputBody as {assertion:Assertion}).assertion,named);
+       // App Review: a review household's first signed mandate presents its
+       // proposal. This used to run in the same unit as the signature above,
+       // so a repeating failure here rolled the signature back too, and the
+       // reviewer could never sign v1. The signature now commits on its own;
+       // presenting is attempted once this transaction has returned (below),
+       // and a failure there is only logged, never surfaced to the member,
+       // because `review-proposal.ts propose <household>` presents it later.
        return {status:200,body:JSON.stringify(value)};
       }
       if(withdrawal || (match && (await r.journal.read(token,match[1]!)).kind==='digital_withdrawal')){
@@ -305,6 +313,42 @@ export async function openPostgresMemberHTTP(pool:Pool,deployment:Identity,input
      const reply=await memberTransport({...r,read,admit:async()=>true,maxBodyBytes:c.maximumBodyBytes})(fixed,context);
      return {status:reply.status,body:await reply.text()};
     });
+    // The signature above already committed. Presenting the review proposal
+    // is attempted in its own transaction, after that commit, so a failure
+    // here can never roll a member's signed mandate back; see the comment at
+    // the `mandate-submit` branch above.
+    if(mandate&&mandate[1]==='submit'&&result.status===200){
+     const presentToken=request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];
+     if(presentToken){
+      const signed=JSON.parse(result.body) as import('../../engine/src/hub/mandates.ts').Mandate;
+      try{
+       await unit.run(store=>{binding(store);return presentAfterSigning(memberRuntime(store,c,now),presentToken,signed,now());});
+      }catch{
+       // Identifiers only: no error text, which can hold driver or peer detail.
+       console.error(JSON.stringify({event:'review_proposal_present_failed',mandate:signed.id,household:signed.household}));
+      }
+     }
+    }
+    // A reviewer stranded by the attempt above (or by a transient failure at
+    // any earlier attempt) gets another one wherever their own live session
+    // next reads something: signing in again, or reading their own offers
+    // list. `retryReviewPresentation` is a no-op for anyone but a review
+    // principal with a signed, unpresented v1 mandate, so this costs an
+    // ordinary member one extra locked unit that reads and writes nothing.
+    const loginVerify=url.pathname==='/auth/login/verify'&&request.method==='POST'&&result.status===200;
+    const offersRead=url.pathname==='/offers'&&request.method==='GET'&&result.status===200;
+    if(loginVerify||offersRead){
+     const retryToken=loginVerify?(JSON.parse(result.body) as {token?:string}).token:request.headers.get('authorization')?.match(/^Bearer (amr1_[A-Za-z0-9_-]{43})$/)?.[1];
+     if(retryToken){
+      try{
+       await unit.run(store=>{binding(store);return retryReviewPresentation(memberRuntime(store,c,now),retryToken,now());});
+      }catch{
+       // No household or mandate id is known statically here, unlike the
+       // submit-time attempt above; the token names the session, not either.
+       console.error(JSON.stringify({event:'review_proposal_present_retry_failed'}));
+      }
+     }
+    }
     if(Buffer.byteLength(result.body)>(hostMove?8_000_000:1_048_576))return json(503,'response_unavailable');
     return new Response(result.status===204?null:result.body,{status:result.status,headers:{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'}});
    }catch(error){if(androidRefresh&&error instanceof MemberAndroidRefreshError)return json(error.status,error.code);if(refresh&&error instanceof MemberRefreshError)return json(error.status,error.code);if(hostMove&&error instanceof MemberHostMoveError)return json(error.status,error.code);if((recovery||hostMove)&&error instanceof MemberRecoveryError)return json(error.status,error.code);if(privateNode&&error instanceof PrivateNodeError)return json(error.status,error.code);if(leave&&error instanceof MemberLeaveError)return jsonLeave(error.status,error.code,error.blockers);if((mandateChanges||leave)&&error instanceof ValenceError)return json(error.status,error.code);return json((error as Error).message==='PostgreSQL writer fenced'||/^[A-Z0-9]{5}$/.test((error as {code?:string}).code??'')?503:member?404:503,'request_unavailable');}finally{pending--;}

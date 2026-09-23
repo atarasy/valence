@@ -19,3 +19,34 @@ test('real isolated bundle manifest verifies and changes to code, deployment fil
  writeFileSync(join(output,'api/extra.js'),'extra');expect(()=>verifyRuntimeArtifact(output,identity,config as MemberRuntimeConfig,manifest.fingerprint)).toThrow();rmSync(join(output,'api/extra.js'));
  const original=await Bun.file(join(output,'api/index.js')).text();writeFileSync(join(dir,'outside.js'),original);rmSync(join(output,'api/index.js'));symlinkSync(join(dir,'outside.js'),join(output,'api/index.js'));expect(()=>verifyRuntimeArtifact(output,identity,config as MemberRuntimeConfig,manifest.fingerprint)).toThrow();
 });
+test('each target bundles only its own origin and app identifier, and its manifest names its own deployment',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'runtime-artifact-targets-'));dirs.push(dir);
+ const build=async(args:string[])=>{const child=Bun.spawn([process.execPath,new URL('./deployment/build.ts',import.meta.url).pathname,...args],{stdout:'pipe',stderr:'pipe'});const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);return {stdout,stderr,code};};
+ const dev=join(dir,'development'),prod=join(dir,'production');
+ expect(await build([dev])).toMatchObject({code:0,stderr:''});
+ const built=await build(['--target','production',prod]);expect(built).toMatchObject({code:0,stderr:''});expect(built.stdout).toContain('(production, https://members.vox.delivery)');
+ const devJS=await Bun.file(join(dev,'api/index.js')).text(),prodJS=await Bun.file(join(prod,'api/index.js')).text();
+ expect(devJS).toContain('83W4J65UE6.dev.atarasy.prototype');expect(devJS).toContain('https://api-dev.vox.delivery');
+ expect(devJS).not.toContain('83W4J65UE6.com.vox.atarasy');expect(devJS).not.toContain('members.vox.delivery');
+ expect(prodJS).toContain('83W4J65UE6.com.vox.atarasy');expect(prodJS).toContain('https://members.vox.delivery');expect(prodJS).toContain('atarasy_api_prod');
+ expect(prodJS).not.toContain('dev.atarasy.prototype');expect(prodJS).not.toContain('api-dev.vox.delivery');expect(prodJS).not.toContain(DEPLOYMENT_ID);
+ expect(await Bun.file(join(prod,'package.json')).json()).toMatchObject({name:'atarasy-api'});
+ const manifest=await Bun.file(join(prod,'runtime-manifest.json')).json();
+ expect(manifest.identity).toEqual({id:'atarasy_api_prod',environment:'production',origin:'https://members.vox.delivery',epoch:1});
+ const production=(await import('./deployment/production/config.json')).default as MemberRuntimeConfig;
+ expect(verifyRuntimeArtifact(prod,manifest.identity,production,manifest.fingerprint).fingerprint).toBe(manifest.fingerprint);
+ // The production bundle serves the two App Store pages itself, before any database is opened.
+ const served=(await import(join(prod,'api/index.js'))).default as {fetch(r:Request):Promise<Response>};
+ for(const [path,text] of [['/privacy','Atarasy privacy policy'],['/support','Membership is by invitation only']] as const){
+  const r=await served.fetch(new Request('https://members.vox.delivery'+path,{headers:{'x-vercel-forwarded-for':'203.0.113.9'}}));
+  expect(r.status).toBe(200);expect(r.headers.get('content-type')).toBe('text/html; charset=utf-8');expect(await r.text()).toContain(text);
+ }
+ expect((await served.fetch(new Request('https://members.vox.delivery/privacy',{method:'POST',headers:{'x-vercel-forwarded-for':'203.0.113.9'}}))).status).toBe(405);
+ expect(devJS).not.toContain('Atarasy privacy policy');
+ // A development bundle does not verify as production.
+ const devManifest=await Bun.file(join(dev,'runtime-manifest.json')).json();
+ expect(()=>verifyRuntimeArtifact(dev,manifest.identity,production,devManifest.fingerprint)).toThrow();
+ // An existing output directory and an unknown target are refused.
+ expect((await build(['--target','production',prod])).code).not.toBe(0);
+ expect((await build(['--target','staging',join(dir,'staging')])).code).not.toBe(0);
+},60000);

@@ -11,6 +11,7 @@ import { openEnrollment } from './enrollment.ts';
 import { openMandateBindings } from './mandate-binding.ts';
 import { openOperationJournal,type JournalOperation } from './operation-journal.ts';
 import type { MemberRuntimeConfig } from './config.ts';
+import { adoptOnSignIn } from './member-adoption.ts';
 export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const path=memberRecords(store,{environment:c.environment,audience:c.origin});
  const memberScope={environment:c.environment,origin:c.origin,androidAppOrigins:c.androidAppOrigins};
@@ -20,12 +21,18 @@ export function memberRuntime(store:Store,c:MemberRuntimeConfig,now=Date.now) {
  const approvalCarriage=(id:string)=>engine.mustGet(id,now()).binding==='digital'?quotes.find(id):deliveries.find(id);
  engine.readApprovalCarriageFrom({async find(id){return approvalCarriage(id);}});
  const authority=openMemberAuthority(path,{environment:c.environment,audience:c.origin,maxSessionLifetimeMs:c.maxSessionLifetimeMs,now});
- const p={environment:c.environment,origin:c.origin,rpID:c.rpID,androidAppOrigins:c.androidAppOrigins,challengeLifetimeMs:c.maximumLifetimeMs,sessionLifetimeMs:c.maxSessionLifetimeMs,now};
- const login=openVerifiedLogin(path,authority,p),enrollment=openEnrollment(path,authority,login,{...p,rpName:'Atarasy',invitationLifetimeMs:c.maximumLifetimeMs});
+ // The sign-in hook needs the whole runtime, which does not exist until the login inside it does.
+ let signedIn:(credential:string)=>void=()=>{throw new Error('Runtime incomplete');};
+ const p={environment:c.environment,origin:c.origin,rpID:c.rpID,androidAppOrigins:c.androidAppOrigins,challengeLifetimeMs:c.maximumLifetimeMs,sessionLifetimeMs:c.maxSessionLifetimeMs,now,onSignIn:(credential:string)=>signedIn(credential)};
+ const login=openVerifiedLogin(path,authority,p),enrollment=openEnrollment(path,authority,login,{...p,rpName:'Atarasy',invitationLifetimeMs:c.invitationLifetimeMs});
  const bindings=openMandateBindings(path,authority,login,engine),journal=openOperationJournal(path,authority,bindings,{maximumLifetimeMs:c.maximumLifetimeMs,now});
  const reviews=records<any>(path,'member_reviews');
+ // App Review: the principals review-invite.ts issued, and the review shop and proposals (review-shop.ts).
+ const reviewPrincipals=records<any>(path,'member_review_invitations'),reviewProposals=records<any>(path,'member_review_proposals');
  // Journal owns the operation map. Expose only its own scoped read method to avoid a duplicate map.
  const operations={find:journal.findBlocking,findCurrent:journal.findCurrent};
- return {path,engine,deliveries,quotes,approvalCarriage,now,authority,login,enrollment,bindings,journal,reviews,operations};
+ const runtime={path,engine,deliveries,quotes,approvalCarriage,now,authority,login,enrollment,bindings,journal,reviews,operations,reviewPrincipals,reviewProposals};
+ signedIn=(credential:string)=>adoptOnSignIn(runtime,credential);
+ return runtime;
 }
 export type ReturnTypeMemberRuntime = ReturnType<typeof memberRuntime>;

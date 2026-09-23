@@ -2,7 +2,7 @@ import {verifyRuntimeArtifact} from './runtime-artifact.ts';
 import { readFileSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import type { Pool } from 'pg';
 import { createPool, type Identity } from './store.ts';
-import { memberRuntimeIdentity, type MemberRuntimeConfig } from './config.ts';
+import { memberRuntimeIdentity, MEMBER_RUNTIME_PROFILE, type MemberRuntimeConfig } from './config.ts';
 import { captureDeployment, freezeDeployment, restoreDeploymentCandidate, activateDeploymentCandidate, abortDeploymentMigration, type DeploymentSnapshot } from './operational-snapshot.ts';
 export type MigrationPlan = { identity: Identity; ticket: string; runtimeFingerprint: string; config: MemberRuntimeConfig };
 const commands = ['inspect-source','inspect-target','freeze','restore','activate','abort'] as const;
@@ -22,7 +22,7 @@ function validate(plan: MigrationPlan) {
 function checkRuntime(snapshot: DeploymentSnapshot, fingerprint: string) {
  const rows=snapshot.rows.filter(r=>r.namespace==='member_config');if(rows.length!==1||rows[0]!.key!=='current')refuse();
  const held=JSON.parse(rows[0]!.value);
- if(held.profile!=='atarasy.member-runtime.2'||held.fingerprint!==fingerprint||memberRuntimeIdentity(held.config).fingerprint!==fingerprint)refuse();
+ if(held.profile!==MEMBER_RUNTIME_PROFILE||held.fingerprint!==fingerprint||memberRuntimeIdentity(held.config).fingerprint!==fingerprint)refuse();
 }
 function summary(snapshot: DeploymentSnapshot) {
  const row=snapshot.rows.find(r=>r.namespace==='member_writer_migration'&&r.key==='current');

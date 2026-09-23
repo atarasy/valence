@@ -48,9 +48,12 @@ export function deviceAcceptanceStatus(store:Store,c:MemberRuntimeConfig){
  const statement=statementEntry(entries),vox=entries.get('vox') as unknown as {presenter:string}|undefined;
  const grants=vox?[vox.presenter]:statement?[statement.presenter]:[];
  const principal=store.map<{household:string|null;presenters:string;disabled:number}>('member_principals').get(value.principal);
- if(!principal||principal.household!==value.household||principal.presenters!==JSON.stringify(grants)||principal.disabled!==0)throw new AcceptanceError('Acceptance principal changed or unavailable');
+ // Since 2026-09-23 the device's first sign-in adopts the household (member-adoption.ts), so before
+ // `statement` records it here the principal may already hold one this entry does not name yet.
+ const adoptedAtSignIn=value.household===null&&principal?.household!=null;
+ if(!principal||(principal.household!==value.household&&!adoptedAtSignIn)||principal.presenters!==JSON.stringify(grants)||principal.disabled!==0)throw new AcceptanceError('Acceptance principal changed or unavailable');
  const credentials=store.map<{principal:string;revoked:number}>('member_credentials');
- const base={prepared:true as const,...value,presenterGrants:grants.length,activeCredentials:[...credentials.values()].filter(v=>v.principal===value.principal&&v.revoked===0).length,archived};
+ const base={prepared:true as const,...value,household:principal.household,presenterGrants:grants.length,activeCredentials:[...credentials.values()].filter(v=>v.principal===value.principal&&v.revoked===0).length,archived};
  if(!statement)return base;
  // Read the engine's settlement namespace directly: a full runtime would reopen the maps above.
  const settled=store.map('settlements').has(statement.offer);
@@ -96,7 +99,6 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  const entries=checked(store,c),value=entries.get('current');if(!value)throw new AcceptanceError('Acceptance not prepared');
  if(statementEntry(entries))throw new AcceptanceError('Statement acceptance already prepared; inspect status');
  const at=now(),r=memberRuntime(store,c,()=>at);
- if(!r.authority.matchesActivePrincipalScope(value.principal,value.household,[]))throw new AcceptanceError('Acceptance principal changed or unavailable');
  // One passkey only, so the mandate key cannot silently pick among devices,
  // and it must have signed once: a registration proves no key (§10.5). A step
  // that counted active credentials instead refused for ever as soon as one
@@ -105,12 +107,20 @@ export async function prepareStatementAcceptance(store:Store,c:MemberRuntimeConf
  if(proven.length!==1||unproven.length!==0)throw new AcceptanceError(`Exactly one acceptance credential is required and it must have signed in; ${proven.length} have signed in and ${unproven.length} have not. Sign in on the device, or run \`retire\` and enrol it again.`);
  const credentials=proven;
  const credential=credentials[0]!,cose=r.login.verifiedPublicKey(credential);if(!cose)throw new AcceptanceError('Acceptance credential unavailable');
+ const named=nameOf(createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
  // The key is registered under the household's own name, not the mandate's:
  // a mandate has no key, and its identifier is the household's with a label.
- // The authority reads the credential's key itself; nothing is named here.
- const household=value.household===null?r.authority.adoptHousehold(value.principal,credential):value.household;
+ // Since 2026-09-23 the device's first sign-in has normally adopted it
+ // already (member-adoption.ts); a principal that signed in before that change
+ // is adopted here, and the authority reads the credential's key itself.
+ let household:string;
+ if(value.household!==null){
+  if(!r.authority.matchesActivePrincipalScope(value.principal,value.household,[])||value.household!==named)throw new AcceptanceError('Acceptance household is not this credential');
+  household=value.household;
+ }else if(r.authority.matchesActivePrincipalScope(value.principal,named,[]))household=named;
+ else if(r.authority.matchesActivePrincipalScope(value.principal,null,[]))household=r.authority.adoptHousehold(value.principal,credential);
+ else throw new AcceptanceError('Acceptance principal changed or unavailable');
  if(value.household===null)entries.set('current',{...value,household});
- else if(household!==nameOf(createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString()))throw new AcceptanceError('Acceptance household is not this credential');
  const mandate=household+'.1';
  r.engine.registerIdentity(household,createPublicKey({key:credentialSPKI(cose),format:'der',type:'spki'}).export({type:'spki',format:'pem'}).toString());
  // §16.1 and §14.2, question 56, decided 2026-09-18. **Nobody signs a mandate
@@ -193,14 +203,28 @@ export function retireUnprovenCredentials(store:Store,c:MemberRuntimeConfig){
  if(statementEntry(entries))throw new AcceptanceError('Statement acceptance already prepared; inspect status');
  const r=memberRuntime(store,c);
  const {proven,unproven}=r.authority.credentialProof(value.principal);
- // Removed, not revoked: a revoked row keeps its id and its user handle, so the
- // same device could never enrol again, and the message this step prints tells
- // the operator to do exactly that.
- for(const id of [...proven,...unproven]){r.authority.removeCredential(id);r.login.removeEnrolledPasskey(id);}
  // What is in flight counts too: an invitation not yet spent, and a ceremony
  // opened and not finished, both become credentials after this returns.
  const cancelled=r.enrollment.cancelEnrolment(value.principal);
- return {retired:proven.length+unproven.length,signedIn:proven.length,unproven:unproven.length,cancelled};
+ // Since 2026-09-23 a sign-in adopts the household, and adoption has no route
+ // back, so a principal that adopted one can never take another credential and
+ // its credentials cannot be removed as unadopted ones are. Undoing the
+ // enrolment step then means a fresh principal: the old one's credentials are
+ // revoked and it is disabled, which also stops it holding the household name.
+ let replacedPrincipal=false;
+ if(!r.authority.matchesActivePrincipalScope(value.principal,null,[])){
+  for(const id of [...proven,...unproven])r.authority.revokeCredential(id);
+  r.authority.disablePrincipal(value.principal);
+  const next:Acceptance={principal:'dev_member_'+randomUUID().replaceAll('-',''),household:null,createdAt:Date.now()};
+  r.authority.provisionUnclaimedPrincipal(next.principal,[]);
+  entries.set('current',next);replacedPrincipal=true;
+ }else{
+  // Removed, not revoked: a revoked row keeps its id and its user handle, so the
+  // same device could never enrol again, and the message this step prints tells
+  // the operator to do exactly that.
+  for(const id of [...proven,...unproven]){r.authority.removeCredential(id);r.login.removeEnrolledPasskey(id);}
+ }
+ return {retired:proven.length+unproven.length,signedIn:proven.length,unproven:unproven.length,cancelled,replacedPrincipal};
 }
 export function grantVoxPresenter(store:Store,c:MemberRuntimeConfig,presenter:string,now=Date.now){
  const entries=checked(store,c),value=entries.get('current'),statement=statementEntry(entries);

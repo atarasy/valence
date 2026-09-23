@@ -41,13 +41,34 @@ export function openEnrollment(path: Records, authority: ReturnType<typeof openM
     dropHandle(principal: string) {
       handles.delete(principal);
     },
-    /** Trusted administration only. The bearer invitation selects the principal. */
+    /**
+     * Trusted administration only. The bearer invitation selects the
+     * principal.
+     *
+     * A second call for the same principal drops the earlier invitation and
+     * any open enrolment flow first, the same rows `cancelEnrolment` drops.
+     * A refutation pass on 2026-09-23 measured what leaving the earlier one
+     * live bought: two invitations enrolled two different keys under one
+     * principal, and whichever signed in second read a live session on the
+     * first's household.
+     *
+     * This closes only the narrower case, where the earlier invitation or
+     * its flow is still outstanding when the second is issued. It does
+     * nothing once the earlier one has already finished enrolling a
+     * credential: a second refutation pass measured that a re-issue after
+     * that point still leaves two credentials on one principal (the row
+     * this method cannot see or drop). **The sign-in gate in
+     * `member-adoption.ts` is what actually stops the mix**, for every
+     * credential regardless of how it got there; this is a narrower,
+     * earlier line of defence, not the one the invariant depends on.
+     */
     issueInvitation(principal: string) {
       if (!authority.isActivePrincipal(principal)) throw new Error('Principal unavailable');
       const at = now(), expiresAt = at + invitationLifetimeMs; integer(expiresAt);
       const token = 'aen1_' + randomBytes(32).toString('base64url');
       db.transaction(() => {
-        invitations.deleteWhere(v=>v.expires<=at);
+        invitations.deleteWhere(v=>v.expires<=at||v.principal===principal);
+        flows.deleteWhere(v=>v.principal===principal);
         invitations.insert(digest(token),{principal,expires:expiresAt});
       }).immediate();
       return { token, expiresAt };

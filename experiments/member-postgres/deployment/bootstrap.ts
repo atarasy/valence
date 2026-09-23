@@ -1,15 +1,18 @@
 import { migrateDatabase } from '../migrate.ts';
-import {DEPLOYMENT_ID} from './identity.ts';
+import {parseTarget,targetDatabaseURL,assertTargetConnection,assertTargetDatabase} from './targets.ts';
 import { createPool,initialiseDeployment } from '../store.ts';
 import { openPostgresMemberHTTP } from '../http.ts';
-import type { MemberRuntimeConfig } from '../config.ts';
-import config from './config.json';
-// Explicit operator command for this newly provisioned, development-only project.
-if(process.env.NEON_PROJECT_ID!=='young-pond-73223516'||!process.env.DATABASE_URL_UNPOOLED)throw new Error('Expected dedicated Atarasy development database');
-await migrateDatabase(process.env.DATABASE_URL_UNPOOLED);
-const pool=createPool(process.env.DATABASE_URL_UNPOOLED),c=config as MemberRuntimeConfig;
+// Explicit operator command: `bun deployment/bootstrap.ts [--target development|production]`.
+const {target,rest}=parseTarget(process.argv.slice(2));
+if(rest.length)throw new Error('Usage: bootstrap.ts [--target development|production]');
+const url=targetDatabaseURL(target,process.env);
+assertTargetConnection(target,url);
+const check=createPool(url);
+try{await assertTargetDatabase(check,target);}finally{await check.end();}
+await migrateDatabase(url);
+const pool=createPool(url),c=target.config;
 try{
- const identity={id:DEPLOYMENT_ID,environment:c.environment,origin:c.origin,epoch:1};
+ const identity={id:target.deploymentID,environment:c.environment,origin:c.origin,epoch:1};
  await initialiseDeployment(pool,identity);await openPostgresMemberHTTP(pool,identity,c);
- console.log('Atarasy development schema and runtime identity initialised; no member fixtures provisioned');
+ console.log(`Atarasy ${target.name} schema and runtime identity initialised; no member fixtures provisioned`);
 }finally{await pool.end();}

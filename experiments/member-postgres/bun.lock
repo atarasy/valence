@@ -8,6 +8,7 @@
         "@vercel/functions": "3.9.7",
         "drizzle-orm": "0.45.2",
         "pg": "8.23.0",
+        "pg-connection-string": "2.14.0",
       },
       "devDependencies": {
         "@types/pg": "8.23.1",
