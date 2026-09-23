@@ -17,3 +17,10 @@
  * rather than removed, so nothing serves it and nothing is lost.
  */
 export const DEPLOYMENT_ID = 'atarasy_api_dev_2';
+
+/**
+ * The production deployment at `https://members.vox.delivery`. It lives in its
+ * own Neon project, so it shares no rows with either development id; the id is
+ * still distinct so a row copied across by hand can never pass as the other's.
+ */
+export const PRODUCTION_DEPLOYMENT_ID = 'atarasy_api_prod';
