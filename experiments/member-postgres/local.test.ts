@@ -1,11 +1,16 @@
 import {test,expect,afterAll} from 'bun:test';
 import {createServer} from 'node:net';
-import {randomUUID,generateKeyPairSync} from 'node:crypto';
+import {randomUUID,generateKeyPairSync,sign} from 'node:crypto';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {createPool,postgresStore} from './store.ts';
 import {memberRuntime} from './runtime.ts';
 import {registerPresenter} from './presenter-http.ts';
 import {assertLocalDatabaseUrl,LOCAL_DEPLOYMENT_ID} from './local-shared.ts';
 import {startLocalServer} from './local.ts';
+import {canonicalConfig} from '../../engine/src/engine/offers.ts';
+import {canonicalDisclosure} from '../../engine/src/shared/disclosure.ts';
 
 function freePort():Promise<number> {
  return new Promise((resolve,reject)=>{
@@ -101,3 +106,67 @@ test('the http exception is only a `local` environment on http://127.0.0.1',asyn
   expect(identity('local','http://10.0.0.1:8788')).toThrow();
  }finally{await pool.end();}
 });
+
+function invokeCLI(cliPath:string,args:string[],env:Record<string,string>) {
+ return (async()=>{
+  const child=Bun.spawn([process.execPath,cliPath,...args],{env:{PATH:process.env.PATH!,...env},stdout:'pipe',stderr:'pipe'});
+  const [out,err,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
+  return {out,err,code};
+ })();
+}
+
+test('local-household.ts refuses a non-local database',async()=>{
+ const cli=new URL('./local-household.ts',import.meta.url).pathname;
+ const refused=await invokeCLI(cli,['create','ops01-presenter','/tmp/local-household-unused.json'],{LOCAL_DATABASE_URL:'postgres://db.example.com:5432/prod'});
+ expect(refused.code).not.toBe(0);
+ expect(refused.err).toContain('127.0.0.1');
+});
+
+// The composition OPS-01 needs, because no passkey can enrol against
+// `127.0.0.1` (README, "No passkey ceremony works here"): `local-household.ts`
+// writes the same rows a real enrolment and adoption would, and a presenter
+// credential issued for the presenter it was granted can offer to the
+// household it made and present that offer, exactly as a real deployment's
+// presenter surface requires (presenter-http.test.ts's own fixture).
+test('a household local-household.ts creates can be offered to by its granted presenter and presented',async()=>{
+ const url=process.env.ATARASY_TEST_POSTGRES_URL;
+ if(!url)throw new Error('Explicit ATARASY_TEST_POSTGRES_URL required; tests do not use application credentials');
+ await cleanupLocalDeployment(url);
+ setEnv('LOCAL_DATABASE_URL',url);
+ const port=await freePort();setEnv('PORT',String(port));
+ let handle:Awaited<ReturnType<typeof startLocalServer>>|undefined,dir:string|undefined;
+ try{
+  handle=await startLocalServer();
+  const presenterPair=generateKeyPairSync('ed25519'),merchantPair=generateKeyPairSync('ed25519');
+  const pem=(pair:{publicKey:{export:(o:any)=>any}})=>pair.publicKey.export({type:'spki',format:'pem'}).toString();
+  const unit=postgresStore(handle.pool,handle.identity);
+  const issued=await unit.run(store=>registerPresenter(memberRuntime(store,handle!.config),{presenter:'ops01-presenter',presenterName:'OPS-01 walkthrough',presenterKey:pem(presenterPair),merchant:'ops01-merchant',merchantKey:pem(merchantPair),at:Date.now()}));
+
+  dir=mkdtempSync(join(tmpdir(),'local-household-'));
+  const output=join(dir,'household.json');
+  const cli=new URL('./local-household.ts',import.meta.url).pathname;
+  const created=await invokeCLI(cli,['create','ops01-presenter',output],{LOCAL_DATABASE_URL:url,PORT:String(port)});
+  expect(created.code).toBe(0);expect(created.err).toBe('');
+  const printed=JSON.parse(created.out);
+  expect(printed).toEqual({household:expect.stringMatching(/^key:/),mandate:expect.stringMatching(/^key:.*\.1$/)});
+  const written=JSON.parse(readFileSync(output,'utf8'));
+  expect(written).toMatchObject({household:printed.household,mandate:printed.mandate});
+  expect(written.privateKeyPem).toContain('BEGIN PRIVATE KEY');
+
+  const send=(path:string,body?:unknown,method?:string)=>fetch(handle!.config.origin+path,{method:method??(body===undefined?'GET':'POST'),headers:{'content-type':'application/json',authorization:'Bearer '+issued.token},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const configBody={version:'ops01-1',presenter:'ops01-presenter',products:{'ops01-tea':{merchant:'ops01-merchant',maker:'ops01-maker',ships:'ops01-carrier',price:1200,physical:{ambient:true,keeps_for_days:365,fits_ten_per_container:true,regulated:false}}}};
+  expect((await send('/presenter/configs',{...configBody,signature:sign(null,canonicalConfig(configBody),presenterPair.privateKey).toString('base64')})).status).toBe(201);
+  const disclosureBody={merchant:'ops01-merchant',product:null,version:'d-1',items:[{label:'notice',value:'test'}]};
+  expect((await send('/presenter/disclosures',{...disclosureBody,signature:sign(null,canonicalDisclosure(disclosureBody),merchantPair.privateKey).toString('base64')})).status).toBe(201);
+  const offerBody={binding:'physical',household:written.household,purpose:'replenish',config_version:'ops01-1',expires_at:Date.now()+86_400_000,mandate:written.mandate,price_band:null,giver:null,candidates:[{product:'ops01-tea',quantity:1,predicted_conversion:0.5,is_exploration:true,given_by:null}]};
+  const offerCreated=await send('/presenter/offers',offerBody);
+  expect(offerCreated.status).toBe(201);
+  const offer=await offerCreated.json() as {id:string};
+  expect((await send('/presenter/offers/'+offer.id+'/present',{})).status).toBe(200);
+ }finally{
+  if(dir)rmSync(dir,{recursive:true,force:true});
+  handle?.server.stop(true);
+  await handle?.pool.end();
+  await cleanupLocalDeployment(url!);
+ }
+},30000);

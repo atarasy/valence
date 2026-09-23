@@ -45,6 +45,21 @@ curl -i http://127.0.0.1:8788/presenter/self \
 # 200 {"presenter":"ops01-presenter","displayName":"OPS-01 presenter"}
 ```
 
+A presenter with no household still has nobody to offer to, and no passkey can enrol one here (see "No passkey ceremony works here" below), so `local-household.ts` makes the one household the presenter side needs before Vox is pointed at this deployment:
+
+```
+LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local PORT=8788 \
+  bun local-household.ts create ops01-presenter /tmp/household.json
+```
+
+It writes the same rows a real enrolment and adoption would (`provisionUnclaimedPrincipal`, `registerCredential`, `login.provisionVerifiedPasskey`, `authority.markCredentialProven`, `authority.adoptHousehold`, the sequence `http.test.ts`'s own fixtures use), against a P-256 key pair generated here instead of a device's, and records a standing mandate signed by that same pair through `engine.mandates.record`; `bindings.importMandate` only writes a claim, and an offer against a claim answers `mandate_unavailable`. The presenter named on the command line is granted at provisioning, so its offers to this household are allowed. Like `local-presenter-credential.ts`, it must run against the same `LOCAL_DATABASE_URL` and `PORT` as `local.ts`, and its output file is exclusive-create, 0600 and never printed beyond what stdout shows:
+
+```
+{"household":"key:...","mandate":"key:....1"}
+```
+
+The file itself also holds `privateKeyPem`, the household's own key, needed to sign a mandate change or a settlement statement later. `presenter-http.test.ts` has the request shapes for the catalogue, disclosure and offer a presenter credential then publishes, deliberates on, presents and reads back against this household and mandate.
+
 **Reset.** Stop the server, then drop *both* schemas the migrator owns, not only `atarasy_member`:
 
 ```
@@ -55,9 +70,9 @@ Dropping only `atarasy_member` leaves `bun local.ts`'s next run believing every 
 
 **What this does not cover.** The https-only checks inside `login.ts`'s portable-assertion verification (host move), `member-host-move.ts`, `operational-snapshot.ts` and `statement-authorisation.ts` (physical-box settlement statements) are unchanged, so host move, the operator migration tooling and physical-box statement acceptance still require a real https origin and are not reachable from a local deployment. The checks in `engine/src/shared/member-decision.ts`, `member-withdrawal.ts` and `member-statement.ts`, and this package's own `authority.ts`, `login.ts`, `config.ts` and `store.ts`, accept the local origin so that the runtime starts and the presenter routes answer.
 
-**No passkey ceremony works here.** WebAuthn does not allow an IP address as a relying party ID, and this deployment's relying party is `127.0.0.1`, so member sign-in, enrolment, digital decisions and withdrawals cannot complete against it. What the local deployment is for is the presenter side: registering a presenter, and the Vox workbench publishing catalogues and disclosures, creating, deliberating on and presenting offers, and reading them back. A member's decision is exercised on the reference engine with the web hub (atarasy's README) or on a device against the development deployment.
+**No passkey ceremony works here.** WebAuthn does not allow an IP address as a relying party ID, and this deployment's relying party is `127.0.0.1`, so member sign-in, enrolment, digital decisions and withdrawals cannot complete against it; that is what `local-household.ts` stands in for, by writing the rows a passkey ceremony would rather than running one. What the local deployment is for is the presenter side: registering a presenter, synthesising the household its offers go to, and the Vox workbench publishing catalogues and disclosures, creating, deliberating on and presenting offers, and reading them back. A member's own decision is still exercised on the reference engine with the web hub (atarasy's README) or on a device against the development deployment.
 
-Tests: `ATARASY_TEST_POSTGRES_URL=<disposable local PostgreSQL> bun test local.test.ts` covers the `assertLocalDatabaseUrl` guard and a real `/presenter/self` round trip (401 without a token, 200 with the one `local-presenter-credential.ts`'s underlying `registerPresenter` issues) against the same `startLocalServer()` `local.ts` uses. A throwaway instance is enough (`initdb`, `pg_ctl start -o "-p <port> -k <short socket dir>"`, `createdb`); on macOS the default socket-directory path under `initdb`'s own data directory can exceed the 103-byte unix-socket limit, so point `-k` at a short path such as `/tmp/pgsock-XXXXXX` instead.
+Tests: `ATARASY_TEST_POSTGRES_URL=<disposable local PostgreSQL> bun test local.test.ts` covers the `assertLocalDatabaseUrl` guard and a real `/presenter/self` round trip (401 without a token, 200 with the one `local-presenter-credential.ts`'s underlying `registerPresenter` issues) against the same `startLocalServer()` `local.ts` uses, `local-household.ts`'s own guard against a non-local database, and, spawned as the CLI it is, a household it creates being offered to by its granted presenter and presented. A throwaway instance is enough (`initdb`, `pg_ctl start -o "-p <port> -k <short socket dir>"`, `createdb`); on macOS the default socket-directory path under `initdb`'s own data directory can exceed the 103-byte unix-socket limit, so point `-k` at a short path such as `/tmp/pgsock-XXXXXX` instead.
 
 [Blind private-node records](PRIVATE_NODE.md) add authenticated, revisioned ciphertext storage for the native IOS-B19 boundary. The database never receives the native envelope key or record plaintext; recovery and host move remain separate ceremonies.
 
