@@ -137,12 +137,22 @@ export function openVerifiedLogin(path: Records, authority: Authority, policy: P
         credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter } });
       if (!result.verified || !result.authenticationInfo.userVerified || result.authenticationInfo.credentialID !== credential.id || flow.expires <= now()) throw new Error('Login unavailable');
       integer(result.authenticationInfo.newCounter);
-      const updated = passkeys.updateWhere(credential.id,v=>v.revision===credential.revision,{counter:result.authenticationInfo.newCounter,revision:credential.revision+1});
-      if (updated.changes !== 1) throw new Error('Login changed during verification');
-      authority.markCredentialProven(credential.id);
-      // Before the session exists, so that whatever the sign-in adopts or
-      // grants is what the session reads, and no grant change revokes it.
-      policy.onSignIn?.(credential.id);
+      // The counter update, marking this key proven, and whatever the sign-in
+      // hook does (adoption, or its refusal) roll back together. Before this,
+      // a refusal from the hook still propagated out of `finish`, but
+      // `member-login/transport.ts` catches that error inside a unit it goes
+      // on to commit, so the counter and the proven mark landed anyway. A
+      // refutation pass measured a principal left permanently `proven:2` by
+      // nothing but refused sign-ins, because each refusal committed one more
+      // proven credential without ever adopting anything.
+      db.transaction(() => {
+        const updated = passkeys.updateWhere(credential.id,v=>v.revision===credential.revision,{counter:result.authenticationInfo.newCounter,revision:credential.revision+1});
+        if (updated.changes !== 1) throw new Error('Login changed during verification');
+        authority.markCredentialProven(credential.id);
+        // Before the session exists, so that whatever the sign-in adopts or
+        // grants is what the session reads, and no grant change revokes it.
+        policy.onSignIn?.(credential.id);
+      }).immediate();
       const expiry = now() + sessionLifetimeMs; integer(expiry);
       // Authoritative lifecycle checks run again here. If issuance fails, the attempt stays spent.
       return authority.createSessionAfterVerification(credential.id, expiry);

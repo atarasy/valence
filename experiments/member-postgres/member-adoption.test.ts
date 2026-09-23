@@ -163,3 +163,48 @@ test('once a principal has adopted, a second credential whose key does not match
   await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id.id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id.id]);await pool.end();
  }
 },60000);
+
+test('a refused sign-in leaves proven exactly as it was; repeated refusals never accumulate into a permanently dead principal',async()=>{
+ const url=process.env.ATARASY_TEST_POSTGRES_URL;if(!url)throw new Error('Isolated PostgreSQL URL required');
+ const c=config as MemberRuntimeConfig,id={id:'adopt6_'+randomUUID().replaceAll('-',''),environment:c.environment,origin:c.origin,epoch:1};
+ const pool=createPool(url),unit=postgresStore(pool,id);
+ try{
+  await migrateDatabase(url);await initialiseDeployment(pool,id);const app=await openPostgresMemberHTTP(pool,id,c);
+  const send=(path:string,body?:unknown,token?:string)=>app.fetch(new Request(c.origin+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}),{peer:'adopt6-test'});
+  const keyA=syntheticAuthenticator(),keyB=syntheticAuthenticator();
+  const credA='creA'+randomUUID().replaceAll('-',''),credB='creB'+randomUUID().replaceAll('-','');
+  const handleA=randomUUID().replaceAll('-',''),handleB=randomUUID().replaceAll('-','');
+  // Two credentials registered while unclaimed, exactly the shape that makes
+  // every sign-in of either one refused by the "exactly one credential" gate.
+  await unit.run(s=>{
+   const r=memberRuntime(s,c);
+   r.authority.provisionUnclaimedPrincipal('member_f',[]);
+   r.authority.registerCredential(credA,'member_f');r.login.provisionVerifiedPasskey(credA,new Uint8Array(keyA.cose),0,handleA);
+   r.authority.registerCredential(credB,'member_f');r.login.provisionVerifiedPasskey(credB,new Uint8Array(keyB.cose),0,handleB);
+  });
+  // The synthetic authenticator's own id is not the id these credentials were
+  // registered under (`credA`/`credB`), so the assertion's id and rawId are
+  // overridden to match, the same way the cross-principal test above does.
+  const signIn=async(k:ReturnType<typeof syntheticAuthenticator>,handle:string,counter:number,credID:string)=>{
+   const f=await(await send('/auth/login/options',{})).json();
+   const response=k.authenticate(f.publicKey.challenge,c.origin,c.rpID,handle,counter);
+   return send('/auth/login/verify',{id:f.id,response:{...response,id:credID,rawId:credID}});
+  };
+  // Every one of these is refused: with two credentials present, adoption's
+  // own gate never lets either through, no matter which signs in or how often.
+  expect((await signIn(keyA,handleA,1,credA)).status).not.toBe(200);
+  expect((await signIn(keyB,handleB,1,credB)).status).not.toBe(200);
+  expect((await signIn(keyA,handleA,2,credA)).status).not.toBe(200);
+  expect((await signIn(keyB,handleB,2,credB)).status).not.toBe(200);
+  // None of the four refused attempts left a trace: before this fix, each one
+  // committed `markCredentialProven` inside a unit that `member-login/transport.ts`
+  // catches the refusal in and then commits, so four refused attempts left the
+  // principal permanently `proven:2` with no route back on production. Here
+  // nothing is ever proven, because the counter update, the proven mark and the
+  // sign-in hook's own refusal now roll back together.
+  expect(await unit.run(s=>memberRuntime(s,c).authority.credentialProof('member_f'))).toEqual({proven:[],unproven:[credA,credB].sort()});
+  expect(await unit.run(s=>s.map<{household:string|null}>('member_principals').get('member_f')?.household)).toBeNull();
+ }finally{
+  await pool.query('DELETE FROM atarasy_member.engine_rows WHERE deployment=$1',[id.id]);await pool.query('DELETE FROM atarasy_member.control WHERE id=$1',[id.id]);await pool.end();
+ }
+},60000);
