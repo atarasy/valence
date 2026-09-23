@@ -12,12 +12,16 @@ No Neon, no Vercel, no `api-dev.vox.delivery`. `local.ts` runs the same store an
 
 Prerequisites: Bun 1.2.19 (`curl -fsSL https://bun.sh/install.sh | bash -s -- bun-v1.2.19`; a newer Bun rewrites `bun.lock`), the four repositories (`valence`, `atarasy`, `ataraxia`, `vox`) cloned side by side in one parent directory, and PostgreSQL 16 or newer from Homebrew, running and reachable at a local address.
 
+Make a private directory outside all four checkouts, in the same parent directory, for the files this section writes (a household's private key, a presenter credential's token). This README calls it `<parent>/private/`; on a walkthrough cloned into `~/ops01` that is `~/ops01/private`.
+
 ```
+mkdir -p <parent>/private
 brew install postgresql@16
 brew services start postgresql@16
 createdb atarasy_local
 cd experiments/member-postgres
 bun install --frozen-lockfile
+bun install --frozen-lockfile --cwd ../member-login   # local-household.ts and the server it starts both import from here
 LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local bun local.ts
 ```
 
@@ -26,10 +30,10 @@ This applies the tracked migrations, initialises a deployment named `atarasy_loc
 With the server running, issue a presenter credential in a second terminal from real ed25519 key pairs:
 
 ```
-openssl genpkey -algorithm ed25519 -out /tmp/presenter.pem
-openssl genpkey -algorithm ed25519 -out /tmp/merchant.pem
+openssl genpkey -algorithm ed25519 -out <parent>/private/presenter.pem
+openssl genpkey -algorithm ed25519 -out <parent>/private/merchant.pem
 LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local \
-  bun local-presenter-credential.ts issue ops01-presenter "OPS-01 presenter" /tmp/presenter.pem ops01-merchant /tmp/merchant.pem /tmp/credential.json
+  bun local-presenter-credential.ts issue ops01-presenter "OPS-01 presenter" <parent>/private/presenter.pem ops01-merchant <parent>/private/merchant.pem <parent>/private/credential.json
 ```
 
 `local-presenter-credential.ts` is the local counterpart of `deployment/presenter-credential.ts issue`, with the same argument order and the same exclusive-create/0600/never-printed handling of the output file, minus the Neon project check and with `assertLocalDatabaseUrl` in its place. It reads the presenter and merchant *public* keys from whatever PEM files are given (a private key PEM works too; `createPublicKey` derives the public half), and it must be run against the same `LOCAL_DATABASE_URL` and `PORT` the server is using, since both read the same fixed deployment id (`atarasy_local`) and build the same origin from `PORT`.
@@ -41,7 +45,7 @@ curl -i http://127.0.0.1:8788/presenter/self
 # 401 {"error":"unauthorised", ...}
 
 curl -i http://127.0.0.1:8788/presenter/self \
-  -H "authorization: Bearer $(python3 -c "import json;print(json.load(open('/tmp/credential.json'))['token'])")"
+  -H "authorization: Bearer $(python3 -c "import json;print(json.load(open('<parent>/private/credential.json'))['token'])")"
 # 200 {"presenter":"ops01-presenter","displayName":"OPS-01 presenter"}
 ```
 
@@ -49,7 +53,7 @@ A presenter with no household still has nobody to offer to, and no passkey can e
 
 ```
 LOCAL_DATABASE_URL=postgres://127.0.0.1/atarasy_local PORT=8788 \
-  bun local-household.ts create ops01-presenter /tmp/household.json
+  bun local-household.ts create ops01-presenter <parent>/private/household.json
 ```
 
 It writes the same rows a real enrolment and adoption would (`provisionUnclaimedPrincipal`, `registerCredential`, `login.provisionVerifiedPasskey`, `authority.markCredentialProven`, `authority.adoptHousehold`, the sequence `http.test.ts`'s own fixtures use), against a P-256 key pair generated here instead of a device's, and records a standing mandate signed by that same pair through `engine.mandates.record`; `bindings.importMandate` only writes a claim, and an offer against a claim answers `mandate_unavailable`. The presenter named on the command line is granted at provisioning, so its offers to this household are allowed. Like `local-presenter-credential.ts`, it must run against the same `LOCAL_DATABASE_URL` and `PORT` as `local.ts`, and its output file is exclusive-create, 0600 and never printed beyond what stdout shows:
@@ -64,9 +68,10 @@ The file itself also holds `privateKeyPem`, the household's own key, needed to s
 
 ```
 psql postgres://127.0.0.1/atarasy_local -c 'DROP SCHEMA IF EXISTS atarasy_member CASCADE; DROP SCHEMA IF EXISTS drizzle CASCADE;'
+rm -f <parent>/private/credential.json <parent>/private/household.json
 ```
 
-Dropping only `atarasy_member` leaves `bun local.ts`'s next run believing every migration is already applied, because drizzle's own migration ledger lives in the separate `drizzle` schema; the server then fails on its first query with `relation "atarasy_member.control" does not exist` (measured 2026-09-23). Dropping both and restarting `bun local.ts` recreates the schema, the control row and an empty engine from nothing.
+Dropping only `atarasy_member` leaves `bun local.ts`'s next run believing every migration is already applied, because drizzle's own migration ledger lives in the separate `drizzle` schema; the server then fails on its first query with `relation "atarasy_member.control" does not exist` (measured 2026-09-23). Dropping both and restarting `bun local.ts` recreates the schema, the control row and an empty engine from nothing. `local-presenter-credential.ts` and `local-household.ts` both write their output file with an exclusive create, so a `credential.json` or `household.json` left over from before the reset makes the next `issue` or `create` fail `EEXIST` even though the rows it names are gone; remove both files along with the schemas.
 
 **What this does not cover.** The https-only checks inside `login.ts`'s portable-assertion verification (host move), `member-host-move.ts`, `operational-snapshot.ts` and `statement-authorisation.ts` (physical-box settlement statements) are unchanged, so host move, the operator migration tooling and physical-box statement acceptance still require a real https origin and are not reachable from a local deployment. The checks in `engine/src/shared/member-decision.ts`, `member-withdrawal.ts` and `member-statement.ts`, and this package's own `authority.ts`, `login.ts`, `config.ts` and `store.ts`, accept the local origin so that the runtime starts and the presenter routes answer.
 

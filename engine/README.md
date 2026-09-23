@@ -71,8 +71,17 @@ holds at install time rather than a fixed set of versions.
 ```
 
 Starts the combined and separate-role servers, seeds their catalogues, and
-runs the suites listed in `scripts/conformance.sh` from the ataraxia repository. Set `ATARAXIA_TESTS` if that
-repository is not beside this one.
+runs the suites listed in `scripts/conformance.sh` from the ataraxia
+repository. It looks for `ataraxia/tests` beside this repository's parent
+(the side-by-side layout the top-level README asks for) and falls back to
+`~/Documents/GitHub/ataraxia/tests` if no sibling checkout is there. Set
+`ATARAXIA_TESTS` to point at the tests directory directly, overriding both.
+
+It starts four servers, on 8788 and the next three hundreds (8888, 8988,
+9088 by default; set `PORT` to move the first and the rest follow). 8788 is
+also the default port of the local member API
+(`experiments/member-postgres`), so stop that before running this, or set
+`PORT` to a free one.
 
 `conformance.sh` sets `VALENCE_BINDINGS=digital,physical`, so `HAS_PHYSICAL` is
 true for this run and exactly one suite is skipped rather than run:
